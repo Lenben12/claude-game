@@ -1,0 +1,38 @@
+# Unity generated
+SEALEBRITIES/[Ll]ibrary/
+SEALEBRITIES/[Tt]emp/
+SEALEBRITIES/[Oo]bj/
+SEALEBRITIES/[Ll]ogs/
+SEALEBRITIES/[Uu]ser[Ss]ettings/
+SEALEBRITIES/[Bb]uild/
+SEALEBRITIES/[Bb]uilds/
+SEALEBRITIES/[Mm]emoryCaptures/
+SEALEBRITIES/[Rr]ecordings/
+SEALEBRITIES/.vs/
+SEALEBRITIES/.vscode/
+SEALEBRITIES/.idea/
+SEALEBRITIES/*.csproj
+SEALEBRITIES/*.sln
+SEALEBRITIES/*.slnx
+SEALEBRITIES/*.user
+SEALEBRITIES/*.pidb
+SEALEBRITIES/*.booproj
+SEALEBRITIES/*.svd
+SEALEBRITIES/*.pdb
+SEALEBRITIES/*.mdb
+SEALEBRITIES/*.opendb
+SEALEBRITIES/*.VC.db
+SEALEBRITIES/sysinfo.txt
+SEALEBRITIES/crashlytics-build.properties
+*.apk
+*.aab
+*.unitypackage
+
+# Game builds and screenshot runs (large, reproducible)
+Builds/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
