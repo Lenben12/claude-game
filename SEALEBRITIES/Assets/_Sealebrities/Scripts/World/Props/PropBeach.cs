@@ -5,7 +5,8 @@ using UnityEngine.Rendering;
 
 namespace Sealebrities
 {
-    /// Beach life between hut and dock, the campfire, island paths (with tiki torches) and the hidden bay.
+    /// Beach life between hut and dock (chunky, colorful low-poly props), the campfire, island paths (planks,
+    /// stepping stones, tiki torches) and the hidden bay.
     public static class PropBeach
     {
         static float G(float x, float z) => PropGround.H(x, z);
@@ -40,20 +41,23 @@ namespace Sealebrities
             var batch = new PropBatch(0f);
             var rng = new System.Random(909);
 
-            // two loungers with a parasol, facing the sea (east)
+            // two loungers with a parasol and a towel, facing the sea (east)
             if (FindLand(new Vector3(146f, 0f, 24f), 0.35f, 8f, excl, out var l1))
             {
-                Lounger(batch, cols, l1, -90f + PropUtil.Range(rng, -8f, 8f));
+                Lounger(batch, cols, l1, -90f + PropUtil.Range(rng, -8f, 8f), PropMats.CushionA);
                 excl.Add(l1.x, l1.z, 2f);
                 Vector3 l2d = l1 + new Vector3(0.6f, 0f, 3.2f);
                 if (FindLand(l2d, 0.35f, 8f, excl, out var l2, 4f))
                 {
-                    Lounger(batch, cols, l2, -90f + PropUtil.Range(rng, -10f, 10f));
+                    Lounger(batch, cols, l2, -90f + PropUtil.Range(rng, -10f, 10f), PropMats.CushionB);
                     excl.Add(l2.x, l2.z, 2f);
                 }
                 Vector3 pp = l1 + new Vector3(-0.6f, 0f, 1.6f);
                 pp.y = G(pp.x, pp.z);
                 Parasol(batch, cols, pp);
+                Vector3 tw = l1 + new Vector3(1.8f, 0f, 1.4f);
+                tw.y = G(tw.x, tw.z);
+                Towel(batch, tw, PropUtil.Range(rng, 0f, 360f));
             }
 
             // surfboard stuck in the sand
@@ -61,9 +65,8 @@ namespace Sealebrities
             {
                 Quaternion r = Quaternion.Euler(0f, 30f, 0f) * Quaternion.Euler(-74f, 0f, 0f);
                 Vector3 c = sp + Vector3.up * 0.8f;
-                batch.B(PropMats.Surfboard).Blob(c, new Vector3(0.27f, 0.035f, 1.05f), r, 5, null, 0.8f);
-                batch.B(PropMats.PlasticWhite).Box(c + r * new Vector3(0f, -0.07f, -0.8f), new Vector3(0.015f, 0.12f, 0.16f), r);
-                PropCol.Box(cols, c, new Vector3(0.55f, 0.1f, 2.1f), r);
+                Surfboard(batch, c, r, PropMats.Surfboard);
+                PropCol.Box(cols, c, new Vector3(0.6f, 0.1f, 2.1f), r);
                 excl.Add(sp.x, sp.z, 1.2f);
             }
 
@@ -112,39 +115,98 @@ namespace Sealebrities
                 Quaternion r = Quaternion.Euler(0f, yaw, 90f + PropUtil.Range(rng, -6f, 6f));
                 float len = PropUtil.Range(rng, 1.6f, 3.4f);
                 Vector3 axis = r * Vector3.up;
-                batch.B(PropMats.BarkCharred).Cylinder(lp + Vector3.up * 0.12f - axis * len * 0.5f, r, 0.16f, 0.12f, len, 7, true, true, 1f, 0.4f);
+                batch.B(PropMats.Driftwood).Cylinder(lp + Vector3.up * 0.12f - axis * len * 0.5f, r, 0.17f, 0.12f, len, 6, true, true);
                 excl.Add(lp.x, lp.z, 1.5f);
+            }
+
+            // starfish on the wet sand
+            for (int i = 0; i < 6; i++)
+            {
+                float a = PropUtil.Range(rng, -0.7f, 0.9f);
+                Vector3 d = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * PropUtil.Range(rng, 150f, 180f);
+                if (!FindLand(d, 0.05f, 0.9f, excl, out var sf, 12f)) continue;
+                Starfish(batch, sf, PropUtil.Range(rng, 0f, 360f), PropUtil.Range(rng, 0.12f, 0.2f), i % 2 == 0 ? PropMats.Orange : PropMats.FlowerPink);
             }
 
             batch.Flush(root, "BeachMesh", ShadowCastingMode.On, 350f);
             yield break;
         }
 
-        static void Lounger(PropBatch batch, Transform cols, Vector3 p, float yaw)
+        static void Lounger(PropBatch batch, Transform cols, Vector3 p, float yaw, Material cushion)
         {
             Quaternion r = Quaternion.Euler(0f, yaw, 0f);
-            var dark = batch.B(PropMats.WoodDark);
+            var frame = batch.B(PropMats.WoodLight);
             for (int sx = -1; sx <= 1; sx += 2)
                 for (int sz = -1; sz <= 1; sz += 2)
-                    dark.Box(p + r * new Vector3(sx * 0.29f, 0.14f, sz * 0.82f), new Vector3(0.05f, 0.32f, 0.05f), r);
-            dark.Box(p + r * new Vector3(0.3f, 0.29f, -0.2f), new Vector3(0.04f, 0.05f, 1.9f), r);
-            dark.Box(p + r * new Vector3(-0.3f, 0.29f, -0.2f), new Vector3(0.04f, 0.05f, 1.9f), r);
-            for (int i = 0; i < 9; i++)
-                batch.B(PropMats.WoodPale).Box(p + r * new Vector3(0f, 0.325f, -1.0f + i * 0.145f), new Vector3(0.62f, 0.022f, 0.1f), r, 1f, new Vector2(i * 0.31f, 0.012f), PropUV.LongU);
+                    frame.Box(p + r * new Vector3(sx * 0.29f, 0.14f, sz * 0.82f), new Vector3(0.07f, 0.32f, 0.07f), r);
+            frame.Box(p + r * new Vector3(0.3f, 0.29f, -0.2f), new Vector3(0.06f, 0.07f, 1.9f), r);
+            frame.Box(p + r * new Vector3(-0.3f, 0.29f, -0.2f), new Vector3(0.06f, 0.07f, 1.9f), r);
+            for (int i = 0; i < 5; i++)
+                batch.B(i % 2 == 0 ? PropMats.Wood : PropMats.WoodLight).Box(p + r * new Vector3(0f, 0.33f, -1.0f + i * 0.26f), new Vector3(0.62f, 0.04f, 0.22f), r);
             Quaternion back = r * Quaternion.Euler(-40f, 0f, 0f);
             Vector3 bc = p + r * new Vector3(0f, 0.6f, 0.62f);
-            batch.B(PropMats.WoodPale).Box(bc, new Vector3(0.62f, 0.025f, 0.75f), back, 1f, new Vector2(0.4f, 0.27f), PropUV.Default);
-            dark.Box(p + r * new Vector3(0f, 0.43f, 0.55f), new Vector3(0.6f, 0.04f, 0.04f), r * Quaternion.Euler(60f, 0f, 0f));
-            batch.B(PropMats.FabricStripe).Box(p + r * new Vector3(0f, 0.345f, -0.35f), new Vector3(0.56f, 0.012f, 1.25f), r);
-            batch.B(PropMats.FabricStripe).Box(bc + back * new Vector3(0f, 0.02f, 0f), new Vector3(0.56f, 0.012f, 0.7f), back);
+            batch.B(PropMats.Wood).Box(bc, new Vector3(0.62f, 0.04f, 0.75f), back);
+            frame.Box(p + r * new Vector3(0f, 0.43f, 0.55f), new Vector3(0.6f, 0.06f, 0.06f), r * Quaternion.Euler(60f, 0f, 0f));
+            batch.B(cushion).Box(p + r * new Vector3(0f, 0.38f, -0.35f), new Vector3(0.56f, 0.07f, 1.25f), r);
+            batch.B(cushion).Box(bc + back * new Vector3(0f, 0.05f, 0f), new Vector3(0.56f, 0.07f, 0.7f), back);
             PropCol.Box(cols, p + r * new Vector3(0f, 0.3f, -0.1f), new Vector3(0.7f, 0.6f, 2f), r);
         }
 
+        /// Beach parasol: 8 flat canopy segments in alternating colors (two-sided) on a white pole.
         static void Parasol(PropBatch batch, Transform cols, Vector3 p)
         {
-            batch.B(PropMats.WoodPale).Rod(p - Vector3.up * 0.3f, p + Vector3.up * 2.3f, 0.025f, 0.025f, 6);
-            batch.B(PropMats.Parasol).Cylinder(p + Vector3.up * 1.95f, Quaternion.Euler(4f, 0f, 3f), 1.3f, 0.03f, 0.42f, 16, false, false, 1f, 1f);
+            batch.B(PropMats.White).Rod(p - Vector3.up * 0.3f, p + Vector3.up * 2.35f, 0.04f, 0.035f, 6);
+            Quaternion tilt = Quaternion.Euler(4f, 0f, 3f);
+            Vector3 apex = p + tilt * new Vector3(0f, 2.35f, 0f);
+            const int segs = 8;
+            for (int i = 0; i < segs; i++)
+            {
+                float a0 = i * Mathf.PI * 2f / segs, a1 = (i + 1) * Mathf.PI * 2f / segs;
+                Vector3 e0 = p + tilt * new Vector3(Mathf.Cos(a0) * 1.4f, 1.9f, Mathf.Sin(a0) * 1.4f);
+                Vector3 e1 = p + tilt * new Vector3(Mathf.Cos(a1) * 1.4f, 1.9f, Mathf.Sin(a1) * 1.4f);
+                Vector3 up = Vector3.Cross(e0 - apex, e1 - apex);
+                if (Vector3.Dot(up, tilt * Vector3.up) < 0f) up = -up;
+                var m = i % 2 == 0 ? PropMats.ParasolA : PropMats.ParasolB;
+                batch.B(m).Tri2(apex, e0, e1, up.normalized);
+                // little hanging flap
+                Vector3 mid = (e0 + e1) * 0.5f;
+                Vector3 outward = (mid - (p + tilt * new Vector3(0f, 1.9f, 0f))).normalized;
+                batch.B(m).Tri2(e0, e1, mid - tilt * Vector3.up * 0.16f, outward);
+            }
+            batch.B(PropMats.White).Ico(apex + tilt * Vector3.up * 0.04f, Vector3.one * 0.07f, Quaternion.identity, 0);
             PropCol.Capsule(cols, p + Vector3.up * 1f, 0.06f, 2f, Quaternion.identity);
+        }
+
+        static void Towel(PropBatch batch, Vector3 p, float yaw)
+        {
+            Quaternion r = Quaternion.Euler(0f, yaw, 0f);
+            for (int i = 0; i < 4; i++)
+                batch.B(i % 2 == 0 ? PropMats.CushionB : PropMats.White).Box(p + r * new Vector3(0f, 0.015f, -0.6f + i * 0.4f), new Vector3(0.8f, 0.02f, 0.4f), r);
+        }
+
+        /// Low-poly surfboard: a flat pointed outline with thickness, a white center stripe and a dark fin.
+        public static void Surfboard(PropBatch batch, Vector3 c, Quaternion r, Material mat)
+        {
+            Vector2[] half = { new Vector2(0f, 1.05f), new Vector2(0.13f, 0.85f), new Vector2(0.24f, 0.45f), new Vector2(0.27f, 0f), new Vector2(0.24f, -0.55f), new Vector2(0.15f, -0.92f), new Vector2(0f, -1f) };
+            int n = half.Length;
+            var outline = new Vector3[2 * n - 2];
+            for (int i = 0; i < n; i++) outline[i] = new Vector3(half[i].x, 0f, half[i].y);
+            for (int i = n - 2, k = n; i >= 1; i--, k++) outline[k] = new Vector3(-half[i].x, 0f, half[i].y);
+            var b = batch.B(mat);
+            const float th = 0.035f;
+            Vector3 up = r * Vector3.up;
+            for (int i = 0; i < outline.Length; i++)
+            {
+                Vector3 a = c + r * (outline[i] + Vector3.up * th), bb = c + r * (outline[(i + 1) % outline.Length] + Vector3.up * th);
+                Vector3 a2 = c + r * (outline[i] - Vector3.up * th), b2 = c + r * (outline[(i + 1) % outline.Length] - Vector3.up * th);
+                b.Face3(c + up * th, a, bb, up);
+                b.Face3(c - up * th, a2, b2, -up);
+                Vector3 mid = (outline[i] + outline[(i + 1) % outline.Length]) * 0.5f;
+                b.QuadAuto(a, bb, b2, a2, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, r * mid);
+            }
+            batch.B(PropMats.White).Box(c + r * new Vector3(0f, th + 0.004f, 0f), new Vector3(0.06f, 0.008f, 1.7f), r);
+            batch.B(PropMats.Ink).Face3(c + r * new Vector3(0f, -th, -0.6f), c + r * new Vector3(0f, -th, -0.9f), c + r * new Vector3(0f, -th - 0.16f, -0.85f), r * Vector3.right);
+            batch.B(PropMats.Ink).Face3(c + r * new Vector3(0f, -th, -0.6f), c + r * new Vector3(0f, -th, -0.9f), c + r * new Vector3(0f, -th - 0.16f, -0.85f), r * Vector3.left);
         }
 
         static void Drum(PropBatch batch, Transform cols, Vector3 p, Material mat, bool lying, float yaw)
@@ -153,8 +215,7 @@ namespace Sealebrities
             if (!lying)
             {
                 Vector3 b = new Vector3(p.x, G(p.x, p.z) - 0.03f, p.z);
-                batch.B(mat).Cylinder(b, Quaternion.identity, r, r, h, 16, false, true, 1.85f, 1f);
-                batch.B(PropMats.DarkMetal).Torus(b + Vector3.up * h, Quaternion.identity, r - 0.01f, 0.012f, 16, 4);
+                PropStructures.Drum(batch, b, mat);
                 PropCol.Capsule(cols, b + Vector3.up * h * 0.5f, r, h, Quaternion.identity);
             }
             else
@@ -162,7 +223,9 @@ namespace Sealebrities
                 Quaternion q = Quaternion.Euler(0f, yaw, 90f);
                 Vector3 axis = q * Vector3.up;
                 Vector3 c = new Vector3(p.x, G(p.x, p.z) + r - 0.04f, p.z);
-                batch.B(mat).Cylinder(c - axis * h * 0.5f, q, r, r, h, 16, true, true, 1.85f, 1f);
+                batch.B(mat).Cylinder(c - axis * h * 0.5f, q, r, r, h, 8, true, true);
+                batch.B(PropMats.DarkMetal).Cylinder(c - axis * 0.2f, q, r + 0.012f, r + 0.012f, 0.05f, 8);
+                batch.B(PropMats.DarkMetal).Cylinder(c + axis * 0.15f, q, r + 0.012f, r + 0.012f, 0.05f, 8);
                 PropCol.Capsule(cols, c, r, h, q);
             }
         }
@@ -171,12 +234,29 @@ namespace Sealebrities
         {
             Quaternion r = Quaternion.Euler(0f, yaw, 0f);
             Vector3 b = new Vector3(p.x, G(p.x, p.z) - 0.01f, p.z);
-            batch.B(mat).Box(b + Vector3.up * 0.235f, new Vector3(0.17f, 0.47f, 0.35f), r);
+            batch.B(mat).Box(b + Vector3.up * 0.235f, new Vector3(0.18f, 0.47f, 0.36f), r);
             var dm = batch.B(PropMats.DarkMetal);
-            dm.Box(b + r * new Vector3(0f, 0.5f, -0.05f), new Vector3(0.03f, 0.03f, 0.2f), r);
-            dm.Box(b + r * new Vector3(0f, 0.485f, -0.14f), new Vector3(0.03f, 0.04f, 0.03f), r);
-            dm.Box(b + r * new Vector3(0f, 0.485f, 0.04f), new Vector3(0.03f, 0.04f, 0.03f), r);
-            dm.Cylinder(b + r * new Vector3(0f, 0.47f, 0.13f), r * Quaternion.Euler(30f, 0f, 0f), 0.025f, 0.022f, 0.07f, 6, false, true);
+            dm.Box(b + r * new Vector3(0f, 0.5f, -0.05f), new Vector3(0.04f, 0.04f, 0.2f), r);
+            dm.Box(b + r * new Vector3(0f, 0.485f, -0.14f), new Vector3(0.04f, 0.05f, 0.04f), r);
+            dm.Box(b + r * new Vector3(0f, 0.485f, 0.04f), new Vector3(0.04f, 0.05f, 0.04f), r);
+            dm.Cylinder(b + r * new Vector3(0f, 0.47f, 0.13f), r * Quaternion.Euler(30f, 0f, 0f), 0.03f, 0.026f, 0.08f, 5, false, true);
+        }
+
+        static void Starfish(PropBatch batch, Vector3 p, float yaw, float size, Material mat)
+        {
+            Quaternion r = Quaternion.Euler(0f, yaw, 0f);
+            Vector3 c = p + Vector3.up * 0.03f;
+            var b = batch.B(mat);
+            for (int i = 0; i < 5; i++)
+            {
+                float a = i * Mathf.PI * 2f / 5f;
+                Vector3 tip = c + r * new Vector3(Mathf.Cos(a), -0.12f, Mathf.Sin(a)) * size;
+                Vector3 l = c + r * new Vector3(Mathf.Cos(a - 0.63f), 0f, Mathf.Sin(a - 0.63f)) * size * 0.38f;
+                Vector3 rr = c + r * new Vector3(Mathf.Cos(a + 0.63f), 0f, Mathf.Sin(a + 0.63f)) * size * 0.38f;
+                Vector3 top = c + Vector3.up * size * 0.12f;
+                b.Face3(top, l, tip, Vector3.up);
+                b.Face3(top, tip, rr, Vector3.up);
+            }
         }
 
         static void TireSwing(Transform root, PropBatch batch, Transform cols, Vector3 p, float yaw)
@@ -186,11 +266,11 @@ namespace Sealebrities
             left.y = G(left.x, left.z);
             right.y = G(right.x, right.z);
             float topY = Mathf.Max(left.y, right.y) + 3.1f;
-            var dark = batch.B(PropMats.WoodDark);
-            dark.Cylinder(left - Vector3.up * 0.4f, Quaternion.identity, 0.11f, 0.1f, topY - left.y + 0.5f, 7, false, true, 0.7f, 1f);
-            dark.Cylinder(right - Vector3.up * 0.4f, Quaternion.identity, 0.11f, 0.1f, topY - right.y + 0.5f, 7, false, true, 0.7f, 1f);
+            var wood = batch.B(PropMats.Wood);
+            wood.Cylinder(left - Vector3.up * 0.4f, Quaternion.identity, 0.12f, 0.11f, topY - left.y + 0.5f, 6, false, true);
+            wood.Cylinder(right - Vector3.up * 0.4f, Quaternion.identity, 0.12f, 0.11f, topY - right.y + 0.5f, 6, false, true);
             Vector3 a = new Vector3(left.x, topY, left.z), b = new Vector3(right.x, topY, right.z);
-            dark.Rod(a - (b - a).normalized * 0.25f, b + (b - a).normalized * 0.25f, 0.09f, 0.09f, 7, true, 0.6f, 1f);
+            wood.Rod(a - (b - a).normalized * 0.25f, b + (b - a).normalized * 0.25f, 0.1f, 0.1f, 6, true);
             PropCol.Capsule(cols, left + Vector3.up * 1.5f, 0.12f, 3f, Quaternion.identity);
             PropCol.Capsule(cols, right + Vector3.up * 1.5f, 0.12f, 3f, Quaternion.identity);
 
@@ -201,35 +281,37 @@ namespace Sealebrities
             var swing = new GameObject("Swing").transform;
             swing.SetParent(pivot.transform, false);
             var sb = new PropMeshBuilder();
-            sb.Rod(new Vector3(0f, -1.65f, 0f), Vector3.zero, 0.015f, 0.015f, 4);
+            sb.Rod(new Vector3(0f, -1.65f, 0f), Vector3.zero, 0.025f, 0.025f, 4);
             PropUtil.MeshObject(swing, "Rope", sb.ToMesh("SwingRope"), PropMats.Rope, Vector3.zero, Quaternion.identity);
             var tb = new PropMeshBuilder();
-            tb.Torus(new Vector3(0f, -2.0f, 0f), Quaternion.FromToRotation(Vector3.up, Vector3.forward), 0.33f, 0.12f, 18, 8);
+            tb.Torus(new Vector3(0f, -2.0f, 0f), Quaternion.FromToRotation(Vector3.up, Vector3.forward), 0.33f, 0.13f, 8, 4);
             PropUtil.MeshObject(swing, "Tire", tb.ToMesh("SwingTire"), PropMats.Rubber, Vector3.zero, Quaternion.identity);
             swing.gameObject.AddComponent<PropSwing>();
         }
 
         static void Campfire(Transform root, PropBatch batch, Transform cols, Vector3 p, System.Random rng)
         {
-            batch.B(PropMats.Ash).Disk(p + Vector3.up * 0.03f, 0.62f, 14, Quaternion.identity, true, 1f);
-            for (int i = 0; i < 10; i++)
+            batch.B(PropMats.Ash).Disk(p + Vector3.up * 0.03f, 0.62f, 8, Quaternion.identity, true);
+            for (int i = 0; i < 9; i++)
             {
-                float a = i * Mathf.PI * 2f / 10f + PropUtil.Range(rng, -0.1f, 0.1f);
-                Vector3 sp = p + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * 0.78f;
+                float a = i * Mathf.PI * 2f / 9f + PropUtil.Range(rng, -0.1f, 0.1f);
+                Vector3 sp = p + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * 0.8f;
                 sp.y = G(sp.x, sp.z) + 0.05f;
-                float s = PropUtil.Range(rng, 0.15f, 0.22f);
-                PropRocks.Build(batch.B(PropMats.RockDark), sp, new Vector3(s, s * 0.8f, s), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), rng.Next(), 3, 0.25f);
+                float s = PropUtil.Range(rng, 0.16f, 0.24f);
+                PropRocks.Build(batch.B(i % 3 == 0 ? PropMats.Rock : PropMats.RockDark), sp, new Vector3(s, s * 0.8f, s), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), rng.Next(), 0, 0.2f);
             }
             for (int i = 0; i < 4; i++)
             {
                 float a = i * Mathf.PI * 0.5f + 0.4f;
                 Vector3 d = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a));
-                batch.B(PropMats.BarkCharred).Rod(p + d * 0.45f + Vector3.up * 0.04f, p + Vector3.up * 0.5f - d * 0.05f, 0.06f, 0.04f, 6, true, 1f, 0.4f);
+                Vector3 l0 = p + d * 0.45f + Vector3.up * 0.04f, l1 = p + Vector3.up * 0.5f - d * 0.05f;
+                batch.B(PropMats.WoodDark).Rod(l0, Vector3.Lerp(l0, l1, 0.7f), 0.065f, 0.055f, 5, true);
+                batch.B(PropMats.Ash).Rod(Vector3.Lerp(l0, l1, 0.7f), l1, 0.055f, 0.04f, 5, true);
             }
             for (int i = 0; i < 5; i++)
             {
-                Vector3 e = p + new Vector3(PropUtil.Range(rng, -0.25f, 0.25f), 0.05f, PropUtil.Range(rng, -0.25f, 0.25f));
-                batch.B(PropMats.FireGlow).Blob(e, new Vector3(0.07f, 0.04f, 0.06f), Quaternion.identity, 2, null);
+                Vector3 e = p + new Vector3(PropUtil.Range(rng, -0.25f, 0.25f), 0.06f, PropUtil.Range(rng, -0.25f, 0.25f));
+                batch.B(PropMats.FireGlow).Octa(e, new Vector3(0.08f, 0.05f, 0.07f));
             }
             // log benches
             for (int i = 0; i < 2; i++)
@@ -239,7 +321,7 @@ namespace Sealebrities
                 bp.y = G(bp.x, bp.z);
                 Vector3 tangent = new Vector3(-Mathf.Sin(a), 0f, Mathf.Cos(a));
                 Quaternion q = Quaternion.FromToRotation(Vector3.up, tangent);
-                batch.B(PropMats.Bark).Cylinder(bp + Vector3.up * 0.2f - tangent * 0.9f, q, 0.21f, 0.19f, 1.8f, 9, true, true, 1f, 0.4f);
+                batch.B(PropMats.Wood).Cylinder(bp + Vector3.up * 0.22f - tangent * 0.9f, q, 0.22f, 0.2f, 1.8f, 6, true, true);
                 PropCol.Capsule(cols, bp + Vector3.up * 0.2f, 0.21f, 1.8f, q);
             }
 
@@ -279,13 +361,15 @@ namespace Sealebrities
             Vector3 door = lh + toHut * 3.4f;
             main.Add(new Vector2(door.x, door.z));
 
+            Material[] planks = { PropMats.WoodLight, PropMats.Wood, PropMats.WoodLight };
             var pts = SampleSpline(main, 1.0f, 41);
             var torchSpots = new List<Vector3>();
             float acc = 0f;
             for (int i = 0; i < pts.Count; i++)
             {
                 Vector2 p2 = pts[i];
-                Vector2 d2 = (i + 1 < pts.Count ? pts[i + 1] - p2 : p2 - pts[i - 1]).normalized;
+                Vector2 d2 = (i + 1 < pts.Count ? pts[i + 1] - p2 : p2 - pts[i - 1]);
+                d2 = d2.sqrMagnitude > 1e-8f ? d2.normalized : Vector2.right;
                 float g = G(p2.x, p2.y);
                 if (g < 0.6f) continue;
                 Vector3 p = new Vector3(p2.x, g, p2.y);
@@ -295,16 +379,17 @@ namespace Sealebrities
                 Vector3 dir = new Vector3(d2.x, 0f, d2.y);
                 Vector3 n = PropGround.Normal(p.x, p.z, 0.6f);
                 float slope = Mathf.Abs(G(p.x + dir.x * 0.6f, p.z + dir.z * 0.6f) - G(p.x - dir.x * 0.6f, p.z - dir.z * 0.6f)) / 1.2f;
-                Vector3 along = Vector3.ProjectOnPlane(dir, n).normalized;
-                Quaternion r = Quaternion.LookRotation(along, n) * Quaternion.Euler(0f, PropUtil.Range(rng, -7f, 7f), 0f);
+                Vector3 along = Vector3.ProjectOnPlane(dir, n);
+                if (along.sqrMagnitude < 1e-6f) along = dir;
+                Quaternion r = Quaternion.LookRotation(along.normalized, n) * Quaternion.Euler(0f, PropUtil.Range(rng, -6f, 6f), 0f);
                 if (slope > 0.28f || i % 9 == 4)
                 {
-                    float s = PropUtil.Range(rng, 0.28f, 0.4f);
-                    PropRocks.Build(batch.B(PropMats.RockLight, p), p + n * 0.01f, new Vector3(s, 0.08f, s * 0.85f), r, rng.Next(), 3, 0.15f, 0.8f);
+                    float s = PropUtil.Range(rng, 0.3f, 0.42f);
+                    PropRocks.Build(batch.B(PropMats.Stone, p), p + n * 0.01f, new Vector3(s, 0.09f, s * 0.85f), r, rng.Next(), 0, 0.12f);
                 }
                 else
                 {
-                    batch.B(PropMats.WoodPale, p).Box(p + n * 0.015f, new Vector3(1.15f, 0.06f, 0.3f), r, 1f, new Vector2(PropUtil.Range(rng, 0f, 2f), (i % 8) * 0.25f + 0.02f), PropUV.LongU);
+                    batch.B(planks[i % planks.Length], p).Box(p + n * 0.02f, new Vector3(1.15f, 0.08f, 0.32f), r);
                 }
                 if (acc > 34f)
                 {
@@ -331,9 +416,9 @@ namespace Sealebrities
                 Vector3 p = new Vector3(hp[i].x, g, hp[i].y);
                 Vector3 n = PropGround.Normal(p.x, p.z, 0.6f);
                 excl.Add(p.x, p.z, 1.8f);
-                float s = PropUtil.Range(rng, 0.3f, 0.42f);
-                PropRocks.Build(batch.B(PropMats.RockLight, p), p + n * 0.01f, new Vector3(s, 0.07f, s * 0.9f),
-                    PropUtil.OnGround(n, 1f, PropUtil.Range(rng, 0f, 360f)), rng.Next(), 3, 0.15f, 0.8f);
+                float s = PropUtil.Range(rng, 0.32f, 0.45f);
+                PropRocks.Build(batch.B(PropMats.Stone, p), p + n * 0.01f, new Vector3(s, 0.08f, s * 0.9f),
+                    PropUtil.OnGround(n, 1f, PropUtil.Range(rng, 0f, 360f)), rng.Next(), 0, 0.12f);
             }
 
             // tiki torches along the main path
@@ -367,10 +452,10 @@ namespace Sealebrities
                 float d = (dense[i] - dense[i - 1]).magnitude;
                 acc += d;
                 total += d;
-                if (acc >= spacing)
+                if (acc >= spacing && d > 1e-6f)
                 {
                     acc = 0f;
-                    Vector2 dir = (dense[i] - dense[i - 1]).normalized;
+                    Vector2 dir = (dense[i] - dense[i - 1]) / d;
                     Vector2 perp = new Vector2(-dir.y, dir.x);
                     float wob = (PropNoise.Value(total * 0.08f, 0.5f, seed) - 0.5f) * 1.6f;
                     outp.Add(dense[i] + perp * wob);
@@ -381,10 +466,10 @@ namespace Sealebrities
 
         static void Torch(Transform root, PropBatch batch, Vector3 p, int index)
         {
-            batch.B(PropMats.Bark, p).Cylinder(p - Vector3.up * 0.3f, Quaternion.Euler(PropUtil.Range(new System.Random(index), -3f, 3f), 0f, 0f), 0.045f, 0.035f, 1.9f, 6, false, true, 0.3f, 0.4f);
+            batch.B(PropMats.Wood, p).Cylinder(p - Vector3.up * 0.3f, Quaternion.Euler(PropUtil.Range(new System.Random(index), -3f, 3f), 0f, 0f), 0.06f, 0.05f, 1.9f, 6, false, true);
             Vector3 cup = p + Vector3.up * 1.6f;
-            batch.B(PropMats.Rope, p).Cylinder(cup - Vector3.up * 0.05f, Quaternion.identity, 0.06f, 0.1f, 0.18f, 8, true, false, 1f, 1f);
-            batch.B(PropMats.FireGlow, p).Blob(cup + Vector3.up * 0.14f, new Vector3(0.06f, 0.03f, 0.06f), Quaternion.identity, 2, null);
+            batch.B(PropMats.Rope, p).Cylinder(cup - Vector3.up * 0.06f, Quaternion.identity, 0.07f, 0.12f, 0.2f, 6, true, false);
+            batch.B(PropMats.FireGlow, p).Octa(cup + Vector3.up * 0.15f, new Vector3(0.08f, 0.04f, 0.08f));
             var go = new GameObject("Torch");
             go.transform.SetParent(root, false);
             go.transform.position = cup + Vector3.up * 0.4f;
@@ -428,15 +513,15 @@ namespace Sealebrities
             bp.y = G(bp.x, bp.z) - 0.18f;
             float byaw = Mathf.Atan2(along.x, along.z) * Mathf.Rad2Deg + 25f;
             Quaternion br = Quaternion.Euler(0f, byaw, 0f) * Quaternion.Euler(-4f, 0f, 19f);
-            RowingBoat(batch, Matrix4x4.TRS(bp, br, Vector3.one), PropMats.WoodDark, true);
+            RowingBoat(batch, Matrix4x4.TRS(bp, br, Vector3.one), PropMats.Shutter, true);
             PropCol.Box(cols, bp + br * new Vector3(0f, 0.3f, 0f), new Vector3(1.25f, 0.55f, 3.5f), br);
             // oar lying in the sand
             Vector3 op = beach + dirIn * 2.2f + along * 3.6f;
             op.y = G(op.x, op.z) + 0.04f;
             Quaternion orr = Quaternion.Euler(0f, byaw + 70f, 90f);
             Vector3 oaxis = orr * Vector3.up;
-            batch.B(PropMats.WoodPale).Cylinder(op - oaxis * 1.1f, orr, 0.025f, 0.025f, 1.6f, 6, true, true);
-            batch.B(PropMats.WoodPale).Box(op + oaxis * 0.75f, new Vector3(0.14f, 0.55f, 0.02f), orr);
+            batch.B(PropMats.WoodLight).Cylinder(op - oaxis * 1.1f, orr, 0.035f, 0.035f, 1.6f, 5, true, true);
+            batch.B(PropMats.WoodLight).Box(op + oaxis * 0.75f, new Vector3(0.16f, 0.55f, 0.03f), orr);
             excl.Add(bp.x, bp.z, 4f);
 
             // small rock arch at the edge of the bay
@@ -445,7 +530,8 @@ namespace Sealebrities
             var arch = new PropMeshBuilder();
             BuildArch(arch, along, 4.2f, 5.2f, rng.Next());
             var archMesh = arch.ToMesh("RockArch");
-            batch.Add(archMesh, PropMats.RockDark, Matrix4x4.Translate(ac));
+            LowPoly.Sanitize(archMesh);
+            batch.Add(archMesh, PropMats.Rock, Matrix4x4.Translate(ac));
             PropCol.Mesh(cols, archMesh, ac, Quaternion.identity, Vector3.one, "ArchCol");
             excl.Add(ac.x, ac.z, 7f);
 
@@ -467,9 +553,9 @@ namespace Sealebrities
                 rp.y = G(rp.x, rp.z) - 0.4f;
                 float s = PropUtil.Range(rng, 0.8f, 2.2f);
                 Vector3 sc = new Vector3(s * PropUtil.Range(rng, 0.9f, 1.4f), s * PropUtil.Range(rng, 0.6f, 1f), s);
-                var rm = PropRocks.Mesh(sc, rng.Next(), 6);
+                var rm = PropRocks.Mesh(sc, rng.Next(), 1);
                 Quaternion rr = Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f);
-                batch.Add(rm, PropMats.RockDark, Matrix4x4.TRS(rp, rr, Vector3.one));
+                batch.Add(rm, i % 2 == 0 ? PropMats.RockDark : PropMats.Rock, Matrix4x4.TRS(rp, rr, Vector3.one));
                 PropCol.Mesh(cols, rm, rp, rr, Vector3.one, "Boulder");
                 excl.Add(rp.x, rp.z, s + 1f);
             }
@@ -478,14 +564,14 @@ namespace Sealebrities
             yield break;
         }
 
-        /// Arch of rock in the vertical plane containing "along"; legs sink 2.5 m below the base point.
+        /// Chunky rock arch in the vertical plane containing "along"; legs sink 2.5 m below the base point.
         static void BuildArch(PropMeshBuilder b, Vector3 along, float span, float height, int seed)
         {
             var pts = new List<Vector3>();
             var radii = new List<float>();
             pts.Add(along * -span - Vector3.up * 2.5f);
             radii.Add(1.6f);
-            const int n = 16;
+            const int n = 8;
             for (int k = 0; k <= n; k++)
             {
                 float th = Mathf.PI * k / n;
@@ -494,60 +580,59 @@ namespace Sealebrities
             }
             pts.Add(along * span - Vector3.up * 2.5f);
             radii.Add(1.6f);
-            int vs = b.VertexCount, ts = b.IndexCount;
-            b.Tube(pts, radii, 10, 3f, 0.5f);
+            int vs = b.VertexCount;
+            b.Tube(pts, radii, 7);
             Vector3 off = new Vector3(seed % 97, seed % 89, seed % 83);
             for (int i = vs; i < b.VertexCount; i++)
             {
                 Vector3 v = b.V[i];
-                float nz = PropNoise.Fbm3(v * 0.45f + off, 4, seed & 0xFFFF) - 0.5f;
-                b.V[i] = v + b.N[i] * nz * 1.1f;
+                float nz = PropNoise.Fbm3(v * 0.45f + off, 2, seed & 0xFFFF) - 0.5f;
+                b.V[i] = v + b.N[i] * nz * 1.0f;
             }
-            b.SmoothNormals(vs, ts);
         }
 
-        /// Open wooden rowing boat (local: length along z, keel at y = 0). Optionally broken (missing planks).
+        /// Open low-poly rowing boat (local: length along z, keel at y = 0). Optionally broken (missing planks).
         public static void RowingBoat(PropBatch batch, Matrix4x4 trs, Material mat, bool broken)
         {
             var b = new PropMeshBuilder();
-            const int secs = 12, around = 8;
+            const int secs = 7, around = 4;
             const float L = 3.6f, HB = 0.65f, D = 0.52f;
             for (int k = 0; k <= secs; k++)
             {
                 float t = (float)k / secs;
                 float z = (t - 0.5f) * L;
-                float hb = HB * Mathf.Max(Mathf.Pow(Mathf.Sin(Mathf.PI * t), 0.6f), t < 0.5f ? 0.38f : 0.03f);
+                float st = Mathf.Max(0f, Mathf.Sin(Mathf.PI * t));     // >= 0: Pow of a tiny negative sin(PI) was NaN
+                float hb = HB * Mathf.Max(Mathf.Pow(st, 0.6f), t < 0.5f ? 0.38f : 0.03f);
                 float depth = D + 0.14f * (2f * t - 1f) * (2f * t - 1f);
+                float sheer = (1f - Mathf.Pow(st, 0.3f)) * 0.2f;
                 for (int j = 0; j <= around; j++)
                 {
                     float phi = Mathf.PI + Mathf.PI * j / around;
-                    Vector3 p = new Vector3(hb * Mathf.Cos(phi), depth * (1f + Mathf.Sin(phi)) * 0.95f + (1f - Mathf.Pow(Mathf.Sin(Mathf.PI * t), 0.3f)) * 0.2f, z);
-                    b.Vert(p, Vector3.up, new Vector2(z, j * 0.25f));
+                    Vector3 p = new Vector3(hb * Mathf.Cos(phi), depth * (1f + Mathf.Sin(phi)) * 0.95f + sheer, z);
+                    b.Vert(p, Vector3.up, Vector2.zero);
                 }
             }
             for (int k = 0; k < secs; k++)
             {
                 for (int j = 0; j < around; j++)
                 {
-                    if (broken && k >= 5 && k <= 7 && j >= 6 && j <= 7) continue;
-                    if (broken && k == 2 && j == 1) continue;
+                    if (broken && k >= 3 && k <= 4 && j == 3) continue;
                     int a = k * (around + 1) + j;
                     int c = a + around + 1;
                     b.Quad(a, a + 1, c + 1, c);
                 }
             }
-            b.SmoothNormals(0, 0);
             // transom closing the stern section (k = 0)
             Vector3 tc = Vector3.zero;
             for (int j = 0; j <= around; j++) tc += b.V[j];
             tc /= around + 1;
-            int center = b.Vert(tc, Vector3.back, new Vector2(0f, 0f));
+            int center = b.Vert(tc, Vector3.back, Vector2.zero);
             for (int j = 0; j < around; j++) b.Tri(center, j, j + 1);
             b.DoubleSide(0, 0);
-            // thwarts, keel and stern transom
-            b.Box(new Vector3(0f, D * 0.8f, 0.3f), new Vector3(HB * 1.7f, 0.04f, 0.22f));
-            b.Box(new Vector3(0f, D * 0.8f, -0.8f), new Vector3(HB * 1.5f, 0.04f, 0.22f));
-            b.Box(new Vector3(0f, 0.02f, 0f), new Vector3(0.06f, 0.06f, L * 0.9f));
+            // thwarts and keel
+            b.Box(new Vector3(0f, D * 0.8f, 0.3f), new Vector3(HB * 1.7f, 0.06f, 0.24f));
+            b.Box(new Vector3(0f, D * 0.8f, -0.8f), new Vector3(HB * 1.5f, 0.06f, 0.24f));
+            b.Box(new Vector3(0f, 0.03f, 0f), new Vector3(0.08f, 0.08f, L * 0.9f));
             batch.B(mat).Append(b, trs);
         }
 
@@ -558,20 +643,20 @@ namespace Sealebrities
             batch.B(PropMats.WoodDark).Box(c, new Vector3(W, H, Dp), r);
             Quaternion lidAxis = r * Quaternion.FromToRotation(Vector3.up, Vector3.right);
             Vector3 lidBase = p + r * new Vector3(-W * 0.5f, H, 0f);
-            batch.B(PropMats.WoodDark).Cylinder(lidBase, lidAxis, Dp * 0.5f, Dp * 0.5f, W, 14, true, true, 1f, 1f);
-            var band = batch.B(PropMats.Rust);
+            batch.B(PropMats.Wood).Cylinder(lidBase, lidAxis, Dp * 0.5f, Dp * 0.5f, W, 6, true, true);
+            var band = batch.B(PropMats.Metal);
             for (int i = -1; i <= 1; i++)
             {
                 float x = i * 0.32f;
-                band.Box(c + r * new Vector3(x, 0f, 0f), new Vector3(0.05f, H + 0.01f, Dp + 0.02f), r);
-                band.Cylinder(p + r * new Vector3(x - 0.025f, H, 0f), lidAxis, Dp * 0.5f + 0.01f, Dp * 0.5f + 0.01f, 0.05f, 14, true, true);
+                band.Box(c + r * new Vector3(x, 0f, 0f), new Vector3(0.06f, H + 0.02f, Dp + 0.03f), r);
+                band.Cylinder(p + r * new Vector3(x - 0.03f, H, 0f), lidAxis, Dp * 0.5f + 0.015f, Dp * 0.5f + 0.015f, 0.06f, 6, true, true);
             }
-            batch.B(PropMats.Gold).Box(p + r * new Vector3(0f, H * 0.9f, Dp * 0.5f + 0.015f), new Vector3(0.12f, 0.15f, 0.02f), r);
+            batch.B(PropMats.Gold).Box(p + r * new Vector3(0f, H * 0.9f, Dp * 0.5f + 0.02f), new Vector3(0.14f, 0.16f, 0.03f), r);
             for (int i = 0; i < 7; i++)
             {
                 Vector3 cp = p + r * new Vector3(PropUtil.Range(rng, -0.5f, 0.5f), 0f, Dp * 0.5f + PropUtil.Range(rng, 0.1f, 0.5f));
                 cp.y = G(cp.x, cp.z) + 0.005f;
-                batch.B(PropMats.Gold).Cylinder(cp, Quaternion.Euler(PropUtil.Range(rng, -20f, 20f), 0f, PropUtil.Range(rng, -20f, 20f)), 0.032f, 0.032f, 0.007f, 10, true, true);
+                batch.B(PropMats.Gold).Cylinder(cp, Quaternion.Euler(PropUtil.Range(rng, -20f, 20f), 0f, PropUtil.Range(rng, -20f, 20f)), 0.04f, 0.04f, 0.012f, 6, true, true);
             }
         }
     }

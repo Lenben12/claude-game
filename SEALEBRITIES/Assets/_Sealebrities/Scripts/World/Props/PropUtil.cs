@@ -53,7 +53,11 @@ namespace Sealebrities
     {
         public static float H(float x, float z)
         {
-            if (WorldInfo.Terrain != null) return WorldInfo.GroundHeight(new Vector3(x, 0f, z));
+            if (WorldInfo.HeightProvider != null || WorldInfo.Terrain != null)
+            {
+                float h = WorldInfo.GroundHeight(new Vector3(x, 0f, z));
+                if (!float.IsNaN(h) && !float.IsInfinity(h)) return h;
+            }
             float r = Mathf.Sqrt(x * x + z * z);
             if (r < WorldLayout.IslandRadius) return Mathf.Lerp(9f, 1.2f, r / WorldLayout.IslandRadius);
             var s = WorldInfo.SiteAt(new Vector3(x, 0f, z));
@@ -68,7 +72,8 @@ namespace Sealebrities
         public static Vector3 Normal(float x, float z, float e = 1f)
         {
             float hl = H(x - e, z), hr = H(x + e, z), hd = H(x, z - e), hu = H(x, z + e);
-            return new Vector3(hl - hr, 2f * e, hd - hu).normalized;
+            Vector3 n = new Vector3(hl - hr, 2f * e, hd - hu);
+            return n.sqrMagnitude > 1e-12f ? n.normalized : Vector3.up;
         }
 
         /// Max absolute height difference to 4 neighbours at distance e, divided by e (rise over run).

@@ -10,7 +10,10 @@ namespace Sealebrities
     /// proportional to surface distance - textures stay undistorted on tall or flat bodies.
     internal sealed class CreatureMeshSweep
     {
-        public int Rings = 24, Sides = 16;
+        public int Rings = 10, Sides = 8;
+        /// Optional explicit ring positions (0..1 along T0..T1, increasing); overrides Rings / Spacing.
+        /// Low-poly bodies place their few rings where the silhouette needs them (snout, gill, peduncle).
+        public float[] Ts;
         public Func<float, Vector3> Center;
         public Func<float, Vector3> UpHint;            // null = +Y
         public Func<float, float> HalfW, HalfTop, HalfBot;
@@ -30,8 +33,11 @@ namespace Sealebrities
 
         public int FirstVertex, VertexCount;
 
+        public int RingCount => Ts != null && Ts.Length >= 2 ? Ts.Length : Rings;
+
         public float T(int i)
         {
+            if (Ts != null && Ts.Length >= 2) return CreatureMeshMath.Lerp(T0, T1, CreatureMeshMath.Clamp01(Ts[Math.Min(i, Ts.Length - 1)]));
             float f = Rings > 1 ? i / (float)(Rings - 1) : 0f;
             float g;
             switch (Spacing)
@@ -164,7 +170,7 @@ namespace Sealebrities
         /// Builds the sweep into b. Returns the first vertex index.
         public int Build(CreatureMeshBuilder b, int slot, CreatureMeshSkinFn skin)
         {
-            int R = Math.Max(2, Rings), S = Math.Max(3, Sides);
+            int R = Math.Max(2, RingCount), S = Math.Max(3, Sides);
             FirstVertex = b.Count;
             var ring = new int[R];
             var centers = new Vector3[R];

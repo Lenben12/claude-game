@@ -5,8 +5,9 @@ using UnityEngine.Rendering;
 
 namespace Sealebrities
 {
-    /// Giant kelp forest: 300-500 stalks (8-20 m) grouped into skinned clusters. Every stalk is a bone chain; one
-    /// PropKelpSway manager rotates the bones (distance culled), so a whole cluster costs a single draw call.
+    /// Giant kelp forest in the low-poly style: every stalk is a faceted, slowly twisting ribbon (flat triangles,
+    /// two-sided) with a few side blades and a floating canopy, in two kelp greens. Stalks are bone chains grouped
+    /// into skinned clusters (two submeshes = two draw calls per cluster); one PropKelpSway manager animates them.
     public static class PropKelp
     {
         public const int StalkTarget = 430;
@@ -57,7 +58,8 @@ namespace Sealebrities
             float currentDir = PropUtil.Range(rng, 0f, 360f);
             foreach (var kv in clusters)
             {
-                BuildCluster(decor, sway, kv.Value, rng, currentDir);
+                try { BuildCluster(decor, sway, kv.Value, rng, currentDir); }
+                catch (System.Exception e) { Debug.LogError("Sealebrities props: kelp cluster failed: " + e); }
                 if (PropRun.Due()) yield return null;
             }
 
@@ -76,8 +78,8 @@ namespace Sealebrities
                 Vector3 sc = new Vector3(s * PropUtil.Range(rng, 1f, 1.5f), s * PropUtil.Range(rng, 0.6f, 1.1f), s);
                 Vector3 p = new Vector3(x, g - sc.y * 0.3f, z);
                 Quaternion r = Quaternion.Euler(PropUtil.Range(rng, -8f, 8f), PropUtil.Range(rng, 0f, 360f), 0f);
-                var mesh = PropRocks.Mesh(sc, rng.Next(), 7, 0.22f);
-                batch.Add(mesh, PropMats.Rock, Matrix4x4.TRS(p, r, Vector3.one));
+                var mesh = PropRocks.Mesh(sc, rng.Next(), 1, 0.16f);
+                batch.Add(mesh, boulders % 3 == 0 ? PropMats.RockDark : PropMats.Rock, Matrix4x4.TRS(p, r, Vector3.one));
                 if (s > 1.6f) PropCol.Mesh(cols, mesh, p, r, Vector3.one, "KelpBoulder");
                 // a few cold-water sponges and anemones on the boulders
                 int extras = rng.Next(4);
@@ -98,9 +100,43 @@ namespace Sealebrities
                 if (-g < 5f) continue;
                 float s = PropUtil.Range(rng, 0.25f, 0.9f);
                 Vector3 p = new Vector3(x, g - s * 0.2f, z);
-                PropRocks.Build(batch.B(PropMats.Rock, p), p, new Vector3(s * 1.3f, s * 0.7f, s), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), rng.Next(), 4);
+                PropRocks.Build(batch.B(PropMats.Rock, p), p, new Vector3(s * 1.3f, s * 0.7f, s), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), rng.Next(), 0);
             }
             batch.Flush(decor, "KelpRocks", ShadowCastingMode.On, 170f);
+        }
+
+        // ------------------------------------------------------------------ flat, skinned cluster mesh
+        sealed class FlatSkin
+        {
+            public readonly List<Vector3> V = new List<Vector3>(4096);
+            public readonly List<Vector3> N = new List<Vector3>(4096);
+            public readonly List<BoneWeight> W = new List<BoneWeight>(4096);
+            public readonly List<int> T0 = new List<int>(4096);
+            public readonly List<int> T1 = new List<int>(4096);
+
+            static BoneWeight Bw(int bone) => new BoneWeight { boneIndex0 = bone, weight0 = 1f };
+
+            /// Flat triangle (own vertices, face normal). Degenerate input is skipped.
+            public void Tri(Vector3 a, Vector3 b, Vector3 c, int ba, int bb, int bc, bool sub1)
+            {
+                Vector3 n = Vector3.Cross(b - a, c - a);
+                float l = n.magnitude;
+                if (!(l > 1e-9f) || float.IsInfinity(l)) return;
+                n /= l;
+                int k = V.Count;
+                V.Add(a); V.Add(b); V.Add(c);
+                N.Add(n); N.Add(n); N.Add(n);
+                W.Add(Bw(ba)); W.Add(Bw(bb)); W.Add(Bw(bc));
+                var t = sub1 ? T1 : T0;
+                t.Add(k); t.Add(k + 1); t.Add(k + 2);
+            }
+
+            /// Two-sided flat triangle.
+            public void Tri2(Vector3 a, Vector3 b, Vector3 c, int ba, int bb, int bc, bool sub1)
+            {
+                Tri(a, b, c, ba, bb, bc, sub1);
+                Tri(a, c, b, ba, bc, bb, sub1);
+            }
         }
 
         static void BuildCluster(Transform parent, PropKelpSway sway, List<Vector4> stalks, System.Random rng, float currentDir)
@@ -119,9 +155,9 @@ namespace Sealebrities
             var bones = new List<Transform>();
             var phases = new List<float>();
             var amps = new List<float>();
-            var b = new PropMeshBuilder();
-            var weights = new List<BoneWeight>();
+            var mesh = new FlatSkin();
             Quaternion current = Quaternion.Euler(0f, currentDir, 0f);
+            Vector3 leanAxis = current * Vector3.right;
 
             foreach (var s in stalks)
             {
@@ -131,8 +167,6 @@ namespace Sealebrities
                 Vector3 basePos = new Vector3(s.x, s.z - 0.15f, s.y);
                 int first = bones.Count;
                 float phase = PropUtil.Range(rng, 0f, 20f);
-                // a steady current leans every stalk the same way
-                Vector3 leanAxis = current * Vector3.right;
                 for (int i = 0; i <= segs; i++)
                 {
                     var bt = new GameObject("k").transform;
@@ -154,78 +188,73 @@ namespace Sealebrities
                     amps.Add(i == 0 ? 0f : Mathf.Min(7f, 1.6f + i * 0.85f));
                 }
 
-                int vs = b.VertexCount, ts = b.IndexCount;
-                // stipe: ring at each bone and one mid-segment ring, 4 sides
-                const int sides = 4;
-                const float r = 0.035f;
-                int ringCount = segs * 2 + 1;
-                for (int ri = 0; ri < ringCount; ri++)
+                // main ribbon: one cross-section per bone, twisting ~40° per segment → faceted light play
+                bool dark = rng.NextDouble() < 0.5;
+                float twist0 = PropUtil.Range(rng, 0f, 180f), twistStep = PropUtil.Range(rng, 28f, 48f) * (rng.NextDouble() < 0.5 ? -1f : 1f);
+                Vector3 prevL = Vector3.zero, prevR = Vector3.zero;
+                for (int i = 0; i <= segs; i++)
                 {
-                    int bi = Mathf.Min(ri / 2, segs);
-                    Transform bt = bones[first + bi];
-                    Vector3 cpos = bt.position + (ri % 2 == 1 ? bt.up * segLen * 0.5f : Vector3.zero);
-                    float rr = r * (ri == 0 ? 1.6f : 1f);
-                    for (int j = 0; j <= sides; j++)
+                    Transform bt = bones[first + i];
+                    float t = (float)i / segs;
+                    float w = Mathf.Lerp(0.05f, 0.17f, Mathf.Clamp01(t * 3f)) * (1f - 0.45f * t * t);
+                    float ang = (twist0 + twistStep * i) * Mathf.Deg2Rad;
+                    Vector3 side = bt.right * Mathf.Cos(ang) + bt.forward * Mathf.Sin(ang);
+                    Vector3 p = bt.position - center;
+                    Vector3 L = p - side * w, R = p + side * w;
+                    if (i > 0)
                     {
-                        float a = j * Mathf.PI * 2f / sides;
-                        Vector3 d = bt.right * Mathf.Cos(a) + bt.forward * Mathf.Sin(a);
-                        AddV(b, weights, cpos + d * rr - center, d, new Vector2((float)j / sides * 0.3f, ri * segLen * 0.5f / 3f), first + bi);
+                        int b0 = first + i - 1, b1 = first + i;
+                        mesh.Tri2(prevL, prevR, R, b0, b0, b1, dark);
+                        mesh.Tri2(prevL, R, L, b0, b1, b1, dark);
                     }
+                    prevL = L; prevR = R;
                 }
-                for (int ri = 0; ri < ringCount - 1; ri++)
-                {
-                    for (int j = 0; j < sides; j++)
-                    {
-                        int a0 = vs + ri * (sides + 1) + j;
-                        int b0 = a0 + sides + 1;
-                        b.Quad(a0, b0, b0 + 1, a0 + 1);
-                    }
-                }
-                b.SmoothNormals(vs, ts, false);
 
-                // blades along the stipe
+                // side blades (other green), one per segment, alternating sides
                 for (int i = 1; i < segs; i++)
                 {
                     Transform bt = bones[first + i];
-                    for (int k = 0; k < 2; k++)
-                    {
-                        float f = k == 0 ? 0.3f : 0.75f;
-                        Vector3 attach = bt.position + bt.up * segLen * f;
-                        float az = (i * 2 + k) * 2.4f + PropUtil.Range(rng, -0.4f, 0.4f);
-                        float e = PropUtil.Range(rng, 40f, 65f) * Mathf.Deg2Rad;
-                        Vector3 dir = new Vector3(Mathf.Cos(az) * Mathf.Cos(e), Mathf.Sin(e), Mathf.Sin(az) * Mathf.Cos(e));
-                        Blade(b, weights, attach - center, dir, PropUtil.Range(rng, 0.9f, 1.6f), PropUtil.Range(rng, 0.12f, 0.2f), first + i);
-                    }
+                    float az = i * 2.4f + PropUtil.Range(rng, -0.4f, 0.4f);
+                    float e = PropUtil.Range(rng, 35f, 60f) * Mathf.Deg2Rad;
+                    Vector3 dir = new Vector3(Mathf.Cos(az) * Mathf.Cos(e), Mathf.Sin(e), Mathf.Sin(az) * Mathf.Cos(e));
+                    Blade(mesh, bt.position + bt.up * segLen * 0.4f - center, dir, PropUtil.Range(rng, 0.9f, 1.5f), PropUtil.Range(rng, 0.16f, 0.24f), first + i, !dark);
                 }
                 // floating canopy at the tip
                 Transform tip = bones[first + segs];
-                for (int k = 0; k < 4; k++)
+                for (int k = 0; k < 3; k++)
                 {
-                    float az = k * 1.57f + PropUtil.Range(rng, -0.5f, 0.5f);
+                    float az = k * 2.1f + PropUtil.Range(rng, -0.5f, 0.5f);
                     float e = PropUtil.Range(rng, 5f, 25f) * Mathf.Deg2Rad;
                     Vector3 dir = new Vector3(Mathf.Cos(az) * Mathf.Cos(e), Mathf.Sin(e), Mathf.Sin(az) * Mathf.Cos(e));
-                    Blade(b, weights, tip.position - center, dir, PropUtil.Range(rng, 1.4f, 2.2f), PropUtil.Range(rng, 0.14f, 0.22f), first + segs);
+                    Blade(mesh, tip.position - center, dir, PropUtil.Range(rng, 1.4f, 2.1f), PropUtil.Range(rng, 0.18f, 0.26f), first + segs, k % 2 == 0);
                 }
             }
 
-            var mesh = b.ToMesh("KelpCluster");
-            mesh.boneWeights = weights.ToArray();
+            var m = new Mesh { name = "KelpCluster" };
+            if (mesh.V.Count > 65000) m.indexFormat = IndexFormat.UInt32;
+            m.SetVertices(mesh.V);
+            m.SetNormals(mesh.N);
+            m.subMeshCount = 2;
+            m.SetTriangles(mesh.T0, 0, false);
+            m.SetTriangles(mesh.T1, 1, false);
+            m.boneWeights = mesh.W.ToArray();
             var bind = new Matrix4x4[bones.Count];
             Matrix4x4 l2w = go.transform.localToWorldMatrix;
             for (int i = 0; i < bones.Count; i++) bind[i] = bones[i].worldToLocalMatrix * l2w;
-            mesh.bindposes = bind;
-            mesh.RecalculateBounds();
+            m.bindposes = bind;
+            m.RecalculateBounds();
+            LowPoly.Sanitize(m);
 
             var smr = go.AddComponent<SkinnedMeshRenderer>();
-            smr.sharedMesh = mesh;
+            smr.sharedMesh = m;
             smr.bones = bones.ToArray();
             smr.rootBone = go.transform;
-            smr.sharedMaterial = PropMats.Kelp;
+            smr.sharedMaterials = new[] { PropMats.Kelp, PropMats.KelpDark };
             smr.quality = SkinQuality.Bone1;
             smr.updateWhenOffscreen = false;
             smr.shadowCastingMode = ShadowCastingMode.Off;
             smr.receiveShadows = true;
-            var bounds = mesh.bounds;
+            var bounds = m.bounds;
             bounds.Expand(new Vector3(6f, 2f, 6f));
             smr.localBounds = bounds;
 
@@ -233,33 +262,20 @@ namespace Sealebrities
             sway.Register(center + Vector3.up * maxH * 0.5f, smr, smr.bones, phaseArr, ampArr);
         }
 
-        static void AddV(PropMeshBuilder b, List<BoneWeight> w, Vector3 p, Vector3 n, Vector2 uv, int bone)
-        {
-            b.Vert(p, n, uv);
-            w.Add(new BoneWeight { boneIndex0 = bone, weight0 = 1f });
-        }
-
-        /// Wavy kelp blade (4 cross sections) bound to one bone.
-        static void Blade(PropMeshBuilder b, List<BoneWeight> w, Vector3 attach, Vector3 dir, float len, float width, int bone)
+        /// Faceted kelp blade (3 cross sections, zig-zag along its normal) bound to one bone, two-sided.
+        static void Blade(FlatSkin m, Vector3 attach, Vector3 dir, float len, float width, int bone, bool sub1)
         {
             Vector3 side = Vector3.Cross(dir, Vector3.up);
             if (side.sqrMagnitude < 1e-4f) side = Vector3.right;
             side.Normalize();
             Vector3 nrm = Vector3.Cross(side, dir).normalized;
-            int v0 = b.VertexCount;
-            for (int k = 0; k < 4; k++)
-            {
-                float t = k / 3f;
-                float wk = width * (k == 0 ? 0.25f : k == 3 ? 0.3f : (k == 1 ? 1f : 0.85f)) * 0.5f;
-                Vector3 p = attach + dir * len * t - Vector3.up * (0.18f * t * t * len) + nrm * Mathf.Sin(t * 6f) * 0.05f;
-                AddV(b, w, p - side * wk, nrm, new Vector2(0f, t * len / 3f), bone);
-                AddV(b, w, p + side * wk, nrm, new Vector2(1f, t * len / 3f), bone);
-            }
-            for (int k = 0; k < 3; k++)
-            {
-                int a = v0 + k * 2;
-                b.Quad(a, a + 2, a + 3, a + 1);
-            }
+            Vector3 mid = attach + dir * len * 0.45f - Vector3.up * (0.05f * len) + nrm * 0.06f;
+            Vector3 end = attach + dir * len - Vector3.up * (0.18f * len);
+            Vector3 a0 = attach - side * width * 0.12f, a1 = attach + side * width * 0.12f;
+            Vector3 m0 = mid - side * width * 0.5f, m1 = mid + side * width * 0.5f;
+            m.Tri2(a0, a1, m1, bone, bone, bone, sub1);
+            m.Tri2(a0, m1, m0, bone, bone, bone, sub1);
+            m.Tri2(m0, m1, end, bone, bone, bone, sub1);
         }
     }
 }

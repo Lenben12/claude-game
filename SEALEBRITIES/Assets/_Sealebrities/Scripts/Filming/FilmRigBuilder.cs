@@ -16,7 +16,7 @@ namespace Sealebrities
             public FilmCameraRig rig;
         }
 
-        // shared palette (semi-realistic, the diver's glove slightly cartoonish)
+        // shared palette; FilmMaterials.Surface maps these to flat, matte toy tones (low-poly look)
         static readonly Color Neoprene = new Color(0.055f, 0.06f, 0.075f);
         static readonly Color SuitAccent = new Color(0.1f, 0.72f, 0.82f);
         static readonly Color GlovePad = new Color(0.17f, 0.17f, 0.19f);

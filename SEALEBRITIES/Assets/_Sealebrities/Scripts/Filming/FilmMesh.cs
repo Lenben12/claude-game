@@ -3,8 +3,10 @@ using UnityEngine;
 
 namespace Sealebrities
 {
-    /// Procedural meshes for the hand camera models. Primitive meshes are cached and shared between rebuilds;
-    /// combined per-rig meshes are owned (and destroyed) by the rig.
+    /// Procedural low-poly meshes for the hand camera models (phone in a bag, action cam, camcorder, pro housing,
+    /// cinema rig). Every primitive is chunky and faceted (flat normals, few sides, single-chamfer boxes) to match the
+    /// game's low-poly toy look. Primitive meshes are cached and shared between rebuilds; combined per-rig meshes are
+    /// owned (and destroyed) by the rig. Surface colors come from FilmMaterials (flat matte palette colors).
     public static class FilmMesh
     {
         static readonly Dictionary<string, Mesh> Cache = new Dictionary<string, Mesh>();
@@ -22,231 +24,181 @@ namespace Sealebrities
             return m;
         }
 
-        // ------------------------------------------------------------------ rounded box
-        /// Box centered at the origin with rounded edges/corners (radius 0 = sharp box). Smooth normals.
+        // ------------------------------------------------------------------ faceted builder
+        sealed class Flat
+        {
+            public readonly List<Vector3> v = new List<Vector3>(64);
+            public readonly List<Vector3> n = new List<Vector3>(64);
+            public readonly List<Vector2> uv = new List<Vector2>(64);
+            public readonly List<int> t = new List<int>(64);
+
+            /// Adds a triangle facing 'outward' (direction hint); degenerate triangles are dropped.
+            public void Tri(Vector3 a, Vector3 b, Vector3 c, Vector3 outward)
+            {
+                Vector3 f = Vector3.Cross(b - a, c - a);
+                float sq = f.sqrMagnitude;
+                if (!(sq >= 1e-18f)) return;   // degenerate (or NaN)
+                if (Vector3.Dot(f, outward) < 0f) { var tmp = b; b = c; c = tmp; f = -f; }
+                // manual normalization: Vector3.normalized returns ZERO below a magnitude of 1e-5, which is exactly the
+                // size of the millimeter chamfer-corner triangles here -> zero normals -> NaN pixels -> a huge bloom
+                // blob over the camera model
+                Vector3 nn = f / Mathf.Sqrt(sq);
+                int i = v.Count;
+                v.Add(a); v.Add(b); v.Add(c);
+                n.Add(nn); n.Add(nn); n.Add(nn);
+                uv.Add(Planar(a, nn)); uv.Add(Planar(b, nn)); uv.Add(Planar(c, nn));
+                t.Add(i); t.Add(i + 1); t.Add(i + 2);
+            }
+
+            public void Quad(Vector3 a, Vector3 b, Vector3 c, Vector3 d, Vector3 outward)
+            {
+                Tri(a, b, c, outward);
+                Tri(a, c, d, outward);
+            }
+
+            static Vector2 Planar(Vector3 p, Vector3 nn)
+            {
+                Vector3 an = new Vector3(Mathf.Abs(nn.x), Mathf.Abs(nn.y), Mathf.Abs(nn.z));
+                Vector2 q = an.x >= an.y && an.x >= an.z ? new Vector2(p.z, p.y) : an.y >= an.z ? new Vector2(p.x, p.z) : new Vector2(p.x, p.y);
+                return q * 20f;
+            }
+
+            public Mesh ToMesh()
+            {
+                var m = new Mesh();
+                m.SetVertices(v);
+                m.SetNormals(n);
+                m.SetUVs(0, uv);
+                m.SetTriangles(t, 0);
+                return m;
+            }
+        }
+
+        /// Few sides for small round parts, a few more for big ones (keeps the silhouette chunky but readable).
+        static int LowSeg(int requested, float radius)
+        {
+            if (requested <= 5) return Mathf.Max(3, requested);
+            int s = radius < 0.01f ? 6 : radius < 0.05f ? 8 : 10;
+            return Mathf.Min(requested, s);
+        }
+
+        // ------------------------------------------------------------------ chamfered box
+        /// Box centered at the origin. 'radius' becomes one flat chamfer on every edge (radius 0 = sharp box);
+        /// 'seg' is ignored (kept for compatibility).
         public static Mesh RoundedBox(Vector3 size, float radius, int seg = 3)
         {
             float maxR = Mathf.Min(size.x, Mathf.Min(size.y, size.z)) * 0.5f;
-            radius = Mathf.Clamp(radius, 0f, maxR * 0.999f);
-            if (radius < 0.0002f) { radius = 0f; seg = 0; }
-            string key = $"rb{size.x:F4}_{size.y:F4}_{size.z:F4}_{radius:F4}_{seg}";
+            float b = Mathf.Clamp(radius * 0.9f, 0f, maxR * 0.9f);
+            if (b < 0.0002f) b = 0f;
+            string key = $"cb{size.x:F4}_{size.y:F4}_{size.z:F4}_{b:F4}";
             if (TryGet(key, out var cached)) return cached;
 
-            Vector3 half = size * 0.5f;
-            Vector3 inner = new Vector3(half.x - radius, half.y - radius, half.z - radius);
-            var verts = new List<Vector3>();
-            var norms = new List<Vector3>();
-            var uvs = new List<Vector2>();
-            var tris = new List<int>();
-
-            // Face table: normal, U, V with Cross(U, V) == normal (front-facing winding for Unity).
-            Vector3[] faceN = { Vector3.forward, Vector3.back, Vector3.right, Vector3.left, Vector3.up, Vector3.down };
-            Vector3[] faceU = { Vector3.right, Vector3.up, Vector3.up, Vector3.forward, Vector3.forward, Vector3.right };
-            Vector3[] faceV = { Vector3.up, Vector3.right, Vector3.forward, Vector3.up, Vector3.right, Vector3.forward };
-
-            for (int f = 0; f < 6; f++)
+            Vector3 h = size * 0.5f;
+            var f = new Flat();
+            if (b <= 0f)
             {
-                Vector3 n = faceN[f], u = faceU[f], v = faceV[f];
-                float aN = Comp(half, n), aU = Comp(half, u), aV = Comp(half, v);
-                float iU = Comp(inner, u), iV = Comp(inner, v);
-                float[] su = Samples(aU, iU, radius, seg);
-                float[] sv = Samples(aV, iV, radius, seg);
-                int baseIndex = verts.Count;
-                for (int j = 0; j < sv.Length; j++)
-                {
-                    for (int i = 0; i < su.Length; i++)
+                for (int axis = 0; axis < 3; axis++)
+                    for (int sg = -1; sg <= 1; sg += 2)
                     {
-                        Vector3 p = n * aN + u * su[i] + v * sv[j];
-                        Vector3 cl = new Vector3(Mathf.Clamp(p.x, -inner.x, inner.x), Mathf.Clamp(p.y, -inner.y, inner.y), Mathf.Clamp(p.z, -inner.z, inner.z));
-                        Vector3 d = p - cl;
-                        Vector3 nn = d.sqrMagnitude > 1e-12f ? d.normalized : n;
-                        verts.Add(radius > 0f ? cl + nn * radius : p);
-                        norms.Add(radius > 0f ? nn : n);
-                        uvs.Add(new Vector2((su[i] + aU) / (2f * aU), (sv[j] + aV) / (2f * aV)));
+                        Vector3 nrm = Axis(axis) * sg;
+                        Vector3 u = Axis((axis + 1) % 3), w = Axis((axis + 2) % 3);
+                        Vector3 c = Vector3.Scale(nrm, h);
+                        Vector3 U = Vector3.Scale(u, h), W = Vector3.Scale(w, h);
+                        f.Quad(c - U - W, c + U - W, c + U + W, c - U + W, nrm);
                     }
-                }
-                int w = su.Length;
-                for (int j = 0; j < sv.Length - 1; j++)
-                {
-                    for (int i = 0; i < w - 1; i++)
-                    {
-                        int p00 = baseIndex + j * w + i;
-                        int p10 = p00 + 1;          // +U
-                        int p01 = p00 + w;          // +V
-                        int p11 = p01 + 1;
-                        tris.Add(p00); tris.Add(p10); tris.Add(p11);
-                        tris.Add(p00); tris.Add(p11); tris.Add(p01);
-                    }
-                }
+                return Store(key, f.ToMesh());
             }
 
-            var m = new Mesh();
-            m.SetVertices(verts);
-            m.SetNormals(norms);
-            m.SetUVs(0, uvs);
-            m.SetTriangles(tris, 0);
-            return Store(key, m);
+            Vector3 inner = h - Vector3.one * b;
+            Vector3 P(int sx, int sy, int sz, int axis)
+            {
+                Vector3 p = new Vector3(sx * inner.x, sy * inner.y, sz * inner.z);
+                if (axis == 0) p.x += sx * b; else if (axis == 1) p.y += sy * b; else p.z += sz * b;
+                return p;
+            }
+            int[] s = { -1, 1 };
+            foreach (int sg in s)
+            {
+                f.Quad(P(sg, -1, -1, 0), P(sg, 1, -1, 0), P(sg, 1, 1, 0), P(sg, -1, 1, 0), new Vector3(sg, 0f, 0f));
+                f.Quad(P(-1, sg, -1, 1), P(1, sg, -1, 1), P(1, sg, 1, 1), P(-1, sg, 1, 1), new Vector3(0f, sg, 0f));
+                f.Quad(P(-1, -1, sg, 2), P(1, -1, sg, 2), P(1, 1, sg, 2), P(-1, 1, sg, 2), new Vector3(0f, 0f, sg));
+            }
+            foreach (int a in s)
+                foreach (int c in s)
+                {
+                    f.Quad(P(a, c, -1, 0), P(a, c, -1, 1), P(a, c, 1, 1), P(a, c, 1, 0), new Vector3(a, c, 0f));
+                    f.Quad(P(a, -1, c, 0), P(a, -1, c, 2), P(a, 1, c, 2), P(a, 1, c, 0), new Vector3(a, 0f, c));
+                    f.Quad(P(-1, a, c, 1), P(-1, a, c, 2), P(1, a, c, 2), P(1, a, c, 1), new Vector3(0f, a, c));
+                }
+            foreach (int x in s)
+                foreach (int y in s)
+                    foreach (int z in s)
+                        f.Tri(P(x, y, z, 0), P(x, y, z, 1), P(x, y, z, 2), new Vector3(x, y, z));
+            return Store(key, f.ToMesh());
         }
 
-        /// Component of v along a cardinal axis (sign-independent).
-        static float Comp(Vector3 v, Vector3 axis) => Mathf.Abs(v.x * axis.x + v.y * axis.y + v.z * axis.z);
-
-        /// Sample positions along one face axis: dense on the rounded bands (uniform angles), sparse in the flat middle.
-        static float[] Samples(float half, float inner, float radius, int seg)
-        {
-            if (radius <= 0f || seg <= 0) return new[] { -half, half };
-            var list = new float[(seg + 1) * 2];
-            int k = 0;
-            for (int s = seg; s >= 0; s--)
-            {
-                float phi = (s / (float)seg) * 45f * Mathf.Deg2Rad;
-                list[k++] = -inner - radius * Mathf.Tan(phi);
-            }
-            for (int s = 0; s <= seg; s++)
-            {
-                float phi = (s / (float)seg) * 45f * Mathf.Deg2Rad;
-                list[k++] = inner + radius * Mathf.Tan(phi);
-            }
-            return list;
-        }
+        static Vector3 Axis(int i) => i == 0 ? Vector3.right : i == 1 ? Vector3.up : Vector3.forward;
 
         public static Mesh Box(Vector3 size) => RoundedBox(size, 0f, 0);
 
-        // ------------------------------------------------------------------ cylinder / frustum
-        /// Frustum along +Y, centered at the origin. 'hard' gives faceted sides (e.g. 4 segments = square matte box).
+        // ------------------------------------------------------------------ prism / frustum
+        /// Faceted frustum along +Y, centered at the origin (always flat-sided; a flat face points toward +X).
+        /// Segment counts above the low-poly budget are reduced. 'hard' is kept for compatibility.
         public static Mesh Frustum(float rBottom, float rTop, float height, int segments = 20, bool caps = true, bool hard = false)
         {
-            segments = Mathf.Max(3, segments);
-            string key = $"cy{rBottom:F4}_{rTop:F4}_{height:F4}_{segments}_{(caps ? 1 : 0)}{(hard ? 1 : 0)}";
+            segments = LowSeg(segments, Mathf.Max(rBottom, rTop));
+            string key = $"fr{rBottom:F4}_{rTop:F4}_{height:F4}_{segments}_{(caps ? 1 : 0)}";
             if (TryGet(key, out var cached)) return cached;
 
-            var verts = new List<Vector3>();
-            var norms = new List<Vector3>();
-            var uvs = new List<Vector2>();
-            var tris = new List<int>();
+            var f = new Flat();
             float hy = height * 0.5f;
-            float slope = (rBottom - rTop) / Mathf.Max(0.0001f, height);
-            float offset = hard ? Mathf.PI / segments : 0f;   // faceted shapes get a flat face toward +X/+Z
-
-            if (!hard)
+            float offset = Mathf.PI / segments;
+            Vector3 Ring(float r, float y, int i)
             {
-                for (int i = 0; i <= segments; i++)
+                float a = i / (float)segments * Mathf.PI * 2f + offset;
+                return new Vector3(Mathf.Cos(a) * r, y, Mathf.Sin(a) * r);
+            }
+            for (int i = 0; i < segments; i++)
+            {
+                Vector3 b0 = Ring(rBottom, -hy, i), b1 = Ring(rBottom, -hy, i + 1);
+                Vector3 t0 = Ring(rTop, hy, i), t1 = Ring(rTop, hy, i + 1);
+                Vector3 mid = (b0 + b1 + t0 + t1) * 0.25f;
+                f.Quad(b0, t0, t1, b1, new Vector3(mid.x, 0f, mid.z));
+                if (caps)
                 {
-                    float a = i / (float)segments * Mathf.PI * 2f;
-                    float c = Mathf.Cos(a), s = Mathf.Sin(a);
-                    Vector3 n = new Vector3(c, slope, s).normalized;
-                    verts.Add(new Vector3(c * rBottom, -hy, s * rBottom)); norms.Add(n); uvs.Add(new Vector2(i / (float)segments, 0f));
-                    verts.Add(new Vector3(c * rTop, hy, s * rTop)); norms.Add(n); uvs.Add(new Vector2(i / (float)segments, 1f));
-                }
-                for (int i = 0; i < segments; i++)
-                {
-                    int b0 = i * 2, t0 = b0 + 1, b1 = b0 + 2, t1 = b0 + 3;
-                    tris.Add(b0); tris.Add(t0); tris.Add(t1);
-                    tris.Add(b0); tris.Add(t1); tris.Add(b1);
+                    if (rTop > 0.0001f) f.Tri(new Vector3(0f, hy, 0f), t0, t1, Vector3.up);
+                    if (rBottom > 0.0001f) f.Tri(new Vector3(0f, -hy, 0f), b0, b1, Vector3.down);
                 }
             }
-            else
-            {
-                for (int i = 0; i < segments; i++)
-                {
-                    float a0 = i / (float)segments * Mathf.PI * 2f + offset;
-                    float a1 = (i + 1) / (float)segments * Mathf.PI * 2f + offset;
-                    float am = (a0 + a1) * 0.5f;
-                    Vector3 n = new Vector3(Mathf.Cos(am), slope, Mathf.Sin(am)).normalized;
-                    int b = verts.Count;
-                    verts.Add(new Vector3(Mathf.Cos(a0) * rBottom, -hy, Mathf.Sin(a0) * rBottom));
-                    verts.Add(new Vector3(Mathf.Cos(a0) * rTop, hy, Mathf.Sin(a0) * rTop));
-                    verts.Add(new Vector3(Mathf.Cos(a1) * rBottom, -hy, Mathf.Sin(a1) * rBottom));
-                    verts.Add(new Vector3(Mathf.Cos(a1) * rTop, hy, Mathf.Sin(a1) * rTop));
-                    for (int k = 0; k < 4; k++) norms.Add(n);
-                    uvs.Add(new Vector2(0, 0)); uvs.Add(new Vector2(0, 1)); uvs.Add(new Vector2(1, 0)); uvs.Add(new Vector2(1, 1));
-                    tris.Add(b); tris.Add(b + 1); tris.Add(b + 3);
-                    tris.Add(b); tris.Add(b + 3); tris.Add(b + 2);
-                }
-            }
-
-            if (caps)
-            {
-                // top cap (+Y)
-                if (rTop > 0.0001f)
-                {
-                    int c = verts.Count;
-                    verts.Add(new Vector3(0f, hy, 0f)); norms.Add(Vector3.up); uvs.Add(new Vector2(0.5f, 0.5f));
-                    for (int i = 0; i <= segments; i++)
-                    {
-                        float a = i / (float)segments * Mathf.PI * 2f + offset;
-                        verts.Add(new Vector3(Mathf.Cos(a) * rTop, hy, Mathf.Sin(a) * rTop)); norms.Add(Vector3.up);
-                        uvs.Add(new Vector2(0.5f + Mathf.Cos(a) * 0.5f, 0.5f + Mathf.Sin(a) * 0.5f));
-                    }
-                    for (int i = 0; i < segments; i++) { tris.Add(c); tris.Add(c + 2 + i); tris.Add(c + 1 + i); }
-                }
-                // bottom cap (-Y)
-                if (rBottom > 0.0001f)
-                {
-                    int c = verts.Count;
-                    verts.Add(new Vector3(0f, -hy, 0f)); norms.Add(Vector3.down); uvs.Add(new Vector2(0.5f, 0.5f));
-                    for (int i = 0; i <= segments; i++)
-                    {
-                        float a = i / (float)segments * Mathf.PI * 2f + offset;
-                        verts.Add(new Vector3(Mathf.Cos(a) * rBottom, -hy, Mathf.Sin(a) * rBottom)); norms.Add(Vector3.down);
-                        uvs.Add(new Vector2(0.5f + Mathf.Cos(a) * 0.5f, 0.5f + Mathf.Sin(a) * 0.5f));
-                    }
-                    for (int i = 0; i < segments; i++) { tris.Add(c); tris.Add(c + 1 + i); tris.Add(c + 2 + i); }
-                }
-            }
-
-            var m = new Mesh();
-            m.SetVertices(verts);
-            m.SetNormals(norms);
-            m.SetUVs(0, uvs);
-            m.SetTriangles(tris, 0);
-            return Store(key, m);
+            return Store(key, f.ToMesh());
         }
 
         public static Mesh Cylinder(float radius, float height, int segments = 20) => Frustum(radius, radius, height, segments, true, false);
 
-        // ------------------------------------------------------------------ sphere / dome
-        /// UV sphere (or the +Y hemisphere when 'hemisphere' is true) centered at the origin.
+        // ------------------------------------------------------------------ ball / dome
+        /// Faceted ball (or the +Y dome when 'hemisphere' is true) centered at the origin.
         public static Mesh Sphere(float radius, int segments = 16, bool hemisphere = false)
         {
-            segments = Mathf.Max(6, segments);
-            string key = $"sp{radius:F4}_{segments}_{(hemisphere ? 1 : 0)}";
+            int lon = LowSeg(Mathf.Max(6, segments), radius);
+            int lat = hemisphere ? (lon >= 10 ? 3 : 2) : (lon >= 10 ? 5 : 4);
+            string key = $"sp{radius:F4}_{lon}_{(hemisphere ? 1 : 0)}";
             if (TryGet(key, out var cached)) return cached;
 
-            int lat = hemisphere ? segments / 2 : segments;
             float latMax = hemisphere ? Mathf.PI * 0.5f : Mathf.PI;
-            int lon = segments * 2;
-            var verts = new List<Vector3>();
-            var norms = new List<Vector3>();
-            var uvs = new List<Vector2>();
-            var tris = new List<int>();
-            for (int i = 0; i <= lat; i++)
+            var f = new Flat();
+            Vector3 Pt(int i, int j)
             {
-                float t = i / (float)lat * latMax;
-                float st = Mathf.Sin(t), ct = Mathf.Cos(t);
-                for (int j = 0; j <= lon; j++)
-                {
-                    float p = j / (float)lon * Mathf.PI * 2f;
-                    Vector3 n = new Vector3(st * Mathf.Cos(p), ct, st * Mathf.Sin(p));
-                    verts.Add(n * radius); norms.Add(n); uvs.Add(new Vector2(j / (float)lon, 1f - i / (float)lat));
-                }
+                float th = i / (float)lat * latMax;
+                float ph = j / (float)lon * Mathf.PI * 2f;
+                return new Vector3(Mathf.Sin(th) * Mathf.Cos(ph), Mathf.Cos(th), Mathf.Sin(th) * Mathf.Sin(ph)) * radius;
             }
-            int w = lon + 1;
             for (int i = 0; i < lat; i++)
-            {
                 for (int j = 0; j < lon; j++)
                 {
-                    int v00 = i * w + j, v01 = v00 + 1, v10 = v00 + w, v11 = v10 + 1;
-                    tris.Add(v00); tris.Add(v01); tris.Add(v11);
-                    tris.Add(v00); tris.Add(v11); tris.Add(v10);
+                    Vector3 a = Pt(i, j), b = Pt(i, j + 1), c = Pt(i + 1, j + 1), d = Pt(i + 1, j);
+                    f.Quad(a, b, c, d, (a + b + c + d) * 0.25f);
                 }
-            }
-            var m = new Mesh();
-            m.SetVertices(verts);
-            m.SetNormals(norms);
-            m.SetUVs(0, uvs);
-            m.SetTriangles(tris, 0);
-            return Store(key, m);
+            return Store(key, f.ToMesh());
         }
 
         // ------------------------------------------------------------------ quad
@@ -265,8 +217,9 @@ namespace Sealebrities
         }
 
         // ------------------------------------------------------------------ combine
-        /// Merges every MeshFilter below 'source' into one mesh per material, parented to 'target'
-        /// (which must share the coordinate frame the parts were built in). Destroys 'source'. Returns the created meshes.
+        /// Merges every MeshFilter below 'source' into one mesh per material, parented to 'target' (which must share
+        /// the coordinate frame the parts were built in). Destroys 'source'. Returns the created meshes.
+        /// The camera surfaces are already flat matte palette colors (FilmMaterials.Surface), so no restyle is needed.
         public static List<Mesh> CombineStatic(Transform source, Transform target)
         {
             var created = new List<Mesh>();

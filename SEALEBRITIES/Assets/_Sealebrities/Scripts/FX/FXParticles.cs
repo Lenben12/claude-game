@@ -4,10 +4,12 @@ using UnityEngine.Rendering;
 namespace Sealebrities
 {
     /// Camera-following particles: underwater marine snow, regulator exhale bubbles and the surface splash burst.
+    /// Low-poly look: sparse clean specks and cartoon bubbles (crisp circles), no dense photographic particulate.
     sealed class FXParticles
     {
         const float SnowHalfHeight = 6f;
         const float SnowLifetimeAvg = 7.5f;
+        const float SnowRateShallow = 12f, SnowRateDeep = 40f;
 
         readonly GameObject root;
         readonly Texture2D dotTex, bubbleTex;
@@ -30,8 +32,8 @@ namespace Sealebrities
             root = new GameObject("FX_Particles");
             root.transform.SetParent(parent, false);
 
-            dotTex = FXAssets.SoftDot(32);
-            bubbleTex = FXAssets.BubbleRing(32);
+            dotTex = FXAssets.CleanDot(32);
+            bubbleTex = FXAssets.CleanBubble(64);
             snowMat = FXAssets.ParticleMaterial("FX_MarineSnow", dotTex, false, Color.white);
             bubbleMat = FXAssets.ParticleMaterial("FX_Bubbles", bubbleTex, false, Color.white);
             dropMat = FXAssets.ParticleMaterial("FX_Droplets", dotTex, false, Color.white);
@@ -99,14 +101,14 @@ namespace Sealebrities
         {
             var ps = Create("FX_MarineSnow", snowMat, out var r);
             t = ps.transform;
-            r.maxParticleSize = 0.012f;
+            r.maxParticleSize = 0.01f;
             r.minParticleSize = 0f;
 
             var main = ps.main;
-            main.maxParticles = 3200;
+            main.maxParticles = 600;
             main.startLifetime = new ParticleSystem.MinMaxCurve(6f, 9f);
-            main.startSize = new ParticleSystem.MinMaxCurve(0.012f, 0.035f);
-            main.startColor = new ParticleSystem.MinMaxGradient(new Color(0.85f, 0.88f, 0.9f, 0.6f));
+            main.startSize = new ParticleSystem.MinMaxCurve(0.018f, 0.04f);
+            main.startColor = new ParticleSystem.MinMaxGradient(new Color(0.92f, 0.97f, 1f, 0.5f));
             main.startRotation = new ParticleSystem.MinMaxCurve(0f, FXMath.TwoPi);
 
             var shape = ps.shape;
@@ -132,30 +134,31 @@ namespace Sealebrities
         ParticleSystem BuildBubbles()
         {
             var ps = Create("FX_Bubbles", bubbleMat, out var r);
-            r.maxParticleSize = 0.06f;
+            r.maxParticleSize = 0.08f;
 
             var main = ps.main;
-            main.maxParticles = 700;
+            main.maxParticles = 400;
             main.startLifetime = 4f;
             main.startSize = 0.03f;
-            main.startColor = new ParticleSystem.MinMaxGradient(new Color(0.92f, 0.96f, 1f, 0.85f));
+            main.startColor = new ParticleSystem.MinMaxGradient(new Color(0.95f, 0.98f, 1f, 0.9f));
 
             var em = ps.emission;
             em.enabled = false;
 
+            // calm, readable wobble (cartoon bubbles rise in gentle S-curves)
             var noise = ps.noise;
             noise.enabled = true;
-            noise.strength = 0.24f;
-            noise.frequency = 1.3f;
-            noise.scrollSpeed = 0.6f;
+            noise.strength = 0.16f;
+            noise.frequency = 0.9f;
+            noise.scrollSpeed = 0.45f;
             noise.damping = true;
             noise.octaveCount = 1;
-            noise.quality = ParticleSystemNoiseQuality.Medium;
+            noise.quality = ParticleSystemNoiseQuality.Low;
 
-            // bubbles expand as the pressure drops, then pop
+            // bubbles grow a little on the way up, then pop
             var sol = ps.sizeOverLifetime;
             sol.enabled = true;
-            var curve = new AnimationCurve(new Keyframe(0f, 0.75f), new Keyframe(0.9f, 1.25f), new Keyframe(1f, 0.15f));
+            var curve = new AnimationCurve(new Keyframe(0f, 0.8f), new Keyframe(0.92f, 1.2f), new Keyframe(1f, 0.2f));
             sol.size = new ParticleSystem.MinMaxCurve(1f, curve);
 
             var col = ps.colorOverLifetime;
@@ -212,8 +215,8 @@ namespace Sealebrities
         void TickSnow(FXFrame f)
         {
             bool on = f.underwater;
-            float rate = on ? Mathf.Lerp(70f, 260f, FXMath.Smooth01(f.depth / 60f)) : 0f;
-            if (Mathf.Abs(rate - lastRate) > 2f || (rate == 0f && lastRate != 0f))
+            float rate = on ? Mathf.Lerp(SnowRateShallow, SnowRateDeep, FXMath.Smooth01(f.depth / 60f)) : 0f;
+            if (Mathf.Abs(rate - lastRate) > 1f || (rate == 0f && lastRate != 0f))
             {
                 var em = snow.emission;
                 em.rateOverTime = rate;
@@ -229,8 +232,8 @@ namespace Sealebrities
 
             // Specks are only visible where light reaches them: sunlight fades with depth, the flashlight brings them back.
             float light = FXMath.Clamp01(f.day01 * Mathf.Exp(-f.depth / 40f) * (0.35f + 0.65f * f.sun01) + 0.55f * f.flash01 + 0.08f);
-            float b = Mathf.Lerp(0.18f, 0.92f, light);
-            var sc = new Color(b * 0.95f, b * 0.98f, b, Mathf.Lerp(0.35f, 0.65f, light));
+            float b = Mathf.Lerp(0.2f, 0.95f, light);
+            var sc = new Color(b * 0.94f, b * 0.98f, b, Mathf.Lerp(0.3f, 0.5f, light));
             if (FXMath.Differs(sc, lastSnowColor, 0.02f))
             {
                 var main = snow.main;
@@ -238,7 +241,7 @@ namespace Sealebrities
                 lastSnowColor = sc;
             }
             byte bb = (byte)(Mathf.Lerp(0.3f, 1f, light) * 255f);
-            bubbleColor = new Color32((byte)(bb * 0.93f), (byte)(bb * 0.97f), bb, 215);
+            bubbleColor = new Color32((byte)(bb * 0.95f), (byte)(bb * 0.98f), bb, 230);
 
             // Fill the box instantly when diving in or after a teleport.
             if (on && (!snowOn || jumped)) snow.Emit((int)(rate * SnowLifetimeAvg * 0.85f));
@@ -252,7 +255,8 @@ namespace Sealebrities
                 bubbleAccum = 0f;
                 return;
             }
-            float rate = 40f * (1f - 0.6f * breath.ExhaleT) * breath.Pitch;
+            // fewer, chunkier bubbles read better in the clean low-poly look than a dense fizz
+            float rate = 24f * (1f - 0.6f * breath.ExhaleT) * breath.Pitch;
             bubbleAccum += rate * f.dt;
             int guard = 0;
             while (bubbleAccum >= 1f && guard++ < 20)
@@ -264,7 +268,7 @@ namespace Sealebrities
                 Vector3 vel = Vector3.up * vy
                               + f.camRight * (bubbleSide * Random.Range(0.12f, 0.35f))
                               + f.camFwd * Random.Range(0f, 0.12f);
-                EmitBubble(pos, vel, Random.Range(0.008f, 0.04f), vy);
+                EmitBubble(pos, vel, Random.Range(0.012f, 0.045f), vy);
             }
         }
 
@@ -297,14 +301,14 @@ namespace Sealebrities
             drops.Emit((int)((under ? 45 : 70) * strength));
 
             if (!under) return;
-            int count = (int)(55 * strength);
+            int count = (int)(38 * strength);
             for (int i = 0; i < count; i++)
             {
                 Vector3 off = new Vector3(Random.Range(-0.9f, 0.9f), Random.Range(-1.6f, -0.1f), Random.Range(-0.9f, 0.9f));
                 Vector3 pos = c + flatFwd * 0.7f + off;
                 float vy = Random.Range(0.5f, 1.7f);
                 Vector3 vel = new Vector3(Random.Range(-0.5f, 0.5f), vy, Random.Range(-0.5f, 0.5f));
-                EmitBubble(pos, vel, Random.Range(0.01f, 0.06f), vy);
+                EmitBubble(pos, vel, Random.Range(0.015f, 0.07f), vy);
             }
         }
     }

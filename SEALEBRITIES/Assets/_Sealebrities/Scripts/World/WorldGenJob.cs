@@ -5,101 +5,68 @@ using UnityEngine;
 
 namespace Sealebrities
 {
-    /// Runs the heavy, Unity-free parts of world generation (heightfield, splatmap, texture pixels) on worker threads.
-    /// The world builder coroutine polls the progress and consumes the results on the main thread.
+    /// Runs the heavy, Unity-free parts of world generation on worker threads: the low-poly terrain (vertex data,
+    /// stitching, color classes), the water color map and the shoreline foam. The world builder coroutine polls the
+    /// progress and turns the results into meshes on the main thread.
     public sealed class WorldGenJob
     {
-        public const int AlphamapResolution = 1024;
-        public const int CloudTextureSize = 1024;
-
-        public float[,] Heights;            // normalized 0..1, [z, x]
-        public float[,,] Splat;             // [z, x, layer]
-        public WorldPixels[] TerrainPixels; // one per WorldSurface
-        public byte[] OceanRipples, StarDot, Moon, Clouds;
+        public WorldTerrainData Terrain;
+        public WorldWaterMap Water;
+        public WorldCoastData Coast;
         public Exception Error;
 
-        int heightRows, splatRows, texturesDoneCount;
-        volatile bool heightsDone, splatDone, texturesDone;
+        int chunksDone, stage;
+        volatile bool done;
 
-        public bool HeightsDone => heightsDone;
-        public bool SplatDone => splatDone;
-        public bool TexturesDone => texturesDone;
-        public float HeightProgress => Mathf.Clamp01(Volatile.Read(ref heightRows) / (float)WorldLayout.HeightmapResolution);
-        public float SplatProgress => Mathf.Clamp01(Volatile.Read(ref splatRows) / (float)AlphamapResolution);
-        static readonly int TextureJobs = Enum.GetValues(typeof(WorldSurface)).Length + 4;
-        public float TextureProgress => Mathf.Clamp01(Volatile.Read(ref texturesDoneCount) / (float)TextureJobs);
+        public bool Done => done;
 
-        static float OriginX => -WorldLayout.TerrainSize * 0.5f;
-        static float OriginZ => -WorldLayout.TerrainSize * 0.5f;
-
-        public void StartHeightsAndTextures()
+        /// 0..1: chunks dominate, the water map and the coast are short tails.
+        public float Progress
         {
-            // initialize static layout caches on the main thread before workers use them
-            WorldHeightField.Height(0f, 0f);
-            Run(ComputeHeights, () => heightsDone = true);
-            Run(ComputeTextures, () => texturesDone = true);
+            get
+            {
+                float chunks = Mathf.Clamp01(Volatile.Read(ref chunksDone) / (float)(WorldTerrainData.ChunksPerSide * WorldTerrainData.ChunksPerSide));
+                int s = Volatile.Read(ref stage);
+                return s == 0 ? chunks * 0.8f : (s == 1 ? 0.85f : 0.95f);
+            }
         }
 
-        public void StartSplat() => Run(ComputeSplat, () => splatDone = true);
-
-        void Run(Action work, Action done)
+        public void Start()
         {
+            // static layout caches must be filled on the main thread before the workers read them
+            WorldTerrainData.PrepareStatics();
             Action body = () =>
             {
-                try { work(); }
+                try { Work(); }
                 catch (Exception e) { Error = e; }
-                finally { done(); }
+                finally { done = true; }
             };
             try { Task.Run(body); }
             catch (Exception) { body(); }   // no thread pool available: run inline
         }
 
-        void ComputeHeights()
+        void Work()
         {
-            int res = WorldLayout.HeightmapResolution;
-            var h = new float[res, res];
-            float cell = WorldLayout.TerrainSize / (res - 1);
-            float minY = WorldLayout.TerrainMinY, range = WorldLayout.TerrainHeightRange;
-            float ox = OriginX, oz = OriginZ;
-            Parallel.For(0, res, zi =>
-            {
-                float z = oz + zi * cell;
-                for (int xi = 0; xi < res; xi++)
-                {
-                    float y = WorldHeightField.Height(ox + xi * cell, z);
-                    float n = (y - minY) / range;
-                    h[zi, xi] = n < 0f ? 0f : (n > 1f ? 1f : n);
-                }
-                Interlocked.Increment(ref heightRows);
-            });
-            Heights = h;
+            var terrain = new WorldTerrainData(WorldHeightField.Height);
+            terrain.Build(() => Interlocked.Increment(ref chunksDone));
+            Terrain = terrain;
+
+            Volatile.Write(ref stage, 1);
+            try { Water = WorldWaterMap.Build(terrain.Height); }
+            catch (Exception e) { Error = e; }
+
+            Volatile.Write(ref stage, 2);
+            try { Coast = WorldCoastData.Build(terrain); }
+            catch (Exception e) { Error = e; }
         }
 
-        void ComputeSplat()
+        /// Synchronous emergency terrain (flat seabed at -20 m) used when the real generation failed.
+        public static WorldTerrainData FlatFallback()
         {
-            var h = Heights;
-            if (h == null) return;
-            Splat = WorldSplat.Compute(h, WorldLayout.HeightmapResolution, WorldLayout.TerrainSize, OriginX, OriginZ,
-                WorldLayout.TerrainMinY, WorldLayout.TerrainHeightRange, AlphamapResolution,
-                _ => Interlocked.Increment(ref splatRows));
-        }
-
-        void ComputeTextures()
-        {
-            var surfaces = (WorldSurface[])Enum.GetValues(typeof(WorldSurface));
-            var px = new WorldPixels[surfaces.Length];
-            var work = new Action[surfaces.Length + 4];
-            for (int i = 0; i < surfaces.Length; i++)
-            {
-                int k = i;
-                work[i] = () => { px[k] = WorldTextureGen.Terrain(surfaces[k], WorldTextures.TerrainTextureSize); Interlocked.Increment(ref texturesDoneCount); };
-            }
-            work[surfaces.Length] = () => { OceanRipples = WorldTextureGen.OceanRipples(256); Interlocked.Increment(ref texturesDoneCount); };
-            work[surfaces.Length + 1] = () => { StarDot = WorldTextureGen.StarDot(32); Interlocked.Increment(ref texturesDoneCount); };
-            work[surfaces.Length + 2] = () => { Moon = WorldTextureGen.Moon(128); Interlocked.Increment(ref texturesDoneCount); };
-            work[surfaces.Length + 3] = () => { Clouds = WorldTextureGen.Clouds(CloudTextureSize); Interlocked.Increment(ref texturesDoneCount); };
-            Parallel.Invoke(work);
-            TerrainPixels = px;
+            WorldTerrainData.PrepareStatics();
+            var t = new WorldTerrainData((x, z) => -20f);
+            t.Build(null);
+            return t;
         }
     }
 }

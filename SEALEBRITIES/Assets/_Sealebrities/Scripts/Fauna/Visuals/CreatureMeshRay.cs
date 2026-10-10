@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace Sealebrities
 {
-    /// Rays: flat disc (1 m wingspan along X), whip tail along -Z. Variant "manta": pointed wings,
+    /// Rays: faceted flat disc (1 m wingspan along X), whip tail along -Z. Variant "manta": pointed wings,
     /// cephalic fins, wide terminal mouth, white belly. Stingrays get front + rear wing bones per side so
     /// the animator's phase lag produces an undulating disc margin.
     internal static class CreatureMeshRay
@@ -19,7 +19,6 @@ namespace Sealebrities
             float thick = CreatureMeshMath.Clamp(s.bodyHeight, 0.03f, 0.2f);
             ctx.Layout = CreatureMeshLayout.Disc;
             ctx.EyeStyle = manta ? CreatureMeshEyeStyle.Mammal : CreatureMeshEyeStyle.Friendly;
-            ctx.SkinSmoothness = 0.5f;
 
             float discLen = manta ? 0.46f : CreatureMeshMath.Clamp(0.95f / bw, 0.45f, 1f);
             float zFront = manta ? 0.22f : discLen * 0.5f;
@@ -98,10 +97,9 @@ namespace Sealebrities
             }
             ctx.Flippers.AddRange(wingBones);
 
-            // ---- disc: top and bottom surfaces over (x, chord fraction)
-            const int NX = 40, NS = 18;
+            // ---- disc: top and bottom surfaces over (x, chord fraction), coarse faceted grid
+            int NX = manta ? 14 : 12, NS = manta ? 5 : 6;
             Func<float, float> xMap = u => 0.5f * CreatureMeshMath.Sin(Pi * (u - 0.5f));
-            Func<float, float> sMap = v => 0.5f - 0.5f * CreatureMeshMath.Cos(Pi * v);
             Func<float, float, Vector3> topP = (u, v) =>
             {
                 float x = xMap(u), ax = CreatureMeshMath.Abs(x);
@@ -137,7 +135,7 @@ namespace Sealebrities
             };
             var tailChain = CreatureMeshParts.ChainAlong(ctx, "Tail", body, new[] { tailPath[0], tailPath[1], tailPath[2], tailPath[3] }, new[] { 0.12f, 0.42f, 0.7f });
             ctx.Spine.AddRange(tailChain.Bones);
-            var tail = CreatureMeshParts.Tube(tailPath, t => tr0 * CreatureMeshMath.Lerp(1f, 0.08f, CreatureMeshMath.Pow(t, 0.7f)), 22, 8, t => Vector3.up);
+            var tail = CreatureMeshParts.Tube(tailPath, t => tr0 * CreatureMeshMath.Lerp(1f, 0.08f, CreatureMeshMath.Pow(t, 0.7f)), 7, 4, t => Vector3.up);
             tail.HalfTop = t => tr0 * CreatureMeshMath.Lerp(0.8f, 0.08f, CreatureMeshMath.Pow(t, 0.7f));
             tail.HalfBot = tail.HalfTop;
             tail.CapStart = false;
@@ -148,7 +146,7 @@ namespace Sealebrities
             {
                 // venomous spine on the tail + pelvic lobes
                 Vector3 sp0 = CreatureMeshMath.PathPoint(tailPath, 0.38f) + Vector3.up * tr0 * 0.4f;
-                CreatureMeshParts.Cone(b, CreatureMeshSlot.Fin, sp0, sp0 + new Vector3(0f, 0.012f, -0.09f), tr0 * 0.25f, 5,
+                CreatureMeshParts.Cone(b, CreatureMeshSlot.Fin, sp0, sp0 + new Vector3(0f, 0.012f, -0.09f), tr0 * 0.3f, 3,
                     CreatureMeshParts.FinUv(3, 0.5f, 0.8f), CreatureMeshParts.FinUv(3, 0.5f, 0.9f), tailChain.Weigh(sp0));
                 for (int side = -1; side <= 1; side += 2)
                 {
@@ -158,7 +156,7 @@ namespace Sealebrities
                         Base = q => new Vector3(sd * CreatureMeshMath.Lerp(0.03f, 0.075f, q), -0.004f, zR(CreatureMeshMath.Lerp(0.03f, 0.075f, q)) + 0.03f),
                         Edge = q => new Vector3(sd * CreatureMeshMath.Lerp(0.03f, 0.085f, q), -0.006f, zR(CreatureMeshMath.Lerp(0.03f, 0.075f, q)) - 0.07f * (1f - 0.6f * q)),
                         Normal = q => Vector3.up,
-                        Cols = 5, Rows = 3, Thickness = 0.006f, Band = 2,
+                        Cols = 2, Rows = 1, Thickness = 0.006f, Band = 2,
                     };
                     CreatureMeshParts.Fin(b, CreatureMeshSlot.Fin, fin, (p, a, t) => CreatureMeshSkin.One(body));
                 }
@@ -171,7 +169,7 @@ namespace Sealebrities
                 {
                     Base = q => new Vector3(0f, thickAt(0f) * chord(0.9f) * 0.5f, zb - 0.045f * q),
                     Edge = q => new Vector3(0f, thickAt(0f) * chord(0.9f) * 0.5f + 0.035f * CreatureMeshMath.Sin(Pi * Math.Min(1f, q * 1.3f)) * (1f - q * 0.6f), zb - 0.045f * q - 0.03f * q),
-                    Normal = q => Vector3.right, Cols = 6, Rows = 3, Thickness = 0.006f, Band = 0,
+                    Normal = q => Vector3.right, Cols = 2, Rows = 1, Thickness = 0.006f, Band = 0,
                 };
                 CreatureMeshParts.Fin(b, CreatureMeshSlot.Fin, fin, (p, a, t) => CreatureMeshSkin.One(body));
             }
@@ -181,7 +179,7 @@ namespace Sealebrities
             {
                 // wide terminal mouth
                 CreatureMeshParts.Ellipsoid(b, CreatureMeshSlot.Mouth, new Vector3(0f, -0.004f, zF(0f) - 0.006f), Vector3.forward, Vector3.up,
-                    0.062f, 0.014f, 0.02f, 7, 16, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), CreatureMeshSkin.Fixed(body));
+                    0.062f, 0.014f, 0.02f, 3, 8, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), CreatureMeshSkin.Fixed(body));
                 // cephalic fins: rolled paddles pointing forward, curling inward
                 for (int side = -1; side <= 1; side += 2)
                 {
@@ -193,8 +191,8 @@ namespace Sealebrities
                         new Vector3(sd * 0.082f, -0.012f, zF(0f) + 0.075f),
                         new Vector3(sd * 0.066f, -0.026f, zF(0f) + 0.095f),
                     };
-                    var cf = CreatureMeshParts.Tube(path, t => CreatureMeshMath.Lerp(0.02f, 0.008f, t), 12, 10, t => Vector3.up);
-                    cf.HalfTop = t => CreatureMeshMath.Lerp(0.0065f, 0.004f, t);
+                    var cf = CreatureMeshParts.Tube(path, t => CreatureMeshMath.Lerp(0.02f, 0.008f, t), 4, 5, t => Vector3.up);
+                    cf.HalfTop = t => CreatureMeshMath.Lerp(0.0075f, 0.0045f, t);
                     cf.HalfBot = cf.HalfTop;
                     cf.HalfW = t => CreatureMeshMath.Lerp(0.02f, 0.01f, t) * CreatureMeshMath.Nose(1f - t, 0.25f);
                     cf.CapEnd = false;
@@ -204,8 +202,8 @@ namespace Sealebrities
                 // eyes on the sides of the head
                 for (int side = -1; side <= 1; side += 2)
                 {
-                    Vector3 c = new Vector3(side * 0.104f, 0.003f, zF(0.1f) - 0.03f);
-                    CreatureMeshParts.Eye(b, c, CreatureMeshMath.Norm(new Vector3(side, 0.15f, 0.3f)), Vector3.up, 0.012f, 0.8f, CreatureMeshSkin.Fixed(body));
+                    Vector3 c = new Vector3(side * 0.104f, 0.004f, zF(0.1f) - 0.03f);
+                    CreatureMeshParts.Eye(ctx, c, CreatureMeshMath.Norm(new Vector3(side, 0.2f, 0.35f)), 0.013f, CreatureMeshSkin.Fixed(body));
                 }
             }
             else
@@ -216,14 +214,14 @@ namespace Sealebrities
                     float ex = side * 0.075f;
                     float v = CreatureMeshMath.Clamp01((zF(CreatureMeshMath.Abs(ex)) - ez) / (zF(CreatureMeshMath.Abs(ex)) - zR(CreatureMeshMath.Abs(ex))));
                     float ytop = thickAt(CreatureMeshMath.Abs(ex)) * chord(v) * 0.62f + thick * 0.18f * CreatureMeshMath.Gauss(ex, 0f, 0.08f) * CreatureMeshMath.Gauss(v, 0.32f, 0.22f);
-                    Vector3 c = new Vector3(ex, ytop + 0.006f, ez);
+                    Vector3 c = new Vector3(ex, ytop + 0.008f, ez);
                     // eye socket bump in skin color
                     Vector2 uv = new Vector2(0.5f + ex, 0.52f + 0.48f * CreatureMeshMath.Clamp01((df - ez) / dl));
-                    CreatureMeshParts.Ellipsoid(b, CreatureMeshSlot.Skin, c - Vector3.up * 0.006f, Vector3.up, Vector3.forward, 0.026f, 0.034f, 0.016f, 6, 12, uv, uv, CreatureMeshSkin.Fixed(body));
-                    CreatureMeshParts.Eye(b, c + Vector3.up * 0.006f, CreatureMeshMath.Norm(new Vector3(side * 0.7f, 0.75f, 0.15f)), Vector3.up, 0.02f, 0.8f, CreatureMeshSkin.Fixed(body));
+                    CreatureMeshParts.Ellipsoid(b, CreatureMeshSlot.Skin, c - Vector3.up * 0.008f, Vector3.up, Vector3.forward, 0.026f, 0.034f, 0.016f, 4, 6, uv, uv, CreatureMeshSkin.Fixed(body));
+                    CreatureMeshParts.Eye(ctx, c + Vector3.up * 0.004f, CreatureMeshMath.Norm(new Vector3(side * 0.6f, 0.75f, 0.35f)), 0.02f, CreatureMeshSkin.Fixed(body));
                     // spiracle behind the eye
-                    Vector3 sp = new Vector3(ex * 1.05f, ytop + 0.002f, ez - 0.045f);
-                    CreatureMeshParts.Ellipsoid(b, CreatureMeshSlot.Mouth, sp, Vector3.up, Vector3.forward, 0.012f, 0.016f, 0.004f, 5, 10,
+                    Vector3 sp = new Vector3(ex * 1.05f, ytop + 0.002f, ez - 0.05f);
+                    CreatureMeshParts.Ellipsoid(b, CreatureMeshSlot.Mouth, sp, Vector3.up, Vector3.forward, 0.012f, 0.016f, 0.004f, 3, 5,
                         new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), CreatureMeshSkin.Fixed(body));
                 }
             }

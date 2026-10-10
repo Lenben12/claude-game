@@ -277,7 +277,7 @@ namespace Sealebrities
                     Vector3 e = KeepInWater(c + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * 24f + Vector3.up * 6f, 3f, 2f);
                     if (!IsClear(e)) continue;
                     if (Physics.Raycast(e, (look - e).normalized, out RaycastHit hit, 30f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)
-                        && !(hit.collider is TerrainCollider))
+                        && !IsTerrain(hit.collider))
                     {
                         eye = e;
                         moray = hit.point + hit.normal * 0.6f;
@@ -369,9 +369,17 @@ namespace Sealebrities
             yield return Frames(10);
         }
 
+        /// The game window has keyboard focus during the tour: a stray Tab/P typed elsewhere opens the phone (and hides
+        /// the camera model). Every non-phone shot starts with the phone closed.
+        static void CloseStrayPhone()
+        {
+            if (UIState.PhoneOpen) UIModule.DebugOpenPhone("close");
+        }
+
         /// Free camera (player frozen where he stands): only for above-water views.
         void FreeCamera(Vector3 eye, Vector3 lookAt)
         {
+            CloseStrayPhone();
             if (pc == null || cam == null) return;
             pc.enabled = false;
             Pose(eye, lookAt);
@@ -399,6 +407,7 @@ namespace Sealebrities
         /// (underwater state, depth), then freezes it and aims the camera.
         IEnumerator Dive(Vector3 eye, Vector3 lookAt)
         {
+            CloseStrayPhone();
             if (pc == null) yield break;
             if (lamp != null) lamp.SetOn(false);
             pc.enabled = true;
@@ -438,6 +447,17 @@ namespace Sealebrities
 
         // ------------------------------------------------------------------ terrain helpers
         static Vector3 Ground(Vector3 p) => new Vector3(p.x, WorldInfo.GroundHeight(p), p.z);
+
+        /// True for the ground: the low-poly mesh terrain chunks ("Chunk_x_z" under the "Terrain" root, see
+        /// WorldTerrain.CreateChunk) or a legacy Unity TerrainCollider.
+        static bool IsTerrain(Collider c)
+        {
+            if (c == null) return false;
+            if (c is TerrainCollider) return true;
+            if (!(c is MeshCollider)) return false;
+            var t = c.transform;
+            return t.name.StartsWith("Chunk_", StringComparison.Ordinal) && t.parent != null && t.parent.name == "Terrain";
+        }
 
         static Vector3 Flat(Vector3 v)
         {

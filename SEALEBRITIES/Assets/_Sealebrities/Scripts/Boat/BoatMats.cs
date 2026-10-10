@@ -2,23 +2,37 @@ using UnityEngine;
 
 namespace Sealebrities
 {
-    /// Shared materials of the Boat module (boat, helicopter, crate, fishing). Created lazily, reused everywhere.
+    /// Shared materials of the Boat module (boat, helicopter, crate, fishing). Low-poly look: solid, matte, flat colors
+    /// from the LowPoly palette (no textures). Opaque ones come from MaterialLibrary's cache, so identical colors batch
+    /// with the rest of the world. Created lazily, reused everywhere.
     public static class BoatMats
     {
-        static Material hull, deck, deckDark, cabin, metal, steel, chrome, rubber, rope, glass, cushion, engine, engineGrey,
-            drumBlue, drumOrange, lifeOrange, white, navRed, navGreen, navWhite, gauge, line, crate, strap, chute,
-            heliYellow, heliRed, heliGlass, heliDark, rotorBlur, smoke, foam, spray, dust, splinter, bobberRed, bobberWhite,
-            bucket, cork, rod, pilot, helmet, cooler, coolerLid, tank, padMark;
-        static Material[] fish = new Material[3];
+        // ------------------------------------------------------------------ boat colors
+        public static readonly Color HullTealColor = LowPoly.Hex("#3AA3A0");
+        public static readonly Color HullBottomColor = LowPoly.Hex("#8E3D35");
+        public static readonly Color RubberColor = LowPoly.Hex("#34373F");
+        public static readonly Color EngineColor = LowPoly.Hex("#3B3F4A");
+        public static readonly Color DrumBlueColor = LowPoly.Hex("#3F7FD0");
+        public static readonly Color DrumOrangeColor = LowPoly.Hex("#F28A3A");
+        public static readonly Color HeliYellowColor = LowPoly.Hex("#FFC63D");
+        public static readonly Color HeliRedColor = LowPoly.Hex("#E2493B");
+
+        static Material hullTeal, hullBottom, hullRust, hullWhite, deck, deckB, deckC, deckDark, cabin, roof, frame, metal, steel,
+            rubber, rope, glass, cushion, engine, engineGrey, drumBlue, drumOrange, lifeOrange, white, navRed, navGreen, navWhite,
+            gauge, line, crate, crateDark, crateBand, strap, chuteRed, chuteWhite, heliYellow, heliRed, heliGlass, heliDark,
+            rotorBlur, smoke, foam, spray, dust, splinter, bobberRed, bobberWhite, bucket, bucketWater, cork, rod, pilot, helmet,
+            cooler, coolerLid, tank, tackle, ink;
+        static Material[][] fish = new Material[3][];
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics()
         {
-            hull = deck = deckDark = cabin = metal = steel = chrome = rubber = rope = glass = cushion = engine = engineGrey = null;
-            drumBlue = drumOrange = lifeOrange = white = navRed = navGreen = navWhite = gauge = line = crate = strap = chute = null;
-            heliYellow = heliRed = heliGlass = heliDark = rotorBlur = smoke = foam = spray = dust = splinter = bobberRed = bobberWhite = null;
-            bucket = cork = rod = pilot = helmet = cooler = coolerLid = tank = padMark = null;
-            fish = new Material[3];
+            hullTeal = hullBottom = hullRust = hullWhite = deck = deckB = deckC = deckDark = cabin = roof = frame = metal = steel = null;
+            rubber = rope = glass = cushion = engine = engineGrey = drumBlue = drumOrange = lifeOrange = white = navRed = navGreen = navWhite = null;
+            gauge = line = crate = crateDark = crateBand = strap = chuteRed = chuteWhite = heliYellow = heliRed = heliGlass = heliDark = null;
+            rotorBlur = smoke = foam = spray = dust = splinter = bobberRed = bobberWhite = bucket = bucketWater = cork = rod = pilot = helmet = null;
+            cooler = coolerLid = tank = tackle = ink = null;
+            fish = new Material[3][];
         }
 
         static Material Get(ref Material m, System.Func<Material> make)
@@ -27,57 +41,89 @@ namespace Sealebrities
             return m;
         }
 
-        public static Material Hull => Get(ref hull, () => MaterialLibrary.Textured(BoatTextures.HullAlbedo, Color.white, 0.4f, 0.05f, null, BoatTextures.HullNormal));
-        public static Material Deck => Get(ref deck, () => MaterialLibrary.Textured(BoatTextures.DeckAlbedo, Color.white, 0.18f, 0f, null, BoatTextures.DeckNormal));
-        public static Material DeckDark => Get(ref deckDark, () => MaterialLibrary.Textured(BoatTextures.DeckAlbedo, new Color(0.72f, 0.62f, 0.52f), 0.28f, 0f, null, BoatTextures.DeckNormal));
-        public static Material Cabin => Get(ref cabin, () => MaterialLibrary.Textured(BoatTextures.CabinAlbedo, Color.white, 0.32f, 0f, null, BoatTextures.CabinNormal));
-        public static Material Metal => Get(ref metal, () => MaterialLibrary.Textured(BoatTextures.MetalAlbedo, Color.white, 0.35f, 0.55f, new Vector2(2f, 2f), BoatTextures.MetalNormal));
-        public static Material Steel => Get(ref steel, () => MaterialLibrary.Opaque(new Color(0.55f, 0.56f, 0.57f), 0.55f, 0.85f));
-        public static Material Chrome => Get(ref chrome, () => MaterialLibrary.Opaque(new Color(0.75f, 0.76f, 0.78f), 0.8f, 0.95f));
-        public static Material Rubber => Get(ref rubber, () => MaterialLibrary.Opaque(new Color(0.07f, 0.07f, 0.075f), 0.18f));
-        public static Material Rope => Get(ref rope, () => MaterialLibrary.Opaque(new Color(0.62f, 0.55f, 0.4f), 0.1f));
-        public static Material Glass => Get(ref glass, () => MaterialLibrary.Transparent(new Color(0.55f, 0.68f, 0.72f, 0.22f), 0.96f, true));
-        public static Material Cushion => Get(ref cushion, () => MaterialLibrary.Opaque(new Color(0.42f, 0.08f, 0.07f), 0.45f));
-        public static Material Engine => Get(ref engine, () => MaterialLibrary.Opaque(new Color(0.09f, 0.1f, 0.11f), 0.62f, 0.1f));
-        public static Material EngineGrey => Get(ref engineGrey, () => MaterialLibrary.Opaque(new Color(0.42f, 0.43f, 0.45f), 0.45f, 0.4f));
-        public static Material DrumBlue => Get(ref drumBlue, () => MaterialLibrary.Textured(BoatTextures.DrumBlue, Color.white, 0.35f, 0.3f));
-        public static Material DrumOrange => Get(ref drumOrange, () => MaterialLibrary.Textured(BoatTextures.DrumOrange, Color.white, 0.35f, 0.3f));
-        public static Material LifeOrange => Get(ref lifeOrange, () => MaterialLibrary.Opaque(new Color(0.95f, 0.35f, 0.05f), 0.4f));
-        public static Material White => Get(ref white, () => MaterialLibrary.Opaque(new Color(0.9f, 0.9f, 0.88f), 0.4f));
-        public static Material NavRed => Get(ref navRed, () => MaterialLibrary.Emissive(new Color(0.5f, 0.05f, 0.05f), new Color(1f, 0.08f, 0.05f), 3f));
-        public static Material NavGreen => Get(ref navGreen, () => MaterialLibrary.Emissive(new Color(0.05f, 0.4f, 0.1f), new Color(0.1f, 1f, 0.25f), 3f));
-        public static Material NavWhite => Get(ref navWhite, () => MaterialLibrary.Emissive(new Color(0.8f, 0.8f, 0.75f), new Color(1f, 0.95f, 0.85f), 2.5f));
-        public static Material Gauge => Get(ref gauge, () => MaterialLibrary.Emissive(new Color(0.05f, 0.12f, 0.08f), new Color(0.3f, 0.9f, 0.45f), 0.6f));
-        public static Material Line => Get(ref line, () => MaterialLibrary.Unlit(new Color(0.92f, 0.92f, 0.86f)));
-        public static Material Crate => Get(ref crate, () => MaterialLibrary.Textured(BoatTextures.CrateAlbedo, Color.white, 0.2f));
-        public static Material Strap => Get(ref strap, () => MaterialLibrary.Opaque(new Color(0.12f, 0.12f, 0.13f), 0.5f, 0.6f));
-        public static Material Chute => Get(ref chute, () =>
+        static Material Flat(ref Material m, Color c)
         {
-            var m = MaterialLibrary.Textured(BoatTextures.Parachute, Color.white, 0.25f);
-            MaterialLibrary.MakeTwoSided(m);
+            if (m == null) m = LowPoly.Mat(c);
             return m;
-        });
-        public static Material HeliYellow => Get(ref heliYellow, () => MaterialLibrary.Opaque(new Color(0.96f, 0.72f, 0.06f), 0.68f, 0.1f));
-        public static Material HeliRed => Get(ref heliRed, () => MaterialLibrary.Opaque(new Color(0.78f, 0.08f, 0.06f), 0.62f, 0.1f));
-        public static Material HeliGlass => Get(ref heliGlass, () => MaterialLibrary.Transparent(new Color(0.12f, 0.2f, 0.26f, 0.45f), 0.97f, false));
-        public static Material HeliDark => Get(ref heliDark, () => MaterialLibrary.Opaque(new Color(0.12f, 0.12f, 0.13f), 0.4f, 0.5f));
-        public static Material RotorBlur => Get(ref rotorBlur, () => MaterialLibrary.Unlit(new Color(0.08f, 0.08f, 0.09f, 0.16f), true));
-        public static Material Pilot => Get(ref pilot, () => MaterialLibrary.Opaque(new Color(0.2f, 0.32f, 0.22f), 0.3f));
-        public static Material Helmet => Get(ref helmet, () => MaterialLibrary.Opaque(new Color(0.95f, 0.95f, 0.92f), 0.7f));
-        public static Material BobberRed => Get(ref bobberRed, () => MaterialLibrary.Opaque(new Color(0.95f, 0.1f, 0.06f), 0.7f));
-        public static Material BobberWhite => Get(ref bobberWhite, () => MaterialLibrary.Opaque(new Color(0.95f, 0.95f, 0.93f), 0.7f));
-        public static Material Bucket => Get(ref bucket, () => MaterialLibrary.Opaque(new Color(0.12f, 0.36f, 0.72f), 0.55f));
-        public static Material Cork => Get(ref cork, () => MaterialLibrary.Opaque(new Color(0.6f, 0.45f, 0.28f), 0.15f));
-        public static Material Rod => Get(ref rod, () => MaterialLibrary.Opaque(new Color(0.1f, 0.1f, 0.12f), 0.75f, 0.2f));
-        public static Material Cooler => Get(ref cooler, () => MaterialLibrary.Opaque(new Color(0.88f, 0.88f, 0.85f), 0.45f));
-        public static Material CoolerLid => Get(ref coolerLid, () => MaterialLibrary.Opaque(new Color(0.1f, 0.42f, 0.75f), 0.45f));
-        public static Material Tank => Get(ref tank, () => MaterialLibrary.Opaque(new Color(0.95f, 0.78f, 0.1f), 0.6f, 0.3f));
-        public static Material PadMark => Get(ref padMark, () => MaterialLibrary.Opaque(new Color(0.9f, 0.9f, 0.86f), 0.3f));
+        }
 
-        public static Material Fish(int kind)
+        // ------------------------------------------------------------------ boat
+        public static Material HullTeal => Flat(ref hullTeal, HullTealColor);
+        public static Material HullBottom => Flat(ref hullBottom, HullBottomColor);
+        public static Material HullRust => Flat(ref hullRust, LowPoly.Rust);
+        public static Material HullWhite => Flat(ref hullWhite, LowPoly.White);
+        public static Material Deck => Flat(ref deck, LowPoly.Wood);
+        public static Material DeckB => Flat(ref deckB, LowPoly.Hex("#D5AA7A"));
+        public static Material DeckC => Flat(ref deckC, LowPoly.Hex("#BC8C5F"));
+        public static Material DeckDark => Flat(ref deckDark, LowPoly.WoodDark);
+        public static Material Cabin => Flat(ref cabin, LowPoly.White);
+        public static Material Roof => Flat(ref roof, LowPoly.Roof);
+        public static Material Frame => Flat(ref frame, HullTealColor);
+        public static Material Metal => Flat(ref metal, LowPoly.Metal);
+        public static Material Steel => Flat(ref steel, LowPoly.Hex("#B8C0C8"));
+        /// Kept for older call sites: no shiny chrome in the low-poly look, just light steel.
+        public static Material Chrome => Steel;
+        public static Material Rubber => Flat(ref rubber, RubberColor);
+        public static Material Rope => Flat(ref rope, LowPoly.Hex("#E3C98F"));
+        public static Material Glass => Get(ref glass, () => MaterialLibrary.Transparent(new Color(0.68f, 0.88f, 0.98f, 0.32f), 0.55f, true));
+        public static Material Cushion => Flat(ref cushion, LowPoly.Hex("#D9503F"));
+        public static Material Engine => Flat(ref engine, EngineColor);
+        public static Material EngineGrey => Flat(ref engineGrey, LowPoly.Hex("#8A929B"));
+        public static Material DrumBlue => Flat(ref drumBlue, DrumBlueColor);
+        public static Material DrumOrange => Flat(ref drumOrange, DrumOrangeColor);
+        public static Material LifeOrange => Flat(ref lifeOrange, LowPoly.SuitOrange);
+        public static Material White => Flat(ref white, LowPoly.White);
+        public static Material Ink => Flat(ref ink, LowPoly.Ink);
+        public static Material NavRed => Get(ref navRed, () => MaterialLibrary.Emissive(new Color(0.6f, 0.08f, 0.06f), new Color(1f, 0.1f, 0.06f), 3f));
+        public static Material NavGreen => Get(ref navGreen, () => MaterialLibrary.Emissive(new Color(0.08f, 0.5f, 0.15f), new Color(0.15f, 1f, 0.3f), 3f));
+        public static Material NavWhite => Get(ref navWhite, () => MaterialLibrary.Emissive(new Color(0.9f, 0.9f, 0.85f), new Color(1f, 0.95f, 0.85f), 2.5f));
+        public static Material Gauge => Get(ref gauge, () => MaterialLibrary.Emissive(new Color(0.1f, 0.3f, 0.18f), new Color(0.35f, 1f, 0.5f), 0.6f));
+        public static Material Line => Get(ref line, () => MaterialLibrary.Unlit(new Color(0.96f, 0.96f, 0.92f)));
+        public static Material Cooler => Flat(ref cooler, LowPoly.White);
+        public static Material CoolerLid => Flat(ref coolerLid, DrumBlueColor);
+        public static Material Tank => Flat(ref tank, LowPoly.CoralYellow);
+        public static Material Tackle => Flat(ref tackle, LowPoly.Hex("#4FAE5A"));
+
+        // ------------------------------------------------------------------ crate + parachute
+        public static Material Crate => Flat(ref crate, LowPoly.Wood);
+        public static Material CrateDark => Flat(ref crateDark, LowPoly.WoodDark);
+        public static Material CrateBand => Flat(ref crateBand, LowPoly.SuitOrange);
+        public static Material Strap => Flat(ref strap, LowPoly.Ink);
+        public static Material ChuteRed => Flat(ref chuteRed, LowPoly.Hex("#E5483A"));
+        public static Material ChuteWhite => Flat(ref chuteWhite, LowPoly.White);
+
+        // ------------------------------------------------------------------ helicopter
+        public static Material HeliYellow => Flat(ref heliYellow, HeliYellowColor);
+        public static Material HeliRed => Flat(ref heliRed, HeliRedColor);
+        public static Material HeliGlass => Get(ref heliGlass, () => MaterialLibrary.Transparent(new Color(0.55f, 0.82f, 0.95f, 0.5f), 0.6f, false));
+        public static Material HeliDark => Flat(ref heliDark, EngineColor);
+        public static Material RotorBlur => Get(ref rotorBlur, () => MaterialLibrary.Unlit(new Color(0.2f, 0.21f, 0.24f, 0.14f), true));
+        public static Material Pilot => Flat(ref pilot, LowPoly.Hex("#5D8F4E"));
+        public static Material Helmet => Flat(ref helmet, LowPoly.White);
+
+        // ------------------------------------------------------------------ fishing
+        public static Material BobberRed => Flat(ref bobberRed, LowPoly.Hex("#E8473A"));
+        public static Material BobberWhite => Flat(ref bobberWhite, LowPoly.White);
+        public static Material Bucket => Flat(ref bucket, DrumBlueColor);
+        public static Material BucketWater => Get(ref bucketWater, () => MaterialLibrary.Transparent(new Color(LowPoly.Water.r, LowPoly.Water.g, LowPoly.Water.b, 0.8f), 0.4f));
+        public static Material Cork => Flat(ref cork, LowPoly.Hex("#C8955E"));
+        public static Material Rod => Flat(ref rod, LowPoly.Hex("#2E3140"));
+
+        static readonly string[] FishBack = { "#2F8590", "#4B78B6", "#9C98A8" };
+        static readonly string[] FishFlank = { "#7FC1C2", "#9DB8DA", "#D2B6B4" };
+        static readonly string[] FishBelly = { "#EEF3F0", "#F2F4F6", "#F4DCCF" };
+
+        /// Fish materials per kind (0 mackerel, 1 sardine, 2 sea bream), matching FishingVisuals.FishMesh submeshes:
+        /// 0 back + fins, 1 flanks, 2 belly, 3 eyes.
+        public static Material[] FishMats(int kind)
         {
             kind = Mathf.Clamp(kind, 0, 2);
-            if (fish[kind] == null) fish[kind] = MaterialLibrary.Textured(BoatTextures.Fish(kind), Color.white, 0.78f, 0.25f);
+            if (fish[kind] == null)
+                fish[kind] = new[]
+                {
+                    LowPoly.Mat(LowPoly.Hex(FishBack[kind])), LowPoly.Mat(LowPoly.Hex(FishFlank[kind])),
+                    LowPoly.Mat(LowPoly.Hex(FishBelly[kind])), LowPoly.Mat(LowPoly.Ink)
+                };
             return fish[kind];
         }
 

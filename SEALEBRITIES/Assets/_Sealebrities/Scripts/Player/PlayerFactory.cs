@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
 namespace Sealebrities
@@ -42,20 +43,30 @@ namespace Sealebrities
             cam.nearClipPlane = 0.05f;
             cam.farClipPlane = 4000f;   // the World module's flat ocean ring reaches 6 km; 4 km keeps a crisp horizon
             cam.allowHDR = true;
-            cam.allowMSAA = false;
+            // Faceted low-poly edges want real geometry AA: use the pipeline's MSAA when the URP asset enables it
+            // (same rule as FXPostProcess, so the two modules agree), otherwise fall back to SMAA.
+            var rp = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
+            bool msaa = rp != null && rp.msaaSampleCount > 1;
+            cam.allowMSAA = msaa;
             camGo.AddComponent<AudioListener>();
             var urp = cam.GetUniversalAdditionalCameraData();
             if (urp != null)
             {
                 urp.renderPostProcessing = true;
-                urp.antialiasing = AntialiasingMode.SubpixelMorphologicalAntiAliasing;
+                urp.antialiasing = msaa ? AntialiasingMode.None : AntialiasingMode.SubpixelMorphologicalAntiAliasing;
                 urp.renderShadows = true;
+                // safety net: a single NaN/Inf pixel (e.g. a zero normal on a tiny procedural face) is otherwise
+                // spread by the bloom into a screen-sized white blob
+                urp.stopNaN = true;
             }
 
-            // ---- dive lamp: slightly left/below the eye, converging on the screen center ~9 m ahead
+            // ---- dive lamp: left/below the eye, converging on the screen center ~9 m ahead. The light sits just in
+            // front of the view model (the lamp head reaches ~0.65 m at the end of a swim stroke, the camera rigs stay
+            // right of the cone): a spot light only lights what is in front of it, so the hand lamp and the camera model
+            // are no longer blown out to white by their own light at a few centimeters.
             var lightGo = new GameObject("Flashlight");
             lightGo.transform.SetParent(camGo.transform, false);
-            Vector3 lp = new Vector3(-0.14f, -0.09f, 0.12f);
+            Vector3 lp = new Vector3(-0.13f, -0.085f, 0.72f);
             lightGo.transform.localPosition = lp;
             lightGo.transform.localRotation = Quaternion.LookRotation((new Vector3(0f, 0f, 9f) - lp).normalized, Vector3.up);
             var light = lightGo.AddComponent<Light>();

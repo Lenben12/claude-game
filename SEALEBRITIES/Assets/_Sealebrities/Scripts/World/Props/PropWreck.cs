@@ -5,8 +5,9 @@ using UnityEngine.Rendering;
 
 namespace Sealebrities
 {
-    /// Procedural ~70 m cargo ship "MS CLICKBAIT" lying on the seabed, rolled ~12°, with superstructure, mast, crane,
-    /// open hatch, dark hull breaches (moray homes), spilled containers and debris.
+    /// Chunky low-poly ~70 m cargo ship "MS CLICKBAIT" lying on the seabed, rolled ~12°: faceted chine hull (dark upper,
+    /// rust-red lower), white superstructure, red funnel, yellow crane, hatches, dark hull breaches (moray homes),
+    /// spilled containers and debris. Flat colors only; readable silhouette.
     /// Ship-local frame: x = beam (starboard +), y = up (keel at 0), z = length (bow +z, stern at z = -35).
     public static class PropWreck
     {
@@ -21,24 +22,20 @@ namespace Sealebrities
 
         static float G(float x, float z) => PropGround.H(x, z);
 
-        /// Section polyline from the starboard deck edge, around the bottom, to the port deck edge (13 points).
+        /// Chine section from the starboard deck edge, around the keel, to the port deck edge (7 points).
         static void Section(float z, List<Vector2> outPts)
         {
             outPts.Clear();
             float hb = HalfBeam(z), keel = Keel(z), deck = DeckY(z);
-            float dead = 1.4f * FB(z);
-            float rb = Mathf.Min(1.5f, Mathf.Min(hb * 0.45f, (deck - keel) * 0.35f));
-            float cx = hb - rb, cy = keel + dead + rb;
-            float wl = Mathf.Clamp(3.4f, cy + 0.1f, deck - 0.1f);
-            var star = new List<Vector2> { new Vector2(hb, deck), new Vector2(hb, wl) };
-            for (int i = 0; i <= 3; i++)
-            {
-                float th = -i * 30f * Mathf.Deg2Rad;
-                star.Add(new Vector2(cx + rb * Mathf.Cos(th), cy + rb * Mathf.Sin(th)));
-            }
-            outPts.AddRange(star);
+            float wl = Mathf.Lerp(keel, deck, 0.5f);
+            float bilge = Mathf.Min(wl - 0.2f, keel + (wl - keel) * 0.3f + 1.2f * FB(z));
+            outPts.Add(new Vector2(hb, deck));
+            outPts.Add(new Vector2(hb, wl));
+            outPts.Add(new Vector2(hb * 0.74f, bilge));
             outPts.Add(new Vector2(0f, keel));
-            for (int i = star.Count - 1; i >= 0; i--) outPts.Add(new Vector2(-star[i].x, star[i].y));
+            outPts.Add(new Vector2(-hb * 0.74f, bilge));
+            outPts.Add(new Vector2(-hb, wl));
+            outPts.Add(new Vector2(-hb, deck));
         }
 
         public static IEnumerator Build(Transform decor, DiveSite site)
@@ -74,28 +71,26 @@ namespace Sealebrities
 
             var colB = new PropMeshBuilder { M = S };
 
-            // ---------------------------------------------------------------- hull loft
-            const int NS = 40;
+            // ---------------------------------------------------------------- hull loft (14 sections, 7-point chine)
+            const int NS = 14;
             var secs = new List<Vector2>[NS];
             var zs = new float[NS];
             for (int s = 0; s < NS; s++)
             {
-                zs[s] = Stern + L * s / (NS - 1);
-                secs[s] = new List<Vector2>(13);
+                float t = (float)s / (NS - 1);
+                zs[s] = Stern + L * t;
+                secs[s] = new List<Vector2>(7);
                 Section(zs[s], secs[s]);
             }
             var up = SB(PropMats.HullUpper);
             var lo = SB(PropMats.HullLower);
-            int upV = up.VertexCount, upT = up.IndexCount, loV = lo.VertexCount, loT = lo.IndexCount;
             for (int s = 0; s < NS - 1; s++)
             {
                 var A = secs[s];
                 var Bs = secs[s + 1];
-                float arcA = 0f, arcB = 0f;
                 float mid = (DeckY(zs[s]) + Keel(zs[s])) * 0.5f;
                 for (int k = 0; k < A.Count - 1; k++)
                 {
-                    float la = (A[k + 1] - A[k]).magnitude, lb = (Bs[k + 1] - Bs[k]).magnitude;
                     Vector3 p00 = new Vector3(A[k].x, A[k].y, zs[s]);
                     Vector3 p01 = new Vector3(A[k + 1].x, A[k + 1].y, zs[s]);
                     Vector3 p10 = new Vector3(Bs[k].x, Bs[k].y, zs[s + 1]);
@@ -103,29 +98,22 @@ namespace Sealebrities
                     Vector3 outward = new Vector3(p00.x + p01.x, (p00.y + p01.y) * 0.5f - mid, 0f);
                     if (outward.sqrMagnitude < 0.01f) outward = Vector3.down;
                     bool upper = k == 0 || k == A.Count - 2;
-                    (upper ? up : lo).QuadAuto(p00, p10, p11, p01,
-                        new Vector2(zs[s], arcA), new Vector2(zs[s + 1], arcB), new Vector2(zs[s + 1], arcB + lb), new Vector2(zs[s], arcA + la), outward);
-                    if (s % 3 == 0 || s == NS - 2) colB.QuadAuto(p00, p10, p11, p01, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, outward);
-                    arcA += la; arcB += lb;
+                    (upper ? up : lo).QuadAuto(p00, p10, p11, p01, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, outward);
+                    colB.QuadAuto(p00, p10, p11, p01, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, outward);
                 }
             }
-            // collider loft uses every 3rd section, close the gaps with the remaining strips
+            // a white band along the sheer line
+            var band = SB(PropMats.Superstructure);
             for (int s = 0; s < NS - 1; s++)
             {
-                if (s % 3 == 0 || s == NS - 2) continue;
-                var A = secs[s];
-                var Bs = secs[s + 1];
-                float mid = (DeckY(zs[s]) + Keel(zs[s])) * 0.5f;
-                for (int k = 0; k < A.Count - 1; k++)
+                for (int side = -1; side <= 1; side += 2)
                 {
-                    Vector3 outward = new Vector3(A[k].x + A[k + 1].x, (A[k].y + A[k + 1].y) * 0.5f - mid, 0f);
-                    if (outward.sqrMagnitude < 0.01f) outward = Vector3.down;
-                    colB.QuadAuto(new Vector3(A[k].x, A[k].y, zs[s]), new Vector3(Bs[k].x, Bs[k].y, zs[s + 1]), new Vector3(Bs[k + 1].x, Bs[k + 1].y, zs[s + 1]), new Vector3(A[k + 1].x, A[k + 1].y, zs[s]),
-                        Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, outward);
+                    float hb0 = HalfBeam(zs[s]) * side, hb1 = HalfBeam(zs[s + 1]) * side;
+                    Vector3 a0 = new Vector3(hb0 + side * 0.03f, DeckY(zs[s]) - 0.15f, zs[s]), a1 = new Vector3(hb1 + side * 0.03f, DeckY(zs[s + 1]) - 0.15f, zs[s + 1]);
+                    Vector3 b0 = a0 - Vector3.up * 0.45f, b1 = a1 - Vector3.up * 0.45f;
+                    band.QuadAuto(a0, a1, b1, b0, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, new Vector3(side, 0f, 0f));
                 }
             }
-            up.SmoothNormals(upV, upT);
-            lo.SmoothNormals(loV, loT);
 
             // transom and bow caps
             Cap(up, secs[0], zs[0], Vector3.back);
@@ -133,24 +121,24 @@ namespace Sealebrities
             Cap(colB, secs[0], zs[0], Vector3.back);
             Cap(colB, secs[NS - 1], zs[NS - 1], Vector3.forward);
 
-            // deck
+            // deck (flat facets)
             var deck = SB(PropMats.Deck);
             for (int s = 0; s < NS - 1; s++)
             {
-                for (int k = 0; k < 4; k++)
+                for (int k = 0; k < 2; k++)
                 {
-                    Vector3 a0 = DeckPoint(zs[s], k / 4f), a1 = DeckPoint(zs[s], (k + 1) / 4f);
-                    Vector3 b0 = DeckPoint(zs[s + 1], k / 4f), b1 = DeckPoint(zs[s + 1], (k + 1) / 4f);
-                    deck.QuadAuto(a0, b0, b1, a1, new Vector2(a0.x, a0.z), new Vector2(b0.x, b0.z), new Vector2(b1.x, b1.z), new Vector2(a1.x, a1.z), Vector3.up);
+                    Vector3 a0 = DeckPoint(zs[s], k / 2f), a1 = DeckPoint(zs[s], (k + 1) / 2f);
+                    Vector3 b0 = DeckPoint(zs[s + 1], k / 2f), b1 = DeckPoint(zs[s + 1], (k + 1) / 2f);
+                    deck.QuadAuto(a0, b0, b1, a1, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, Vector3.up);
                     colB.QuadAuto(a0, b0, b1, a1, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, Vector3.up);
                 }
             }
             if (PropRun.Due()) yield return null;
 
-            // name on the stern
+            // name on the stern (crisp block texture)
             float ny = DeckY(Stern) - 1.35f;
-            float nz = Stern - 0.04f;
-            SB(PropMats.NamePlate).QuadAuto(new Vector3(-2.7f, ny - 0.36f, nz), new Vector3(-2.7f, ny + 0.36f, nz), new Vector3(2.7f, ny + 0.36f, nz), new Vector3(2.7f, ny - 0.36f, nz),
+            float nz = Stern - 0.06f;
+            SB(PropMats.NamePlate).QuadAuto(new Vector3(-2.7f, ny - 0.39f, nz), new Vector3(-2.7f, ny + 0.39f, nz), new Vector3(2.7f, ny + 0.39f, nz), new Vector3(2.7f, ny - 0.39f, nz),
                 new Vector2(0f, 0f), new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(1f, 0f), Vector3.back);
 
             // ---------------------------------------------------------------- superstructure
@@ -159,57 +147,59 @@ namespace Sealebrities
             BoxCol(white, colB, new Vector3(0f, 7f + 1.25f, -27.75f), new Vector3(9.4f, 3.1f, 11.5f));
             BoxCol(white, colB, new Vector3(0f, 9.8f + 1.3f, -27.75f), new Vector3(8.4f, 2.6f, 9.5f));
             BoxCol(white, colB, new Vector3(0f, 12.4f + 1.2f, -27.5f), new Vector3(11.6f, 2.4f, 6f));
-            white.Box(new Vector3(0f, 14.85f, -27.5f), new Vector3(12f, 0.1f, 6.4f));
-            for (float x = -3.6f; x <= 3.61f; x += 1.8f)
+            white.Box(new Vector3(0f, 14.9f, -27.5f), new Vector3(12f, 0.2f, 6.4f));
+            for (float x = -3.6f; x <= 3.61f; x += 2.4f)
             {
-                dark.Box(new Vector3(x, 8.3f, -22f + 0.02f), new Vector3(0.9f, 0.7f, 0.06f));
-                dark.Box(new Vector3(x, 11.2f, -23f + 0.02f), new Vector3(0.9f, 0.7f, 0.06f));
+                dark.Box(new Vector3(x, 8.3f, -22f + 0.02f), new Vector3(1.1f, 0.8f, 0.08f));
+                dark.Box(new Vector3(x, 11.2f, -23f + 0.02f), new Vector3(1.1f, 0.8f, 0.08f));
             }
-            for (float x = -4.8f; x <= 4.81f; x += 1.2f) dark.Box(new Vector3(x, 13.7f, -24.5f + 0.02f), new Vector3(1.0f, 0.95f, 0.06f));
-            for (float z = -32f; z <= -23.5f; z += 1.7f)
+            for (float x = -4.8f; x <= 4.81f; x += 1.6f) dark.Box(new Vector3(x, 13.7f, -24.5f + 0.02f), new Vector3(1.2f, 1.0f, 0.08f));
+            for (float z = -31.5f; z <= -23.5f; z += 2.6f)
             {
                 for (int sx = -1; sx <= 1; sx += 2)
                 {
-                    dark.Box(new Vector3(sx * 4.71f, 8.4f, z), new Vector3(0.06f, 0.5f, 0.5f));
-                    dark.Box(new Vector3(sx * 4.21f, 11.2f, z), new Vector3(0.06f, 0.5f, 0.5f));
+                    dark.Box(new Vector3(sx * 4.71f, 8.4f, z), new Vector3(0.08f, 0.7f, 0.7f));
+                    dark.Box(new Vector3(sx * 4.21f, 11.2f, z), new Vector3(0.08f, 0.7f, 0.7f));
                 }
             }
-            // funnel and bridge mast
-            SB(PropMats.Funnel).Cylinder(new Vector3(0f, 12.4f, -31.6f), Quaternion.Euler(-6f, 0f, 0f), 1.35f, 1.15f, 5f, 14, false, false, 6f, 1f);
-            SB(PropMats.HoleDark).Cylinder(new Vector3(0f, 12.4f, -31.6f) + Quaternion.Euler(-6f, 0f, 0f) * new Vector3(0f, 4.5f, 0f), Quaternion.Euler(-6f, 0f, 0f), 1.17f, 1.16f, 0.55f, 14, false, true);
+            // funnel (red with a dark top band) and bridge mast
+            Quaternion fr = Quaternion.Euler(-6f, 0f, 0f);
+            Vector3 fb = new Vector3(0f, 12.4f, -31.6f);
+            SB(PropMats.Funnel).Cylinder(fb, fr, 1.4f, 1.2f, 4.2f, 8, false, false, 1f, 1f, 0f, false, 22.5f);
+            SB(PropMats.HoleDark).Cylinder(fb + fr * new Vector3(0f, 4.2f, 0f), fr, 1.2f, 1.15f, 0.8f, 8, false, true, 1f, 1f, 0f, false, 22.5f);
             var rust = SB(PropMats.Rust);
-            rust.Rod(new Vector3(0f, 14.9f, -27f), new Vector3(0f, 19.2f, -27f), 0.12f, 0.08f, 6);
-            rust.Box(new Vector3(0f, 18.6f, -27f), new Vector3(2.6f, 0.12f, 0.25f));
+            rust.Rod(new Vector3(0f, 14.9f, -27f), new Vector3(0f, 19.2f, -27f), 0.16f, 0.1f, 6);
+            rust.Box(new Vector3(0f, 18.6f, -27f), new Vector3(2.6f, 0.16f, 0.3f));
 
             // foremast with stays
             float fz = 25f, fdeck = DeckY(fz);
-            rust.Rod(new Vector3(0f, fdeck, fz), new Vector3(0f, fdeck + 12f, fz), 0.26f, 0.15f, 8, true);
-            rust.Rod(new Vector3(-3.2f, fdeck + 9f, fz), new Vector3(3.2f, fdeck + 9f, fz), 0.1f, 0.1f, 6, true);
-            rust.Rod(new Vector3(0f, fdeck + 11.8f, fz), new Vector3(0f, DeckY(33f) + 0.2f, 33f), 0.03f, 0.03f, 4);
-            rust.Rod(new Vector3(0f, fdeck + 11.5f, fz), new Vector3(HalfBeam(20f) - 0.2f, DeckY(20f), 20f), 0.03f, 0.03f, 4);
-            rust.Rod(new Vector3(0f, fdeck + 11.5f, fz), new Vector3(-HalfBeam(20f) + 0.2f, DeckY(20f), 20f), 0.03f, 0.03f, 4);
+            rust.Rod(new Vector3(0f, fdeck, fz), new Vector3(0f, fdeck + 12f, fz), 0.3f, 0.18f, 6, true);
+            rust.Rod(new Vector3(-3.2f, fdeck + 9f, fz), new Vector3(3.2f, fdeck + 9f, fz), 0.12f, 0.12f, 4, true);
+            rust.Rod(new Vector3(0f, fdeck + 11.8f, fz), new Vector3(0f, DeckY(33f) + 0.2f, 33f), 0.05f, 0.05f, 3);
+            rust.Rod(new Vector3(0f, fdeck + 11.5f, fz), new Vector3(HalfBeam(20f) - 0.2f, DeckY(20f), 20f), 0.05f, 0.05f, 3);
+            rust.Rod(new Vector3(0f, fdeck + 11.5f, fz), new Vector3(-HalfBeam(20f) + 0.2f, DeckY(20f), 20f), 0.05f, 0.05f, 3);
 
             // crane
             var crane = SB(PropMats.Crane);
             float cz = 6f, cdeck = DeckY(cz);
-            crane.Cylinder(new Vector3(2.4f, cdeck - 0.2f, cz), Quaternion.identity, 0.8f, 0.7f, 2.8f, 12, false, true, 4.6f, 1f);
+            crane.Cylinder(new Vector3(2.4f, cdeck - 0.2f, cz), Quaternion.identity, 0.85f, 0.75f, 2.8f, 8, false, true);
             BoxCol(crane, colB, new Vector3(2.4f, cdeck + 3.5f, cz), new Vector3(2f, 1.8f, 2.2f));
             Vector3 boomA = new Vector3(2.0f, cdeck + 3.7f, cz + 0.6f);
             Vector3 boomDir = new Vector3(-0.35f, 0.5f, 0.79f).normalized;
             Vector3 boomB = boomA + boomDir * 15f;
-            crane.Rod(boomA, boomB, 0.3f, 0.18f, 8, true, 1.5f, 1f);
-            SB(PropMats.Rust).Rod(boomB, boomB - Vector3.up * 6.5f, 0.03f, 0.03f, 4);
-            SB(PropMats.Rust).Torus(boomB - Vector3.up * 6.8f, Quaternion.FromToRotation(Vector3.up, Vector3.right), 0.28f, 0.07f, 10, 5);
+            crane.Rod(boomA, boomB, 0.34f, 0.2f, 6, true);
+            rust.Rod(boomB, boomB - Vector3.up * 6.5f, 0.05f, 0.05f, 3);
+            rust.Torus(boomB - Vector3.up * 6.8f, Quaternion.FromToRotation(Vector3.up, Vector3.right), 0.3f, 0.09f, 6, 3);
 
             // cargo hatches (one open: dark hole)
             float[] hz = { 16f, 1f, -12f };
             for (int i = 0; i < hz.Length; i++)
             {
                 float hdk = DeckY(hz[i]);
-                Hatch(SB(PropMats.Rust), colB, new Vector3(0f, hdk, hz[i]), 7f, 8f, i != 1);
+                Hatch(rust, colB, new Vector3(0f, hdk, hz[i]), 7f, 8f, i != 1);
                 if (i == 1)
                 {
-                    SB(PropMats.HoleDark).Box(new Vector3(0f, hdk + 0.06f, hz[i]), new Vector3(6.6f, 0.02f, 7.6f));
+                    dark.Box(new Vector3(0f, hdk + 0.06f, hz[i]), new Vector3(6.6f, 0.02f, 7.6f));
                     AddHole(S, shipRot, new Vector3(0f, hdk + 0.3f, hz[i]), Vector3.up);
                 }
             }
@@ -222,42 +212,43 @@ namespace Sealebrities
                 for (int sx = -1; sx <= 1; sx += 2)
                 {
                     Vector3 bp = DeckPoint(z, sx > 0 ? 0.08f : 0.92f);
-                    dm.Cylinder(bp, Quaternion.identity, 0.18f, 0.18f, 0.45f, 8, false, true);
+                    dm.Cylinder(bp, Quaternion.identity, 0.2f, 0.2f, 0.45f, 6, false, true);
                 }
             }
             for (int i = 0; i < 4; i++)
             {
                 Vector3 vp = DeckPoint(-19f + i * 11f, i % 2 == 0 ? 0.2f : 0.8f);
-                dm.Cylinder(vp, Quaternion.identity, 0.2f, 0.2f, 1.2f, 8);
-                dm.Cylinder(vp + Vector3.up * 1.2f, Quaternion.Euler(0f, 0f, 90f), 0.24f, 0.24f, 0.1f, 8, true, true);
+                SB(PropMats.Superstructure).Cylinder(vp, Quaternion.identity, 0.24f, 0.24f, 1.2f, 6);
+                dm.Cylinder(vp + Vector3.up * 1.2f, Quaternion.Euler(0f, 0f, 90f), 0.3f, 0.3f, 0.12f, 6, true, true);
             }
             Vector3 wp = DeckPoint(30f, 0.5f);
-            dm.Cylinder(wp + new Vector3(-1.2f, 0.5f, 0f), Quaternion.Euler(0f, 0f, -90f), 0.45f, 0.45f, 2.4f, 12, true, true);
+            dm.Cylinder(wp + new Vector3(-1.2f, 0.5f, 0f), Quaternion.Euler(0f, 0f, -90f), 0.5f, 0.5f, 2.4f, 8, true, true);
 
             // railings along both deck edges (some posts missing)
             for (int sx = -1; sx <= 1; sx += 2)
             {
-                var rail = new List<Vector3>();
-                var rr = new List<float>();
-                for (float z = -20f; z <= 31f; z += 2.2f)
+                Vector3 prev = Vector3.zero;
+                bool has = false;
+                for (float z = -20f; z <= 31f; z += 3.4f)
                 {
                     Vector3 e = DeckPoint(z, sx > 0 ? 0.01f : 0.99f) - new Vector3(sx * 0.12f, 0f, 0f);
-                    if (rng.NextDouble() > 0.15) rust.Rod(e, e + Vector3.up * 1.1f, 0.035f, 0.035f, 4);
-                    rail.Add(e + Vector3.up * 1.1f);
-                    rr.Add(0.04f);
+                    Vector3 top = e + Vector3.up * 1.1f;
+                    if (rng.NextDouble() > 0.15) rust.Box(e + Vector3.up * 0.55f, new Vector3(0.08f, 1.1f, 0.08f));
+                    if (has && rng.NextDouble() > 0.08) rust.Beam(prev, top, 0.08f, 0.08f);
+                    prev = top;
+                    has = true;
                 }
-                rust.Tube(rail, rr, 4, 1f, 1f);
             }
 
             // propeller and rudder
             Vector3 hub = new Vector3(0f, 2.3f, Stern - 0.4f);
-            rust.Blob(hub, new Vector3(0.45f, 0.45f, 0.7f), Quaternion.identity, 3, null);
+            rust.Ico(hub, new Vector3(0.5f, 0.5f, 0.75f), Quaternion.identity, 0);
             for (int i = 0; i < 4; i++)
             {
                 Quaternion q = Quaternion.Euler(0f, 0f, i * 90f + 20f) * Quaternion.Euler(0f, 25f, 0f);
-                rust.Box(hub + q * new Vector3(0f, 1.0f, 0f), new Vector3(0.7f, 1.6f, 0.08f), q);
+                rust.Box(hub + q * new Vector3(0f, 1.0f, 0f), new Vector3(0.75f, 1.6f, 0.1f), q);
             }
-            BoxCol(rust, colB, new Vector3(0f, 3.4f, Stern - 1.6f), new Vector3(0.35f, 3.6f, 2.2f));
+            BoxCol(rust, colB, new Vector3(0f, 3.4f, Stern - 1.6f), new Vector3(0.4f, 3.6f, 2.2f));
 
             // ---------------------------------------------------------------- hull breaches (moray homes)
             float[] holeZ = { -12f, 3f, 14f, -5f, 9f, -24f };
@@ -266,8 +257,8 @@ namespace Sealebrities
             for (int i = 0; i < holeZ.Length; i++)
             {
                 float hbz = HalfBeam(holeZ[i]);
-                Vector3 hc = new Vector3(holeSide[i] * (hbz + 0.03f), holeY[i], holeZ[i]);
-                Breach(SB(PropMats.HoleDark), SB(PropMats.Rust), hc, holeSide[i], PropUtil.Range(rng, 0.6f, 0.95f), rng);
+                Vector3 hc = new Vector3(holeSide[i] * (hbz + 0.05f), holeY[i], holeZ[i]);
+                Breach(dark, rust, hc, holeSide[i], PropUtil.Range(rng, 0.65f, 0.95f), rng);
                 AddHole(S, shipRot, hc + new Vector3(holeSide[i] * 0.4f, 0f, 0f), new Vector3(holeSide[i], 0f, 0f));
             }
 
@@ -275,7 +266,7 @@ namespace Sealebrities
             PropFX.Bubbles(decor, S.MultiplyPoint3x4(new Vector3(-2f, 14.9f, -26f)), 1.5f, 0.3f);
 
             // collider of hull + deck + superstructure
-            var colMesh = colB.ToMesh("WreckCollider");
+            var colMesh = colB.ToMesh("WreckCollider", false);
             PropCol.Mesh(cols, colMesh, Vector3.zero, Quaternion.identity, Vector3.one, "WreckCol");
             if (PropRun.Due()) yield return null;
 
@@ -297,13 +288,12 @@ namespace Sealebrities
             {
                 bool longBox = rng.NextDouble() < 0.45;
                 Vector3 size = new Vector3(2.44f, 2.6f, longBox ? 12.2f : 6.06f);
-                Vector3 local;
                 Quaternion rot;
                 if (i < 2)
                 {
                     // still on deck (rolled with the ship), turned across the beam between hatches and mast
                     float z = i == 0 ? 22f : -5.5f;
-                    local = DeckPoint(z, 0.5f) + new Vector3(0f, 1.3f, 0f);
+                    Vector3 local = DeckPoint(z, 0.5f) + new Vector3(0f, 1.3f, 0f);
                     Vector3 wpos = S.MultiplyPoint3x4(local);
                     rot = shipRot * Quaternion.Euler(0f, 90f + PropUtil.Range(rng, -6f, 6f), 0f);
                     Container(batch, cols, wpos, rot, new Vector3(2.44f, 2.6f, 6.06f), i, rng);
@@ -326,14 +316,14 @@ namespace Sealebrities
                 dp.y = G(dp.x, dp.z);
                 Material dmat = i % 3 == 0 ? PropMats.DrumRed : i % 3 == 1 ? PropMats.DrumBlue : PropMats.Rust;
                 Quaternion q = Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), rng.NextDouble() < 0.6 ? 90f : 0f);
-                debris.B(dmat, dp).Cylinder(dp + q * new Vector3(0f, -0.44f, 0f) + Vector3.up * 0.25f, q, 0.29f, 0.29f, 0.88f, 12, true, true, 1.8f, 1f);
+                debris.B(dmat, dp).Cylinder(dp + q * new Vector3(0f, -0.44f, 0f) + Vector3.up * 0.25f, q, 0.29f, 0.29f, 0.88f, 8, true, true);
             }
             for (int i = 0; i < 7; i++)
             {
                 Vector3 dp = pos + yawRot * new Vector3(PropUtil.Range(rng, -16f, 18f), 0f, PropUtil.Range(rng, -38f, 38f));
                 dp.y = G(dp.x, dp.z) + 0.05f;
                 Quaternion q = Quaternion.Euler(PropUtil.Range(rng, -15f, 15f), PropUtil.Range(rng, 0f, 360f), PropUtil.Range(rng, -15f, 15f));
-                debris.B(PropMats.Rust, dp).Box(dp, new Vector3(PropUtil.Range(rng, 1f, 3f), 0.05f, PropUtil.Range(rng, 1f, 2.5f)), q);
+                debris.B(PropMats.Rust, dp).Box(dp, new Vector3(PropUtil.Range(rng, 1f, 3f), 0.08f, PropUtil.Range(rng, 1f, 2.5f)), q);
             }
             // half buried orange lifeboat
             Vector3 lifeboat = pos + yawRot * new Vector3(-14f, 0f, -18f);
@@ -367,8 +357,8 @@ namespace Sealebrities
 
         static void BoxCol(PropMeshBuilder vis, PropMeshBuilder col, Vector3 c, Vector3 size)
         {
-            vis.Box(c, size, Quaternion.identity, 1f);
-            col.Box(c, size, Quaternion.identity, 1f);
+            vis.Box(c, size, Quaternion.identity);
+            col.Box(c, size, Quaternion.identity);
         }
 
         static void Cap(PropMeshBuilder b, List<Vector2> sec, float z, Vector3 outward)
@@ -379,29 +369,29 @@ namespace Sealebrities
             for (int i = 0; i < sec.Count; i++)
             {
                 Vector2 a = sec[i], bb = sec[(i + 1) % sec.Count];
-                b.TriAuto(cc, new Vector3(a.x, a.y, z), new Vector3(bb.x, bb.y, z), new Vector2(cc.x, cc.y), new Vector2(a.x, a.y), new Vector2(bb.x, bb.y), outward);
+                b.Face3(cc, new Vector3(a.x, a.y, z), new Vector3(bb.x, bb.y, z), outward);
             }
         }
 
         static void Hatch(PropMeshBuilder b, PropMeshBuilder col, Vector3 c, float w, float len, bool closed)
         {
-            const float h = 0.9f, t = 0.25f;
+            const float h = 0.9f, t = 0.3f;
             BoxCol(b, col, c + new Vector3(w * 0.5f, h * 0.5f, 0f), new Vector3(t, h, len));
             BoxCol(b, col, c + new Vector3(-w * 0.5f, h * 0.5f, 0f), new Vector3(t, h, len));
             BoxCol(b, col, c + new Vector3(0f, h * 0.5f, len * 0.5f), new Vector3(w, h, t));
             BoxCol(b, col, c + new Vector3(0f, h * 0.5f, -len * 0.5f), new Vector3(w, h, t));
             if (closed)
             {
-                for (int i = 0; i < 4; i++)
-                    b.Box(c + new Vector3(0f, h + 0.1f, -len * 0.375f + i * len * 0.25f), new Vector3(w + 0.1f, 0.2f, len * 0.24f), Quaternion.Euler(i == 2 ? 6f : 0f, 0f, 0f));
+                for (int i = 0; i < 3; i++)
+                    b.Box(c + new Vector3(0f, h + 0.12f, -len / 3f + i * len / 3f), new Vector3(w + 0.1f, 0.24f, len / 3f - 0.1f), Quaternion.Euler(i == 2 ? 6f : 0f, 0f, 0f));
                 col.Box(c + new Vector3(0f, h + 0.1f, 0f), new Vector3(w, 0.2f, len));
             }
         }
 
-        /// Dark jagged opening on the hull side (x = const plane) with bent plate shards around it.
+        /// Dark jagged opening on the hull side (x = const plane) with a few bent plate shards around it.
         static void Breach(PropMeshBuilder darkB, PropMeshBuilder rustB, Vector3 c, int side, float radius, System.Random rng)
         {
-            const int n = 11;
+            const int n = 7;
             var ring = new Vector3[n];
             for (int i = 0; i < n; i++)
             {
@@ -410,14 +400,14 @@ namespace Sealebrities
                 ring[i] = c + new Vector3(0f, Mathf.Sin(a) * r * 1.1f, Mathf.Cos(a) * r * 1.3f);
             }
             Vector3 outward = new Vector3(side, 0f, 0f);
-            for (int i = 0; i < n; i++)
-                darkB.TriAuto(c, ring[i], ring[(i + 1) % n], Vector2.zero, Vector2.zero, Vector2.zero, outward);
-            for (int i = 0; i < 7; i++)
+            for (int i = 0; i < n; i++) darkB.Face3(c, ring[i], ring[(i + 1) % n], outward);
+            for (int i = 0; i < 4; i++)
             {
                 Vector3 e = ring[rng.Next(n)];
-                Vector3 toC = (c - e).normalized;
+                Vector3 toC = (c - e);
+                toC = toC.sqrMagnitude > 1e-6f ? toC.normalized : Vector3.up;
                 Quaternion q = Quaternion.LookRotation(toC, outward) * Quaternion.Euler(PropUtil.Range(rng, 25f, 60f), 0f, 0f);
-                rustB.Box(e + toC * 0.12f + outward * 0.05f, new Vector3(PropUtil.Range(rng, 0.25f, 0.5f), 0.03f, PropUtil.Range(rng, 0.25f, 0.45f)), q);
+                rustB.Box(e + toC * 0.12f + outward * 0.06f, new Vector3(PropUtil.Range(rng, 0.3f, 0.55f), 0.05f, PropUtil.Range(rng, 0.3f, 0.5f)), q);
             }
         }
 
@@ -427,34 +417,40 @@ namespace Sealebrities
             PropInfo.WreckHoleNormals.Add(rot * localNormal);
         }
 
+        /// Flat-colored container: body, darker end walls with door bars, a few ribs along the sides.
         static void Container(PropBatch batch, Transform cols, Vector3 c, Quaternion r, Vector3 size, int index, System.Random rng)
         {
-            Material mat = PropMats.Container(index + rng.Next(PropMats.ContainerCount));
-            var b = batch.B(mat);
+            int ci = index + rng.Next(PropMats.ContainerCount);
+            var b = batch.B(PropMats.Container(ci));
             b.M = Matrix4x4.identity;
-            b.Box(c, size, r, 1f, new Vector2(PropUtil.Range(rng, 0f, 3f), 0f));
-            var dm = batch.B(PropMats.DarkMetal);
-            dm.M = Matrix4x4.identity;
+            b.Box(c, size, r);
+            var e = batch.B(PropMats.ContainerEnd(ci));
+            e.M = Matrix4x4.identity;
             Vector3 h = size * 0.5f;
-            for (int sx = -1; sx <= 1; sx += 2)
-                for (int sy = -1; sy <= 1; sy += 2)
-                    for (int sz = -1; sz <= 1; sz += 2)
-                        dm.Box(c + r * new Vector3(sx * (h.x - 0.08f), sy * (h.y - 0.08f), sz * (h.z - 0.08f)), new Vector3(0.2f, 0.2f, 0.2f), r);
+            for (int sz = -1; sz <= 1; sz += 2)
+                e.Box(c + r * new Vector3(0f, 0f, sz * (h.z - 0.06f)), new Vector3(size.x + 0.08f, size.y + 0.08f, 0.14f), r);
+            int ribs = size.z > 8f ? 5 : 3;
+            for (int i = 1; i <= ribs; i++)
+            {
+                float z = -h.z + i * size.z / (ribs + 1);
+                e.Box(c + r * new Vector3(0f, 0f, z), new Vector3(size.x + 0.05f, size.y + 0.05f, 0.1f), r);
+            }
             bool open = index == 5;
-            Vector3 door = c + r * new Vector3(0f, 0f, h.z + 0.012f);
+            Vector3 door = c + r * new Vector3(0f, 0f, h.z + 0.02f);
             if (open)
             {
                 var d = batch.B(PropMats.HoleDark);
                 d.M = Matrix4x4.identity;
-                d.Box(door, new Vector3(size.x - 0.25f, size.y - 0.25f, 0.01f), r);
+                d.Box(door + r * new Vector3(0f, 0f, 0.01f), new Vector3(size.x - 0.3f, size.y - 0.3f, 0.02f), r);
                 PropInfo.WreckHoles.Add(door + r * Vector3.forward * 0.4f);
                 PropInfo.WreckHoleNormals.Add(r * Vector3.forward);
             }
             else
             {
-                for (int i = -2; i <= 2; i++)
-                    if (i != 0) dm.Box(door + r * new Vector3(i * 0.48f, 0f, 0.03f), new Vector3(0.04f, size.y - 0.3f, 0.04f), r);
-                dm.Box(door, new Vector3(0.02f, size.y - 0.2f, 0.02f), r);
+                var dm = batch.B(PropMats.DarkMetal);
+                dm.M = Matrix4x4.identity;
+                for (int i = -1; i <= 1; i += 2)
+                    dm.Box(door + r * new Vector3(i * 0.5f, 0f, 0.04f), new Vector3(0.06f, size.y - 0.4f, 0.06f), r);
             }
             PropCol.Box(cols, c, size, r, "Container");
         }

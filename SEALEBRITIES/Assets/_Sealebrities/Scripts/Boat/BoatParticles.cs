@@ -4,6 +4,7 @@ using UnityEngine.Rendering;
 namespace Sealebrities
 {
     /// Particle system factory for the Boat module (engine smoke, bow spray, wake foam, splashes, puffs, rotor downwash).
+    /// Sprites are crisp flat cartoon discs/blobs (BoatTextures) to match the low-poly look.
     public static class BoatParticles
     {
         public static ParticleSystem Create(string name, Transform parent, Vector3 localPos, Quaternion localRot, Material mat, bool worldSpace)
@@ -53,7 +54,8 @@ namespace Sealebrities
             main.startSpeed = new ParticleSystem.MinMaxCurve(0.6f, 1.4f);
             main.startSize = new ParticleSystem.MinMaxCurve(0.25f, 0.45f);
             main.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
-            main.startColor = new ParticleSystem.MinMaxGradient(new Color(0.42f, 0.42f, 0.44f, 0.55f), new Color(0.3f, 0.3f, 0.32f, 0.7f));
+            // light cartoon puffs (round flat sprites) rather than realistic dark exhaust
+            main.startColor = new ParticleSystem.MinMaxGradient(new Color(0.78f, 0.79f, 0.82f, 0.6f), new Color(0.62f, 0.63f, 0.67f, 0.7f));
             main.gravityModifier = -0.04f;
             main.maxParticles = 160;
             var sh = ps.shape;

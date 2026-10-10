@@ -3,86 +3,137 @@ using UnityEngine;
 
 namespace Sealebrities
 {
-    /// Procedural rock geometry (faceted noisy cube-spheres).
+    /// Low-poly rocks: jittered icospheres with a few flat cut planes (chunky facets), flattened at the bottom.
     public static class PropRocks
     {
-        /// Adds a rock to the builder. pos = rock center, scale = half extents in meters.
-        /// texScale multiplies the UV density (UVs are in meters, so world-tiled rock materials keep their texel size).
-        public static void Build(PropMeshBuilder b, Vector3 pos, Vector3 scale, Quaternion rot, int seed, int res = 7, float rough = 0.18f, float texScale = 1f)
+        static readonly float[] Radii = new float[200];
+        static readonly Vector3[] Pn = new Vector3[8];
+        static readonly float[] Po = new float[8];
+
+        /// Fills the shared radius table for an icosphere of the given detail (random jitter, cut planes, flat bottom).
+        /// The returned array is reused: pass it to PropMeshBuilder.Ico immediately.
+        public static float[] Jitter(System.Random rng, int detail, float rough, int cuts, float flatBottom = 0.6f)
         {
-            var rng = new System.Random(seed);
-            int planes = 5 + rng.Next(4);
-            var pn = new Vector3[planes];
-            var po = new float[planes];
-            for (int i = 0; i < planes; i++)
+            var dirs = PropIco.Dirs(detail);
+            cuts = Mathf.Clamp(cuts, 0, Pn.Length);
+            for (int i = 0; i < cuts; i++)
             {
-                pn[i] = new Vector3(PropUtil.Range(rng, -1f, 1f), PropUtil.Range(rng, -0.4f, 1f), PropUtil.Range(rng, -1f, 1f)).normalized;
-                po[i] = PropUtil.Range(rng, 0.72f, 0.95f);
+                Vector3 n = new Vector3(PropUtil.Range(rng, -1f, 1f), PropUtil.Range(rng, -0.25f, 1f), PropUtil.Range(rng, -1f, 1f));
+                Pn[i] = n.sqrMagnitude > 1e-4f ? n.normalized : Vector3.up;
+                Po[i] = PropUtil.Range(rng, 0.7f, 0.9f);
             }
-            Vector3 off = new Vector3(PropUtil.Range(rng, 0f, 90f), PropUtil.Range(rng, 0f, 90f), PropUtil.Range(rng, 0f, 90f));
-            int nseed = seed & 0xFFFF;
-            // a cube-sphere face spans about 2 x the largest half extent in meters
-            float faceMeters = 2f * Mathf.Max(scale.x, Mathf.Max(scale.y, scale.z)) * texScale;
-            b.Blob(pos, scale, rot, res, d =>
+            for (int v = 0; v < dirs.Length; v++)
             {
-                float r = 1f;
-                for (int i = 0; i < planes; i++)
+                Vector3 d = dirs[v];
+                float r = 1f + ((float)rng.NextDouble() * 2f - 1f) * rough;
+                for (int i = 0; i < cuts; i++)
                 {
-                    float dd = Vector3.Dot(d, pn[i]);
-                    if (dd > 0.05f) r = Mathf.Min(r, po[i] / dd);
+                    float dd = Vector3.Dot(d, Pn[i]);
+                    if (dd > 0.05f) r = Mathf.Min(r, Po[i] / dd);
                 }
-                r *= 1f + (PropNoise.Fbm3(d * 1.8f + off, 4, nseed) - 0.5f) * 2f * rough;
-                if (d.y < -0.2f) r *= Mathf.Lerp(1f, 0.6f, (-d.y - 0.2f) / 0.8f);
-                return r;
-            }, Mathf.Max(0.05f, faceMeters));
+                if (d.y < -0.3f) r *= Mathf.Lerp(1f, flatBottom, (-d.y - 0.3f) / 0.7f);
+                Radii[v] = Mathf.Max(0.25f, r);
+            }
+            return Radii;
         }
 
-        /// Rock as a standalone mesh (for MeshColliders), built in local space.
-        public static Mesh Mesh(Vector3 scale, int seed, int res = 7, float rough = 0.18f)
+        /// Adds a rock. pos = center, scale = half extents in meters. detail 0 = 20 faces (pebbles), 1 = 80 faces.
+        public static void Build(PropMeshBuilder b, Vector3 pos, Vector3 scale, Quaternion rot, int seed, int detail = 1, float rough = 0.14f)
+        {
+            var rng = new System.Random(seed);
+            var radii = Jitter(rng, detail, rough, 2 + rng.Next(4));
+            b.Ico(pos, scale, rot, detail, radii);
+        }
+
+        /// Rock as a standalone flat-shaded mesh (shared by the renderer batch and a MeshCollider), local space.
+        public static Mesh Mesh(Vector3 scale, int seed, int detail = 1, float rough = 0.14f)
         {
             var b = new PropMeshBuilder();
-            Build(b, Vector3.zero, scale, Quaternion.identity, seed, res, rough);
-            return b.ToMesh("PropRock");
+            Build(b, Vector3.zero, scale, Quaternion.identity, seed, detail, rough);
+            var m = b.ToMesh("PropRock");
+            LowPoly.Sanitize(m);
+            return m;
         }
     }
 
-    /// Palm, fern, shrub and broad-leaf plant variants (built once in local space, instanced into batches).
+    /// Low-poly island vegetation ("How to Fish" look): segmented red-brown palms with big angular fronds,
+    /// round faceted jungle trees, faceted bushes, broad-leaf plants, ferns and grass tufts.
+    /// Variants are built once in local space and instanced into combined batches.
     public static class PropPlants
     {
-        // ------------------------------------------------------------------ fronds
-        /// V-folded leaf strip along a drooping curve. UV u across (0..1), v along (0..1).
-        public static void Frond(PropMeshBuilder b, Vector3 origin, float azDeg, float elev0, float droop, float len, float halfW, float fold, bool doubleSide, int segs = 10, float twist = 0f)
+        static readonly Vector3 Up = Vector3.up;
+
+        /// Safe leaf width profile (0..1): narrow base, widest a bit before the middle, small at the tip.
+        /// The argument stays inside (0, PI) so the result is always > 0 (the old Pow(sin(PI)) produced NaN).
+        static float Profile(float s) => Mathf.Sin(Mathf.PI * Mathf.Clamp(0.1f + Mathf.Clamp01(s) * 0.82f, 0.02f, 0.98f));
+
+        // ------------------------------------------------------------------ fronds / leaves
+        /// Palm (or fern) frond: midrib along a drooping arc with saw-tooth leaflet triangles on both sides, folded down
+        /// along the midrib. Two-sided flat triangles. Every direction used is a unit vector by construction.
+        public static void Frond(PropMeshBuilder b, Vector3 origin, float azDeg, float elevDeg, float droopDeg, float len, float halfW, float foldDeg, int segs)
         {
+            segs = Mathf.Clamp(segs, 2, 12);
+            len = Mathf.Max(0.05f, len);
+            halfW = Mathf.Max(0f, halfW);
             float az = azDeg * Mathf.Deg2Rad;
             Vector3 hor = new Vector3(Mathf.Cos(az), 0f, Mathf.Sin(az));
-            Vector3 lateral = Vector3.Cross(Vector3.up, hor).normalized;
-            int vs = b.VertexCount, ts = b.IndexCount;
+            Vector3 lat = new Vector3(hor.z, 0f, -hor.x);          // = cross(up, hor), unit
+            float fold = Mathf.Clamp(foldDeg, 0f, 80f) * Mathf.Deg2Rad;
+            float cf = Mathf.Cos(fold), sf = Mathf.Sin(fold);
+            float seg = len / segs;
             Vector3 p = origin;
-            for (int i = 0; i <= segs; i++)
-            {
-                float s = (float)i / segs;
-                float e = (elev0 - droop * Mathf.Pow(s, 1.4f)) * Mathf.Deg2Rad;
-                Vector3 dir = hor * Mathf.Cos(e) + Vector3.up * Mathf.Sin(e);
-                if (i > 0) p += dir * (len / segs);
-                Vector3 lat = Quaternion.AngleAxis(twist * s, dir) * lateral;
-                Vector3 nUp = Vector3.Cross(dir, lat).normalized;
-                float w = halfW * Mathf.Pow(Mathf.Sin(Mathf.PI * Mathf.Min(1f, s * 1.05f + 0.04f)), 0.6f);
-                float cf = Mathf.Cos(fold), sf = Mathf.Sin(fold);
-                Vector3 left = p + lat * (w * cf) - nUp * (w * sf);
-                Vector3 right = p - lat * (w * cf) - nUp * (w * sf);
-                b.Vert(left, nUp, new Vector2(0f, s));
-                b.Vert(p, nUp, new Vector2(0.5f, s));
-                b.Vert(right, nUp, new Vector2(1f, s));
-            }
             for (int i = 0; i < segs; i++)
             {
-                // wound so the face normal is cross(dir, lateral) = the frond's upper side
-                int r0 = vs + i * 3, r1 = r0 + 3;
-                b.Quad(r0, r0 + 1, r1 + 1, r1);
-                b.Quad(r0 + 1, r0 + 2, r1 + 2, r1 + 1);
+                float s1 = (float)(i + 1) / segs;
+                float e = (elevDeg - droopDeg * Mathf.Pow(s1, 1.5f)) * Mathf.Deg2Rad;
+                Vector3 dir = hor * Mathf.Cos(e) + Up * Mathf.Sin(e);  // unit (hor ⟂ up)
+                Vector3 q = p + dir * seg;
+                Vector3 nUp = Vector3.Cross(dir, lat);                 // unit (dir ⟂ lat)
+                float w = halfW * Profile(s1);
+                if (w > 0.01f)
+                {
+                    for (int side = -1; side <= 1; side += 2)
+                    {
+                        Vector3 tip = q + dir * (seg * 0.25f) + lat * (side * w * cf) - nUp * (w * sf);
+                        b.Tri2(p, q, tip, nUp);
+                    }
+                }
+                p = q;
             }
-            b.SmoothNormals(vs, ts, false);
-            if (doubleSide) b.DoubleSide(vs, ts);
+        }
+
+        /// Broad diamond leaf folded along the midrib (two-sided), 8 triangles per side.
+        public static void Leaf(PropMeshBuilder b, Vector3 basePos, Vector3 hor, float len, float width, float elevDeg, float droopDeg)
+        {
+            hor.y = 0f;
+            if (hor.sqrMagnitude < 1e-6f) hor = Vector3.forward;
+            hor.Normalize();
+            Vector3 lat = new Vector3(hor.z, 0f, -hor.x);
+            const int K = 3;
+            var mid = new Vector3[K + 1];
+            mid[0] = basePos;
+            for (int i = 0; i < K; i++)
+            {
+                float s = (float)(i + 1) / K;
+                float e = (elevDeg - droopDeg * s * s) * Mathf.Deg2Rad;
+                mid[i + 1] = mid[i] + (hor * Mathf.Cos(e) + Up * Mathf.Sin(e)) * (len / K);
+            }
+            Vector3 along = mid[K] - mid[0];
+            if (along.sqrMagnitude < 1e-8f) along = hor;
+            Vector3 nUp = Vector3.Cross(along.normalized, lat);
+            if (nUp.sqrMagnitude < 1e-8f) nUp = Up;
+            nUp.Normalize();
+            float w = width * 0.5f;
+            const float fold = 0.3f;
+            Vector3 E(int i, float side, float f) => mid[i] + lat * (side * w * f) - nUp * (w * f * fold);
+            for (int side = -1; side <= 1; side += 2)
+            {
+                Vector3 e1 = E(1, side, 1f), e2 = E(2, side, 0.72f);
+                b.Tri2(mid[0], mid[1], e1, nUp);
+                b.Tri2(e1, mid[1], mid[2], nUp);
+                b.Tri2(e1, mid[2], e2, nUp);
+                b.Tri2(e2, mid[2], mid[3], nUp);
+            }
         }
 
         // ------------------------------------------------------------------ palm
@@ -90,59 +141,100 @@ namespace Sealebrities
         {
             var rng = new System.Random(seed);
             var mb = new PropModelBuilder();
-            float H = PropUtil.Range(rng, 7f, 13.5f);
-            float lean = PropUtil.Range(rng, 0.06f, 0.3f);
-            float wig = PropUtil.Range(rng, -0.25f, 0.25f);
-            const int segs = 11;
-            var pts = new List<Vector3>(segs + 2);
-            var radii = new List<float>(segs + 2);
-            pts.Add(new Vector3(0f, -0.5f, 0f));
-            radii.Add(0.34f);
-            for (int i = 0; i <= segs; i++)
+            float H = PropUtil.Range(rng, 6.5f, 11.5f);
+            float lean = PropUtil.Range(rng, 0.1f, 0.3f);
+            float wig = PropUtil.Range(rng, -0.3f, 0.3f);
+            int segs = 7 + rng.Next(3);
+            Vector3 Curve(float t) => new Vector3(lean * H * Mathf.Pow(t, 1.6f) + Mathf.Sin(t * Mathf.PI) * wig, H * t, Mathf.Sin(t * Mathf.PI * 0.8f) * wig * 0.4f);
+
+            // trunk: stacked, slightly rotated 6-sided segments, each tapering → visible rings; alternating dark rings
+            var ta = PropMats.PalmTrunk;
+            var tb = PropMats.PalmTrunkDark;
+            float yaw0 = PropUtil.Range(rng, 0f, 60f);
+            Vector3 top = Curve(1f), topDir = Up;
+            for (int i = 0; i < segs; i++)
             {
-                float t = (float)i / segs;
-                float x = lean * H * Mathf.Pow(t, 1.7f) + Mathf.Sin(t * Mathf.PI * 1.5f) * wig;
-                float z = Mathf.Sin(t * Mathf.PI) * wig * 0.5f;
-                pts.Add(new Vector3(x, H * t, z));
-                float r = Mathf.Lerp(0.22f, 0.135f, t) + Mathf.Max(0f, (0.1f - t) / 0.1f) * 0.11f;
-                radii.Add(r);
+                float t0 = (float)i / segs, t1 = (float)(i + 1) / segs;
+                Vector3 a = Curve(t0), c = Curve(t1);
+                if (i == 0) a.y = -0.45f;
+                Vector3 d = c - a;
+                float l = d.magnitude;
+                if (l < 1e-3f) continue;
+                d /= l;
+                float r0 = Mathf.Lerp(0.27f, 0.16f, t0) + (i == 0 ? 0.07f : 0f);
+                float r1 = Mathf.Lerp(0.27f, 0.16f, t1) * 0.84f;
+                Quaternion q = Quaternion.FromToRotation(Up, d) * Quaternion.Euler(0f, yaw0 + i * 17f, 0f);
+                mb.B(i % 2 == 0 ? ta : tb).Cylinder(a, q, r0, r1, l + 0.05f, 6, i > 0, false);
+                top = c;
+                topDir = d;
             }
-            mb.B(PropMats.Bark).Tube(pts, radii, 8, 1f, 0.4f);
-            Vector3 top = pts[pts.Count - 1];
-            Vector3 tan = (top - pts[pts.Count - 2]).normalized;
-            mb.B(PropMats.Bark).Rod(top - tan * 0.35f, top + tan * 0.3f, 0.19f, 0.1f, 7, true);
+            Quaternion topRot = Quaternion.FromToRotation(Up, topDir);
+            mb.B(tb).Cylinder(top - topDir * 0.05f, topRot, 0.2f, 0.07f, 0.42f, 6, true, false);
+            Vector3 crown = top + topDir * 0.3f;
 
             // coconuts
-            int nuts = 2 + rng.Next(5);
+            int nuts = 2 + rng.Next(3);
             for (int i = 0; i < nuts; i++)
             {
                 float a = PropUtil.Range(rng, 0f, Mathf.PI * 2f);
-                Vector3 np = top - Vector3.up * PropUtil.Range(rng, 0.2f, 0.45f) + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * 0.22f;
-                float s = PropUtil.Range(rng, 0.1f, 0.13f);
-                mb.B(PropMats.Coconut).Blob(np, new Vector3(s, s * 1.15f, s), Quaternion.Euler(PropUtil.Range(rng, -30f, 30f), 0f, 0f), 2, null);
+                Vector3 np = top - Up * PropUtil.Range(rng, 0.08f, 0.22f) + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * 0.24f;
+                float s = PropUtil.Range(rng, 0.13f, 0.17f);
+                mb.B(PropMats.Coconut).Ico(np, new Vector3(s, s * 1.1f, s), Quaternion.Euler(PropUtil.Range(rng, -30f, 30f), PropUtil.Range(rng, 0f, 360f), 0f), 0);
             }
 
-            // living fronds
-            int nf = 8 + rng.Next(5);
+            // crown: 7-10 big angular fronds, alternating light / dark green
+            int nf = 7 + rng.Next(4);
             float azOff = PropUtil.Range(rng, 0f, 360f);
+            bool darkFirst = (seed & 1) == 0;
+            float sizeK = Mathf.Pow(H / 9f, 0.35f);
             for (int f = 0; f < nf; f++)
             {
-                float az = azOff + f * 360f / nf + PropUtil.Range(rng, -12f, 12f);
+                float az = azOff + f * 360f / nf + PropUtil.Range(rng, -10f, 10f);
                 bool young = f < 2;
-                float elev = young ? PropUtil.Range(rng, 55f, 75f) : PropUtil.Range(rng, 12f, 45f);
-                float droop = young ? PropUtil.Range(rng, 30f, 60f) : PropUtil.Range(rng, 70f, 120f);
-                float len = PropUtil.Range(rng, 3.0f, 4.5f) * Mathf.Pow(H / 10f, 0.3f) * (young ? 0.8f : 1f);
-                Frond(mb.B(PropMats.PalmLeaf), top + Vector3.up * 0.1f, az, elev, droop, len, len * 0.2f, PropUtil.Range(rng, 0.35f, 0.6f), true, 10, PropUtil.Range(rng, -25f, 25f));
+                float elev = young ? PropUtil.Range(rng, 50f, 68f) : PropUtil.Range(rng, 14f, 38f);
+                float droop = young ? PropUtil.Range(rng, 25f, 45f) : PropUtil.Range(rng, 60f, 95f);
+                float len = PropUtil.Range(rng, 2.8f, 3.9f) * sizeK * (young ? 0.75f : 1f);
+                var lm = ((f % 2 == 0) ^ darkFirst) ? PropMats.PalmLeaf : PropMats.PalmLeafDark;
+                Frond(mb.B(lm), crown, az, elev, droop, len, len * 0.21f, PropUtil.Range(rng, 22f, 34f), 6);
             }
-            // dry hanging fronds
-            int nd = 1 + rng.Next(3);
+            // a dry frond or two hanging down
+            int nd = rng.Next(3);
             for (int f = 0; f < nd; f++)
             {
                 float az = PropUtil.Range(rng, 0f, 360f);
-                float len = PropUtil.Range(rng, 2.2f, 3.0f);
-                Frond(mb.B(PropMats.PalmLeafDry), top - Vector3.up * 0.15f, az, PropUtil.Range(rng, -30f, -10f), PropUtil.Range(rng, 40f, 60f), len, len * 0.14f, 0.9f, true, 7);
+                float len = PropUtil.Range(rng, 2.0f, 2.8f) * sizeK;
+                Frond(mb.B(PropMats.PalmLeafDry), crown - Up * 0.22f, az, PropUtil.Range(rng, -35f, -15f), PropUtil.Range(rng, 25f, 40f), len, len * 0.17f, 30f, 5);
             }
-            return mb.Build("Palm" + seed, H, 4.5f);
+            return mb.Build("Palm" + seed, H, 4f);
+        }
+
+        // ------------------------------------------------------------------ round jungle tree
+        public static PropModel Tree(int seed)
+        {
+            var rng = new System.Random(seed);
+            var mb = new PropModelBuilder();
+            float H = PropUtil.Range(rng, 4.2f, 7f);
+            Vector3 lean = new Vector3(PropUtil.Range(rng, -0.5f, 0.5f), 0f, PropUtil.Range(rng, -0.5f, 0.5f));
+            Vector3 b0 = new Vector3(0f, -0.4f, 0f), b1 = lean * 0.4f + Up * H * 0.45f, b2 = lean + Up * H * 0.78f;
+            var trunk = mb.B(PropMats.TreeTrunk);
+            trunk.Rod(b0, b1, 0.3f, 0.22f, 6);
+            trunk.Rod(b1, b2, 0.22f, 0.12f, 6, true);
+            // one side branch
+            float ba = PropUtil.Range(rng, 0f, Mathf.PI * 2f);
+            Vector3 br = b1 + new Vector3(Mathf.Cos(ba), 0f, Mathf.Sin(ba)) * 1.1f + Up * 1.0f;
+            trunk.Rod(b1, br, 0.12f, 0.06f, 5, true);
+
+            int n = 2 + rng.Next(2);
+            Material[] greens = { PropMats.Grass, PropMats.GrassDark, PropMats.GrassLight };
+            int g0 = rng.Next(greens.Length);
+            for (int k = 0; k < n; k++)
+            {
+                Vector3 c = k == 0 ? b2 + Up * 0.6f : (k == 1 ? br + Up * 0.4f : b2 + new Vector3(PropUtil.Range(rng, -1f, 1f), PropUtil.Range(rng, -0.6f, 0.2f), PropUtil.Range(rng, -1f, 1f)));
+                float s = (k == 0 ? PropUtil.Range(rng, 1.7f, 2.3f) : PropUtil.Range(rng, 1.1f, 1.6f)) * Mathf.Sqrt(H / 5.5f);
+                var radii = PropRocks.Jitter(rng, 1, 0.12f, 1, 0.75f);
+                mb.B(greens[(g0 + k) % greens.Length]).Ico(c, new Vector3(s, s * 0.82f, s), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), 1, radii);
+            }
+            return mb.Build("Tree" + seed, H + 2f, 2.5f);
         }
 
         // ------------------------------------------------------------------ ground plants
@@ -150,74 +242,74 @@ namespace Sealebrities
         {
             var rng = new System.Random(seed);
             var mb = new PropModelBuilder();
-            int n = 10 + rng.Next(7);
-            float size = PropUtil.Range(rng, 0.7f, 1.3f);
+            int n = 7 + rng.Next(4);
+            float size = PropUtil.Range(rng, 0.6f, 1.1f);
+            var mat = (seed & 1) == 0 ? PropMats.GrassDark : PropMats.PalmLeafDark;
             for (int i = 0; i < n; i++)
             {
                 float az = i * 360f / n + PropUtil.Range(rng, -15f, 15f);
-                float len = size * PropUtil.Range(rng, 0.7f, 1.1f);
-                Frond(mb.B(PropMats.FernLeaf), new Vector3(0f, 0.04f, 0f), az, PropUtil.Range(rng, 40f, 72f), PropUtil.Range(rng, 55f, 105f), len, len * 0.2f, 0.12f, false, 6);
+                float len = size * PropUtil.Range(rng, 0.75f, 1.1f);
+                Frond(mb.B(mat), new Vector3(0f, 0.04f, 0f), az, PropUtil.Range(rng, 38f, 62f), PropUtil.Range(rng, 55f, 95f), len, len * 0.24f, 18f, 5);
             }
             return mb.Build("Fern" + seed, size, size);
         }
 
-        public static PropModel Shrub(int seed)
+        /// Faceted bush: 2-4 overlapping jittered icospheres, sometimes with berries.
+        public static PropModel Bush(int seed)
         {
             var rng = new System.Random(seed);
             var mb = new PropModelBuilder();
-            var b = mb.B(PropMats.BushLeaf);
             float R = PropUtil.Range(rng, 0.6f, 1.1f);
-            float Hh = PropUtil.Range(rng, 0.8f, 1.6f);
-            Vector3 center = new Vector3(0f, Hh * 0.5f, 0f);
-            int clusters = 7 + rng.Next(5);
-            for (int c = 0; c < clusters; c++)
+            int n = 2 + rng.Next(3);
+            Material[] greens = { PropMats.GrassDark, PropMats.Grass, PropMats.GrassLight };
+            int g0 = rng.Next(greens.Length);
+            float maxH = 0f;
+            var centers = new List<Vector4>(4);
+            for (int k = 0; k < n; k++)
             {
-                float a = PropUtil.Range(rng, 0f, Mathf.PI * 2f);
-                float r = Mathf.Sqrt(PropUtil.R01(rng)) * R * 0.75f;
-                Vector3 cp = new Vector3(Mathf.Cos(a) * r, PropUtil.Range(rng, 0.25f, 1f) * Hh, Mathf.Sin(a) * r);
-                float s = PropUtil.Range(rng, 0.55f, 0.95f) * Mathf.Max(0.8f, R);
-                float yaw = PropUtil.Range(rng, 0f, 180f);
-                for (int k = 0; k < 3; k++)
+                Vector2 o = k == 0 ? Vector2.zero : PropUtil.InDisc(rng, R * 0.6f);
+                float s = R * (k == 0 ? 1f : PropUtil.Range(rng, 0.55f, 0.8f));
+                Vector3 c = new Vector3(o.x, s * 0.62f, o.y);
+                int detail = s > 0.75f ? 1 : 0;
+                var radii = PropRocks.Jitter(rng, detail, 0.12f, 1, 0.7f);
+                mb.B(greens[(g0 + k) % greens.Length]).Ico(c, new Vector3(s, s * 0.8f, s), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), detail, radii);
+                maxH = Mathf.Max(maxH, c.y + s * 0.8f);
+                centers.Add(new Vector4(c.x, c.y, c.z, s));
+            }
+            if (rng.NextDouble() < 0.35)
+            {
+                var bm = rng.NextDouble() < 0.5 ? PropMats.FlowerRed : PropMats.FlowerYellow;
+                int berries = 4 + rng.Next(4);
+                for (int i = 0; i < berries; i++)
                 {
-                    Quaternion q = Quaternion.Euler(PropUtil.Range(rng, -20f, 20f), yaw + k * 60f, PropUtil.Range(rng, -15f, 15f));
-                    Vector3 rx = q * Vector3.right * s, ry = q * Vector3.up * s;
-                    int v0 = b.VertexCount;
-                    b.Vert(cp - rx - ry, Vector3.up, new Vector2(0f, 0f));
-                    b.Vert(cp - rx + ry, Vector3.up, new Vector2(0f, 1f));
-                    b.Vert(cp + rx + ry, Vector3.up, new Vector2(1f, 1f));
-                    b.Vert(cp + rx - ry, Vector3.up, new Vector2(1f, 0f));
-                    b.Quad(v0, v0 + 1, v0 + 2, v0 + 3);
-                    // foliage normals point away from the bush center for soft, volumetric shading
-                    for (int i = v0; i < v0 + 4; i++) b.N[i] = ((b.V[i] - center).normalized + Vector3.up * 0.6f).normalized;
+                    var c = centers[rng.Next(centers.Count)];
+                    Vector3 d = new Vector3(PropUtil.Range(rng, -1f, 1f), PropUtil.Range(rng, 0.1f, 1f), PropUtil.Range(rng, -1f, 1f)).normalized;
+                    Vector3 p = new Vector3(c.x, c.y, c.z) + Vector3.Scale(d, new Vector3(c.w, c.w * 0.8f, c.w)) * 0.95f;
+                    mb.B(bm).Octa(p, 0.06f);
                 }
             }
-            // a few woody stems
-            var stems = mb.B(PropMats.BarkCharred);
-            for (int i = 0; i < 4; i++)
-            {
-                float a = PropUtil.Range(rng, 0f, Mathf.PI * 2f);
-                stems.Rod(Vector3.zero, new Vector3(Mathf.Cos(a) * R * 0.4f, Hh * 0.6f, Mathf.Sin(a) * R * 0.4f), 0.035f, 0.015f, 4);
-            }
-            return mb.Build("Shrub" + seed, Hh, R);
+            return mb.Build("Bush" + seed, maxH, R);
         }
 
         public static PropModel BroadLeaf(int seed, int flowerKind)
         {
             var rng = new System.Random(seed);
             var mb = new PropModelBuilder();
-            int n = 5 + rng.Next(5);
+            int n = 5 + rng.Next(3);
             float maxH = 0f;
+            var leafA = (seed & 1) == 0 ? PropMats.PalmLeaf : PropMats.Grass;
+            var leafB = PropMats.GrassDark;
             for (int i = 0; i < n; i++)
             {
                 float az = i * 360f / n + PropUtil.Range(rng, -20f, 20f);
                 float ar = az * Mathf.Deg2Rad;
                 Vector3 hor = new Vector3(Mathf.Cos(ar), 0f, Mathf.Sin(ar));
-                float h = PropUtil.Range(rng, 0.5f, 1.2f);
-                float reach = PropUtil.Range(rng, 0.25f, 0.55f);
-                Vector3 p0 = Vector3.zero, p1 = hor * reach * 0.3f + Vector3.up * h * 0.6f, p2 = hor * reach + Vector3.up * h;
-                mb.B(PropMats.Stem).Tube(new[] { p0, p1, p2 }, new[] { 0.025f, 0.02f, 0.014f }, 4);
+                float h = PropUtil.Range(rng, 0.45f, 1.0f);
+                float reach = PropUtil.Range(rng, 0.2f, 0.45f);
+                Vector3 tip = hor * reach + Up * h;
+                mb.B(PropMats.Stem).Rod(Vector3.zero, tip, 0.03f, 0.018f, 3);
                 maxH = Mathf.Max(maxH, h);
-                Leaf(mb.B(PropMats.BigLeaf), p2, hor, PropUtil.Range(rng, 0.6f, 1.15f), PropUtil.Range(rng, 0.35f, 0.6f), PropUtil.Range(rng, 10f, 35f), PropUtil.Range(rng, 40f, 75f));
+                Leaf(mb.B(i % 2 == 0 ? leafA : leafB), tip, hor, PropUtil.Range(rng, 0.55f, 1.0f), PropUtil.Range(rng, 0.35f, 0.55f), PropUtil.Range(rng, 5f, 25f), PropUtil.Range(rng, 25f, 50f));
             }
             if (flowerKind > 0)
             {
@@ -227,23 +319,23 @@ namespace Sealebrities
                 {
                     float a = PropUtil.Range(rng, 0f, Mathf.PI * 2f);
                     Vector3 basep = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * 0.12f;
-                    float h = maxH * PropUtil.Range(rng, 0.8f, 1.15f);
-                    Vector3 top = basep + Vector3.up * h;
-                    mb.B(PropMats.Stem).Rod(basep, top, 0.02f, 0.015f, 4);
+                    float h = maxH * PropUtil.Range(rng, 0.85f, 1.15f);
+                    Vector3 top = basep + Up * h;
+                    mb.B(PropMats.Stem).Rod(basep, top, 0.022f, 0.016f, 3);
                     if (flowerKind == 3)
                     {
-                        mb.B(fm).Blob(top + Vector3.up * 0.1f, new Vector3(0.07f, 0.14f, 0.07f), Quaternion.identity, 3, null);
+                        mb.B(fm).Ico(top + Up * 0.1f, new Vector3(0.09f, 0.14f, 0.09f), Quaternion.identity, 0);
                     }
                     else
                     {
-                        // heliconia-like alternating bracts
-                        int bracts = 4 + rng.Next(3);
+                        // heliconia-like alternating bracts (little cones)
+                        int bracts = 3 + rng.Next(3);
                         for (int k = 0; k < bracts; k++)
                         {
-                            Vector3 bp = top - Vector3.up * (k * 0.09f);
+                            Vector3 bp = top - Up * (k * 0.1f);
                             float side = (k % 2 == 0) ? 1f : -1f;
                             Quaternion q = Quaternion.Euler(0f, a * Mathf.Rad2Deg, 0f) * Quaternion.Euler(0f, 0f, side * 58f);
-                            mb.B(fm).Cylinder(bp, q, 0.045f, 0.004f, 0.2f - k * 0.015f, 5);
+                            mb.B(fm).Cylinder(bp, q, 0.055f, 0f, 0.22f - k * 0.02f, 4);
                         }
                     }
                 }
@@ -251,38 +343,38 @@ namespace Sealebrities
             return mb.Build("BroadLeaf" + seed, maxH, 1f);
         }
 
-        /// Broad heart-shaped leaf blade with a folded midrib (u across, v along).
-        public static void Leaf(PropMeshBuilder b, Vector3 basePos, Vector3 hor, float len, float width, float elev0, float droop)
+        /// Grass tuft: 3-5 flat two-sided blades (one triangle each), optionally with a little flower on a stalk.
+        public static PropModel GrassTuft(int seed, Material blade, Material flower)
         {
-            const int along = 7, across = 5;
-            Vector3 lateral = Vector3.Cross(Vector3.up, hor).normalized;
-            int vs = b.VertexCount, ts = b.IndexCount;
-            Vector3 p = basePos;
-            for (int i = 0; i <= along; i++)
+            var rng = new System.Random(seed);
+            var mb = new PropModelBuilder();
+            var b = mb.B(blade);
+            int n = 3 + rng.Next(3);
+            float maxH = 0f;
+            for (int i = 0; i < n; i++)
             {
-                float s = (float)i / along;
-                float e = (elev0 - droop * s * s) * Mathf.Deg2Rad;
-                Vector3 dir = hor * Mathf.Cos(e) + Vector3.up * Mathf.Sin(e);
-                if (i > 0) p += dir * (len / along);
-                Vector3 nUp = Vector3.Cross(dir, lateral).normalized;
-                float w = width * 0.5f * Mathf.Pow(Mathf.Sin(Mathf.PI * Mathf.Clamp01(s * 0.92f + 0.08f)), 0.8f) * (1f + 0.25f * (1f - s));
-                for (int j = 0; j <= across; j++)
-                {
-                    float x = (float)j / across * 2f - 1f;
-                    Vector3 q = p + lateral * (x * w) - nUp * (Mathf.Abs(x) * w * 0.15f) - nUp * (x * x * w * 0.1f);
-                    b.Vert(q, nUp, new Vector2(x * 0.5f + 0.5f, s));
-                }
+                Vector2 o = PropUtil.InDisc(rng, 0.12f);
+                Vector3 bp = new Vector3(o.x, -0.03f, o.y);
+                float a = PropUtil.Range(rng, 0f, Mathf.PI * 2f);
+                Vector3 outDir = o.sqrMagnitude > 1e-6f ? new Vector3(o.x, 0f, o.y).normalized : new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a));
+                float h = PropUtil.Range(rng, 0.22f, 0.5f);
+                float w = PropUtil.Range(rng, 0.05f, 0.085f);
+                Vector3 side = new Vector3(-Mathf.Sin(a), 0f, Mathf.Cos(a)) * w;
+                Vector3 tip = bp + Up * h + outDir * (h * PropUtil.Range(rng, 0.15f, 0.5f));
+                Vector3 n0 = Vector3.Cross(side, tip - bp);
+                if (n0.sqrMagnitude < 1e-10f) n0 = outDir;
+                b.Tri2(bp - side, bp + side, tip, n0.normalized);
+                maxH = Mathf.Max(maxH, tip.y);
             }
-            for (int i = 0; i < along; i++)
+            if (flower != null)
             {
-                for (int j = 0; j < across; j++)
-                {
-                    int a = vs + i * (across + 1) + j;
-                    int c = a + across + 1;
-                    b.Quad(a, c, c + 1, a + 1);
-                }
+                Vector3 top = new Vector3(PropUtil.Range(rng, -0.05f, 0.05f), maxH + PropUtil.Range(rng, 0.05f, 0.15f), PropUtil.Range(rng, -0.05f, 0.05f));
+                Vector3 side = new Vector3(0.012f, 0f, 0f);
+                b.Tri2(new Vector3(0f, -0.03f, 0f) - side, new Vector3(0f, -0.03f, 0f) + side, top, Vector3.forward);
+                mb.B(flower).Octa(top, new Vector3(0.07f, 0.04f, 0.07f));
+                maxH = top.y;
             }
-            b.SmoothNormals(vs, ts, false);
+            return mb.Build("Tuft" + seed, maxH, 0.25f);
         }
     }
 }

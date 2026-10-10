@@ -3,8 +3,8 @@ using UnityEngine;
 
 namespace Sealebrities
 {
-    /// Jellyfish: 1 m bell diameter (axis +Y), translucent double-sheet bell with an in-curled rim, four
-    /// horseshoe gonads, 4 frilly oral arms and 16 thin marginal tentacles (bone chains under the bell bone).
+    /// Jellyfish: 1 m bell diameter (axis +Y), faceted translucent double-sheet bell with a scalloped rim, four
+    /// horseshoe gonads, 4 zig-zag oral arms and 12 thin marginal tentacles (bone chains under the bell bone).
     internal static class CreatureMeshJelly
     {
         const float Pi = CreatureMeshMath.Pi;
@@ -15,7 +15,7 @@ namespace Sealebrities
             var b = ctx.B;
             ctx.Layout = CreatureMeshLayout.Bell;
             ctx.CastShadows = false;
-            ctx.SkinSmoothness = 0.9f;
+            ctx.SkinSmoothness = 0.35f;
             const float R = 0.5f;
             float Hb = CreatureMeshMath.Clamp(s.bodyHeight * 0.56f, 0.16f, 0.6f);
             const float aMax = 1.74f;
@@ -28,21 +28,20 @@ namespace Sealebrities
             var bellW = CreatureMeshSkin.One(bell);
 
             // ---- bell: outer sheet, inner sheet, rim lip (Skin slot = translucent bell material)
-            const int NA = 16, NP = 40;
+            const int NA = 4, NP = 16;
             Func<float, float, Vector3> outer = (u, v) =>
             {
                 float a = v * aMax;
                 Vector2 pr = prof(a);
                 float ang = u * CreatureMeshMath.TwoPi;
-                // subtle lobes at the margin (8 lappets)
-                float lobe = 1f + 0.02f * CreatureMeshMath.Smooth(0.75f, 1f, v) * CreatureMeshMath.Cos(ang * 8f);
+                // scalloped margin: 8 lappets (alternating rim vertices)
+                float lobe = 1f + 0.05f * CreatureMeshMath.Smooth(0.6f, 1f, v) * CreatureMeshMath.Cos(ang * 8f);
                 return new Vector3(CreatureMeshMath.Cos(ang) * pr.x * lobe, pr.y, CreatureMeshMath.Sin(ang) * pr.x * lobe);
             };
             Func<float, float, Vector3> inner = (u, v) =>
             {
                 Vector3 p = outer(u, v);
-                float th = CreatureMeshMath.Lerp(0.07f, 0.008f, CreatureMeshMath.Pow(v, 0.8f)) * Hb / 0.28f;
-                // offset roughly along the inward normal of the profile
+                float th = CreatureMeshMath.Lerp(0.07f, 0.01f, CreatureMeshMath.Pow(v, 0.8f)) * Hb / 0.28f;
                 float a = v * aMax;
                 Vector3 radial = new Vector3(p.x, 0f, p.z);
                 float rl = radial.magnitude;
@@ -50,40 +49,41 @@ namespace Sealebrities
                 Vector3 nOut = CreatureMeshMath.Norm(radial * CreatureMeshMath.Sin(a) * (Hb / R) + Vector3.up * CreatureMeshMath.Cos(a));
                 return p - nOut * th;
             };
+            Func<float, float> vMap = v => CreatureMeshMath.Pow(v, 0.8f);
             CreatureMeshParts.Surface(b, CreatureMeshSlot.Skin, NP, NA, (u, v) => outer(u, v), (u, v) => new Vector2(u, v),
-                p => CreatureMeshMath.Norm(new Vector3(p.x, (p.y - rimY * 0.5f) * 1.2f + 0.05f, p.z)), (p, u, v) => bellW);
-            CreatureMeshParts.Surface(b, CreatureMeshSlot.Skin, NP, NA, (u, v) => inner(u, v), (u, v) => new Vector2(u, v * 0.98f),
-                p => -CreatureMeshMath.Norm(new Vector3(p.x, (p.y - rimY * 0.5f) * 1.2f + 0.05f, p.z)), (p, u, v) => bellW);
+                p => CreatureMeshMath.Norm(new Vector3(p.x, (p.y - rimY * 0.5f) * 1.2f + 0.05f, p.z)), (p, u, v) => bellW, null, vMap);
+            CreatureMeshParts.Surface(b, CreatureMeshSlot.Skin, NP, NA - 1, (u, v) => inner(u, v), (u, v) => new Vector2(u, v * 0.98f),
+                p => -CreatureMeshMath.Norm(new Vector3(p.x, (p.y - rimY * 0.5f) * 1.2f + 0.05f, p.z)), (p, u, v) => bellW, null, vMap);
             CreatureMeshParts.Surface(b, CreatureMeshSlot.Skin, NP, 1, (u, v) => v < 0.5f ? outer(u, 1f) : inner(u, 1f), (u, v) => new Vector2(u, 0.99f),
                 p => CreatureMeshMath.Norm(new Vector3(p.x, -0.4f, p.z)), (p, u, v) => bellW);
 
-            // ---- gonads: four horseshoes seen through the bell (Shell slot)
+            // ---- gonads: four pastel horseshoes seen through the bell (Shell slot)
             for (int k = 0; k < 4; k++)
             {
                 float a0 = (k + 0.5f) * Pi * 0.5f;
                 Vector3 c = new Vector3(CreatureMeshMath.Cos(a0) * 0.16f, 0f, CreatureMeshMath.Sin(a0) * 0.16f);
-                var path = new Vector3[9];
-                for (int i = 0; i < 9; i++)
+                var path = new Vector3[7];
+                for (int i = 0; i < 7; i++)
                 {
-                    float ang = a0 + Pi + CreatureMeshMath.Lerp(-2.3f, 2.3f, i / 8f);
+                    float ang = a0 + Pi + CreatureMeshMath.Lerp(-2.3f, 2.3f, i / 6f);
                     Vector3 p = c + new Vector3(CreatureMeshMath.Cos(ang), 0f, CreatureMeshMath.Sin(ang)) * 0.075f;
                     float rr = new Vector2(p.x, p.z).magnitude;
                     float aa = (float)Math.Asin(CreatureMeshMath.Clamp(rr / R, 0f, 1f));
                     p.y = prof(aa).y - 0.05f * Hb / 0.28f;
                     path[i] = p;
                 }
-                var g = CreatureMeshParts.Tube(path, t => 0.02f * CreatureMeshMath.Nose(Math.Min(t, 1f - t), 0.15f) + 0.004f, 18, 8, t => Vector3.up);
-                g.HalfTop = t => 0.011f * CreatureMeshMath.Nose(Math.Min(t, 1f - t), 0.15f) + 0.003f;
+                var g = CreatureMeshParts.Tube(path, t => 0.022f * CreatureMeshMath.Nose(Math.Min(t, 1f - t), 0.15f) + 0.004f, 6, 4, t => Vector3.up);
+                g.HalfTop = t => 0.012f * CreatureMeshMath.Nose(Math.Min(t, 1f - t), 0.15f) + 0.003f;
                 g.HalfBot = g.HalfTop;
                 g.Uv = (t, vv) => new Vector2(0.5f, 0.5f);
                 g.Build(b, CreatureMeshSlot.Shell, (p, a, t) => bellW);
             }
 
-            // ---- oral arms: 4 frilly ribbons from the center underside
+            // ---- oral arms: 4 zig-zag ribbons from the center underside
             float armLen = 0.55f;
             for (int k = 0; k < 4; k++)
             {
-                float a0 = (k + 0.0f) * Pi * 0.5f + 0.2f;
+                float a0 = k * Pi * 0.5f + 0.2f;
                 Vector3 dir = new Vector3(CreatureMeshMath.Cos(a0), 0f, CreatureMeshMath.Sin(a0));
                 Vector3 p0 = dir * 0.04f + Vector3.up * (rimY + Hb * 0.35f);
                 var path = new[]
@@ -95,27 +95,27 @@ namespace Sealebrities
                 };
                 var ch = CreatureMeshParts.ChainAlong(ctx, "OralArm" + k + "_", bell, path, new[] { 0f, 0.36f, 0.7f });
                 ctx.Tentacles.Add(ch.Bones[0]);
-                float twist0 = a0;
+                int kk = k;
                 var arm = new CreatureMeshSweep
                 {
-                    Rings = 30, Sides = 10,
+                    Rings = 8, Sides = 4,
                     Center = t => CreatureMeshMath.PathPoint(path, t),
                     UpHint = t => CreatureMeshMath.Rotate(dir, Vector3.up, Pi * 0.5f + t * 2.2f),
-                    HalfW = t => CreatureMeshMath.Lerp(0.05f, 0.012f, t),
-                    HalfTop = t => CreatureMeshMath.Lerp(0.007f, 0.003f, t),
-                    HalfBot = t => CreatureMeshMath.Lerp(0.007f, 0.003f, t),
-                    Radial = (t, th) => 1f + 0.35f * CreatureMeshMath.Sin(t * 70f + k) * CreatureMeshMath.Pow(CreatureMeshMath.Abs(CreatureMeshMath.Sin(th)), 6f),
+                    HalfW = t => CreatureMeshMath.Lerp(0.05f, 0.014f, t) * (1f + 0.3f * CreatureMeshMath.Sin(t * Pi * 7f + kk)),
+                    HalfTop = t => CreatureMeshMath.Lerp(0.008f, 0.004f, t),
+                    HalfBot = t => CreatureMeshMath.Lerp(0.008f, 0.004f, t),
                     ArcLength = false, Spacing = 0, CapStart = true, CapEnd = true,
                     Uv = (t, vv) => new Vector2(0.5f, t),
                 };
                 arm.Build(b, CreatureMeshSlot.Extra, (p, a, t) => ch.Weigh(a));
             }
 
-            // ---- 16 thin marginal tentacles
+            // ---- 12 thin marginal tentacles
             float tLen = 0.42f;
-            for (int k = 0; k < 16; k++)
+            const int NT = 12;
+            for (int k = 0; k < NT; k++)
             {
-                float ang = (k + 0.5f) / 16f * CreatureMeshMath.TwoPi;
+                float ang = (k + 0.5f) / NT * CreatureMeshMath.TwoPi;
                 Vector3 dir = new Vector3(CreatureMeshMath.Cos(ang), 0f, CreatureMeshMath.Sin(ang));
                 Vector2 rim = prof(aMax);
                 Vector3 p0 = dir * (rim.x * 0.97f) + Vector3.up * (rim.y + 0.005f);
@@ -129,7 +129,7 @@ namespace Sealebrities
                 };
                 var ch = CreatureMeshParts.ChainAlong(ctx, "Tentacle" + k + "_", bell, path, new[] { 0f, 0.36f, 0.7f });
                 ctx.Tentacles.Add(ch.Bones[0]);
-                var tube = CreatureMeshParts.Tube(path, t => CreatureMeshMath.Lerp(0.0055f, 0.0015f, t), 14, 4, t => dir);
+                var tube = CreatureMeshParts.Tube(path, t => CreatureMeshMath.Lerp(0.007f, 0.002f, t), 5, 3, t => dir);
                 tube.CapStart = false;
                 tube.Uv = (t, vv) => new Vector2(0.5f, t);
                 tube.Build(b, CreatureMeshSlot.Extra, (p, a, t) => ch.Weigh(a));

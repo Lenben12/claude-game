@@ -26,12 +26,13 @@ namespace Sealebrities
 
         /// Straight body along -Z: t = 0 at z0 (snout), t = 1 at z0 - len. Profiles are absolute y of the
         /// dorsal / ventral outline and the half width; nose rounds the first noseT of the body.
+        /// ts: explicit ring positions (low-poly bodies use 10-14 rings), sides: 6-8 for chunky facets.
         public static CreatureMeshSweep Body(float z0, float len, Func<float, float> yTop, Func<float, float> yBot, Func<float, float> halfW,
-                                             float noseT, int rings, int sides)
+                                             float noseT, float[] ts, int sides)
         {
             return new CreatureMeshSweep
             {
-                Rings = rings, Sides = sides,
+                Ts = ts, Rings = ts != null ? ts.Length : 12, Sides = sides,
                 Center = t => new Vector3(0f, 0.5f * (yTop(t) + yBot(t)), z0 - len * t),
                 HalfTop = t => Math.Max(1e-5f, 0.5f * (yTop(t) - yBot(t)) * CreatureMeshMath.Nose(t, noseT)),
                 HalfBot = t => Math.Max(1e-5f, 0.5f * (yTop(t) - yBot(t)) * CreatureMeshMath.Nose(t, noseT)),
@@ -62,7 +63,7 @@ namespace Sealebrities
             };
         }
 
-        /// Builds lower jaw, palate, tongue, gullet and teeth. Call after the body was built.
+        /// Builds lower jaw, palate, tongue, gullet and teeth (all low poly). Call after the body was built.
         public static void BuildJaw(CreatureMeshContext ctx, CreatureMeshSweep body, CreatureMeshJaw jaw, CreatureMeshSkinFn skin, float skinU = -1f)
         {
             var b = ctx.B;
@@ -84,7 +85,7 @@ namespace Sealebrities
             };
 
             // ---- palate (under the flattened upper jaw), faces down
-            CreatureMeshParts.Surface(b, CreatureMeshSlot.Mouth, 8, 3,
+            CreatureMeshParts.Surface(b, CreatureMeshSlot.Mouth, 3, 1,
                 (u, v) =>
                 {
                     float t = u * h;
@@ -101,7 +102,7 @@ namespace Sealebrities
             float ext = jaw.Extend;
             var lower = new CreatureMeshSweep
             {
-                Rings = 10, Sides = body.Sides,
+                Rings = 4, Sides = body.Sides,
                 Center = tau =>
                 {
                     float t = tau * h;
@@ -119,7 +120,7 @@ namespace Sealebrities
             lower.Build(b, CreatureMeshSlot.Skin, (p, a, t) => skin(p, a, t * h));
 
             // ---- tongue (top of the lower jaw), faces up
-            CreatureMeshParts.Surface(b, CreatureMeshSlot.Mouth, 8, 3,
+            CreatureMeshParts.Surface(b, CreatureMeshSlot.Mouth, 3, 1,
                 (u, v) =>
                 {
                     float tau = Math.Max(0.02f, u);
@@ -133,7 +134,7 @@ namespace Sealebrities
                 (u, v) => new Vector2(0.5f, 0.5f), p => Vector3.up, (p, u, v) => skin(p, p, u * h),
                 u => CreatureMeshMath.Sqrt(u));
 
-            // ---- lower teeth (built in the closed pose, rotated with the jaw)
+            // ---- lower teeth (built in the closed pose, rotated with the jaw): chunky 3-sided spikes
             bool teeth = jaw.Teeth > 0 && jaw.ToothLen > 0f;
             int n = Math.Max(1, jaw.Teeth);
             if (teeth)
@@ -152,7 +153,7 @@ namespace Sealebrities
                         Vector3 basePt = c + sd * (xw * side) + up * (y - 0.0015f);
                         Vector3 dir = CreatureMeshMath.Norm(up - sd * (side * jaw.ToothInward) + Vector3.back * 0.12f);
                         float l = jaw.ToothLen * jaw.LowerTeeth * fang * (0.85f + 0.3f * CreatureMeshNoise.Rand(k, side, 2, 7));
-                        CreatureMeshParts.Cone(b, CreatureMeshSlot.Teeth, basePt, basePt + dir * l, jaw.ToothRadius * fang, 5,
+                        CreatureMeshParts.Cone(b, CreatureMeshSlot.Teeth, basePt, basePt + dir * l, jaw.ToothRadius * fang, 3,
                             new Vector2(0.5f, 0.2f), new Vector2(0.5f, 0.9f), skin(basePt, basePt, tau * h));
                     }
             }
@@ -174,7 +175,7 @@ namespace Sealebrities
                         Vector3 basePt = c + sd * (xw * side) + up * (y + 0.0015f);
                         Vector3 dir = CreatureMeshMath.Norm(-up - sd * (side * jaw.ToothInward) + Vector3.back * 0.1f);
                         float l = jaw.ToothLen * jaw.UpperTeeth * fang * (0.85f + 0.3f * CreatureMeshNoise.Rand(k, side, 1, 7));
-                        CreatureMeshParts.Cone(b, CreatureMeshSlot.Teeth, basePt, basePt + dir * l, jaw.ToothRadius * fang, 5,
+                        CreatureMeshParts.Cone(b, CreatureMeshSlot.Teeth, basePt, basePt + dir * l, jaw.ToothRadius * fang, 3,
                             new Vector2(0.5f, 0.2f), new Vector2(0.5f, 0.9f), skin(basePt, basePt, t));
                     }
             }
@@ -187,7 +188,7 @@ namespace Sealebrities
             float drop = Math.Max(0.004f, CreatureMeshMath.Sin(gape) * mouthLen * 0.42f);
             Vector3 gcen = gc + gup * gy + Vector3.down * (drop * 0.45f) + Vector3.back * (mouthLen * 0.05f);
             CreatureMeshParts.Ellipsoid(b, CreatureMeshSlot.Mouth, gcen, Vector3.forward, Vector3.up,
-                gxw * 0.86f, Math.Max(drop * 0.75f, body.HalfBot(h) * 0.25f), mouthLen * 0.48f, 7, 12,
+                gxw * 0.86f, Math.Max(drop * 0.75f, body.HalfBot(h) * 0.25f), mouthLen * 0.48f, 4, 6,
                 new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), (p, a, t) => skin(p, p, tg));
         }
 
@@ -196,7 +197,7 @@ namespace Sealebrities
         /// Fin on the dorsal (top = true) or ventral midline between t0 and t1.
         public static void MedianFin(CreatureMeshContext ctx, CreatureMeshSweep body, float t0, float t1, bool top,
                                      Func<float, float> height, Func<float, float> rake, int cols, int band, CreatureMeshSkinFn skin,
-                                     float thickness = 0.006f, int slot = CreatureMeshSlot.Fin, Func<float, float, Vector2> uv = null, int rows = 4)
+                                     float thickness = 0.006f, int slot = CreatureMeshSlot.Fin, Func<float, float, Vector2> uv = null, int rows = 1)
         {
             float theta = top ? Pi : 0f;
             float dir = top ? 1f : -1f;
@@ -256,13 +257,13 @@ namespace Sealebrities
 
         /// Caudal fin from a vertical base at the peduncle: len(s) backwards, lift(s) vertical offset, s = 0 bottom .. 1 top.
         public static void CaudalFin(CreatureMeshContext ctx, Vector3 peduncle, float baseHalf, Func<float, float> len, Func<float, float> lift,
-                                     int bone, int cols, float thickness, float cup = 0.0f)
+                                     int bone, int cols, float thickness, float cup = 0.0f, int rows = 1)
         {
             var fin = new CreatureMeshFin
             {
                 Base = s => peduncle + Vector3.up * CreatureMeshMath.Lerp(-baseHalf, baseHalf, s) + Vector3.forward * 0.01f,
                 Normal = s => Vector3.right,
-                Cols = cols, Rows = 4, Thickness = thickness, Band = 1,
+                Cols = cols, Rows = rows, Thickness = thickness, Band = 1,
             };
             fin.Edge = s => fin.Base(s) + Vector3.back * len(s) + Vector3.up * lift(s);
             if (cup != 0f) fin.Bend = (s, r) => Vector3.right * (cup * r * r * CreatureMeshMath.Sin(s * Pi));
@@ -271,13 +272,12 @@ namespace Sealebrities
 
         /// Flat paddle (flipper) along a path: chord in the plane perpendicular to upHint, thickness along it.
         public static void Paddle(CreatureMeshBuilder b, Vector3[] path, Func<float, float> chord, Func<float, float> thick, Func<float, Vector3> upHint,
-                                  Func<float, float, Vector2> uv, CreatureMeshSkinFn skin, int slot, Func<float, float, float> radial = null)
+                                  Func<float, float, Vector2> uv, CreatureMeshSkinFn skin, int slot, int rings = 5, int sides = 6)
         {
-            var sw = CreatureMeshParts.Tube(path, chord, 18, 12, upHint);
+            var sw = CreatureMeshParts.Tube(path, chord, rings, sides, upHint);
             sw.HalfW = chord;
             sw.HalfTop = t => thick(t) * 0.55f;
             sw.HalfBot = t => thick(t) * 0.45f;
-            sw.Radial = radial;
             sw.CapStart = false;
             sw.CapEnd = true;
             sw.CapBulgeEnd = 0.25f;
@@ -290,6 +290,16 @@ namespace Sealebrities
         {
             float c = CreatureMeshMath.Abs(CreatureMeshMath.Cos(Pi * s * n));
             return CreatureMeshMath.Lerp(membrane, 1f, CreatureMeshMath.Pow(c, sharp));
+        }
+
+        /// Small closed cartoon mouth at the snout tip of a lofted body (dark "o" slightly below the nose).
+        public static void SnoutMouth(CreatureMeshContext ctx, CreatureMeshSweep body, float tMouth, float width, float height, CreatureMeshSkinFn skin)
+        {
+            Vector3 c = body.Center(tMouth);
+            float hb = body.HalfBot(tMouth);
+            float hw = body.HalfW(tMouth);
+            Vector3 p = c + Vector3.down * (hb * 0.3f) + Vector3.forward * 0.002f;
+            CreatureMeshParts.Mouth(ctx.B, p, Vector3.forward, Math.Max(0.003f, hw * width), Math.Max(0.002f, hb * height), Math.Max(0.004f, hw * 0.5f), skin);
         }
     }
 }

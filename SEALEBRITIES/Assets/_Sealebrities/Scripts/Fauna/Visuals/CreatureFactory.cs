@@ -127,7 +127,6 @@ namespace Sealebrities
             try
             {
                 bake = CreatureMeshBakery.Get(s);
-                if (!bake.HasPixels) bake = CreatureMeshBake.Make(s);   // pixels were released after an earlier kit
             }
             catch (Exception)
             {
@@ -135,15 +134,17 @@ namespace Sealebrities
                 throw;
             }
             kit = MakeKit(s, bake);
-            bake.ReleasePixels();
             Kits[s.id] = kit;
             return kit;
         }
 
+        /// Low-poly kit: faceted (flat shaded, unwelded) skinned mesh built from the managed bake; the flattening
+        /// happens on the bake thread (same result as LowPoly.Flatten, bone weights + bind poses preserved).
         static CreatureMeshKit MakeKit(SpeciesDef s, CreatureMeshBake bake)
         {
             var ctx = bake.Ctx;
             var b = ctx.B;
+            var f = bake.Flat;
             var kit = new CreatureMeshKit
             {
                 Id = s.id,
@@ -162,22 +163,19 @@ namespace Sealebrities
             };
 
             var mesh = new Mesh { name = "SB_Creature_" + s.id };
-            if (b.Count > 65000) mesh.indexFormat = IndexFormat.UInt32;
-            mesh.SetVertices(b.Verts);
-            mesh.SetUVs(0, b.Uvs);
-            mesh.normals = b.ComputeNormals();
+            if (f.Count > 65000) mesh.indexFormat = IndexFormat.UInt32;
+            mesh.vertices = f.Verts;
+            mesh.uv = f.Uvs;
+            mesh.normals = f.Normals;
             var used = new List<int>();
-            for (int i = 0; i < CreatureMeshSlot.Count; i++) if (b.Tris[i].Count > 0) used.Add(i);
+            for (int i = 0; i < CreatureMeshSlot.Count; i++) if (f.Tris[i].Length > 0) used.Add(i);
             mesh.subMeshCount = used.Count;
-            for (int i = 0; i < used.Count; i++) mesh.SetTriangles(b.Tris[used[i]], i, false);
-            var weights = new BoneWeight[b.Count];
-            for (int i = 0; i < weights.Length; i++) weights[i] = Sorted(b.Weights[i]);
-            mesh.boneWeights = weights;
+            for (int i = 0; i < used.Count; i++) mesh.SetTriangles(f.Tris[used[i]], i, false);
+            mesh.boneWeights = f.Weights;
             var bind = new Matrix4x4[kit.Bones.Length];
             for (int i = 0; i < bind.Length; i++) bind[i] = Matrix4x4.Translate(-kit.Bones[i].Pos);
             mesh.bindposes = bind;
             mesh.RecalculateBounds();
-            mesh.RecalculateTangents();
             kit.Mesh = mesh;
             kit.SubmeshSlots = used.ToArray();
             kit.Owned.Add(mesh);
@@ -193,25 +191,6 @@ namespace Sealebrities
             if (s.plan == BodyPlan.Turtle || s.plan == BodyPlan.SeaLion) pad.y += 0.15f;
             kit.LocalBounds = new Bounds(mb.center, size + pad * 2f);
             return kit;
-        }
-
-        static BoneWeight Sorted(BoneWeight w)
-        {
-            // Unity expects weights in descending order (lower skin quality settings use the first entries)
-            var idx = new[] { w.boneIndex0, w.boneIndex1, w.boneIndex2, w.boneIndex3 };
-            var wt = new[] { w.weight0, w.weight1, w.weight2, w.weight3 };
-            for (int i = 0; i < 4; i++)
-                for (int j = i + 1; j < 4; j++)
-                    if (wt[j] > wt[i]) { float t = wt[i]; wt[i] = wt[j]; wt[j] = t; int k = idx[i]; idx[i] = idx[j]; idx[j] = k; }
-            float sum = wt[0] + wt[1] + wt[2] + wt[3];
-            if (sum <= 1e-6f) { wt[0] = 1f; sum = 1f; }
-            return new BoneWeight
-            {
-                boneIndex0 = idx[0], weight0 = wt[0] / sum,
-                boneIndex1 = wt[1] > 0f ? idx[1] : 0, weight1 = wt[1] / sum,
-                boneIndex2 = wt[2] > 0f ? idx[2] : 0, weight2 = wt[2] / sum,
-                boneIndex3 = wt[3] > 0f ? idx[3] : 0, weight3 = wt[3] / sum,
-            };
         }
     }
 }

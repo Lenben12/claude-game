@@ -224,7 +224,7 @@ namespace Sealebrities
         /// Returns the map texture; rebuilds once the terrain exists.
         public static Texture2D Get()
         {
-            bool terrainReady = WorldInfo.Terrain != null && WorldInfo.Terrain.terrainData != null;
+            bool terrainReady = WorldInfo.HeightProvider != null || WorldInfo.Terrain != null;
             if (tex != null && (fromTerrain || !terrainReady)) return tex;
             tex = Build(terrainReady);
             fromTerrain = terrainReady;
@@ -235,13 +235,12 @@ namespace Sealebrities
         {
             const int n = 256;
             var h = new float[n * n];
-            Terrain terrain = useTerrain ? WorldInfo.Terrain : null;
             for (int y = 0; y < n; y++)
                 for (int x = 0; x < n; x++)
                 {
                     float wx = -WorldHalf + (x + 0.5f) / n * WorldLayout.TerrainSize;
                     float wz = -WorldHalf + (y + 0.5f) / n * WorldLayout.TerrainSize;
-                    h[y * n + x] = terrain != null ? HeightFromTerrain(terrain, wx, wz) : ApproxHeight(wx, wz);
+                    h[y * n + x] = useTerrain ? WorldInfo.GroundHeight(new Vector3(wx, 0f, wz)) - Waves.SeaLevel : ApproxHeight(wx, wz);
                 }
 
             var px = new Color32[n * n];
@@ -270,15 +269,6 @@ namespace Sealebrities
             t.SetPixels32(px);
             t.Apply(false, true);
             return t;
-        }
-
-        static float HeightFromTerrain(Terrain t, float wx, float wz)
-        {
-            var td = t.terrainData;
-            var o = t.transform.position;
-            float u = (wx - o.x) / Mathf.Max(1f, td.size.x), v = (wz - o.z) / Mathf.Max(1f, td.size.z);
-            if (u < 0f || v < 0f || u > 1f || v > 1f) return WorldLayout.TerrainMinY;
-            return td.GetInterpolatedHeight(u, v) + o.y - Waves.SeaLevel;
         }
 
         /// Approximate island shape when no terrain exists (radius ~190 m with a wobbly coast).

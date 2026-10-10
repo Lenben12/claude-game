@@ -8,6 +8,8 @@ namespace Sealebrities
 {
     /// Collects static geometry per material (and optionally per grid cell), then merges it with Mesh.CombineMeshes
     /// into UInt32-indexed meshes. Cells get a LODGroup that culls them beyond a distance.
+    /// All input geometry is faceted (PropMeshBuilder.ToMesh is flat by default), so merged chunks keep the low-poly look;
+    /// one draw call per chunk and flat color.
     public sealed class PropBatch
     {
         struct Key : IEquatable<Key>
@@ -138,14 +140,15 @@ namespace Sealebrities
                     var list = groups[k];
                     if (list.Count == 0) continue;
                     var mat = mats[k.mat];
-                    var combined = new Mesh { name = name + "_" + mat.name, indexFormat = IndexFormat.UInt32 };
+                    string label = Label(mat);
+                    var combined = new Mesh { name = name + "_" + label, indexFormat = IndexFormat.UInt32 };
                     combined.CombineMeshes(list.ToArray(), true, true, false);
                     if (combined.vertexCount == 0) { UnityEngine.Object.Destroy(combined); continue; }
-                    if (mat.HasProperty("_BumpMap") && mat.GetTexture("_BumpMap") != null) combined.RecalculateTangents();
+                    LowPoly.Sanitize(combined);
                     combined.RecalculateBounds();
                     combined.UploadMeshData(true);
 
-                    var go = new GameObject(mat.name);
+                    var go = new GameObject(label);
                     go.transform.SetParent(cellT, false);
                     go.AddComponent<MeshFilter>().sharedMesh = combined;
                     var mr = go.AddComponent<MeshRenderer>();
@@ -163,6 +166,14 @@ namespace Sealebrities
             for (int i = 0; i < temps.Count; i++) UnityEngine.Object.Destroy(temps[i]);
             temps.Clear();
             return root;
+        }
+
+        /// Readable name for a merged renderer: shared flat materials are all called "SB_Opaque", so use their color.
+        static string Label(Material mat)
+        {
+            if (mat.name == "SB_Opaque" && mat.HasProperty("_BaseColor"))
+                return "Flat_" + ColorUtility.ToHtmlStringRGB(mat.GetColor("_BaseColor"));
+            return mat.name;
         }
 
         /// Single-level LODGroup that hides the renderers beyond roughly cullDistance (60° FOV assumed).
@@ -198,7 +209,10 @@ namespace Sealebrities
         public void Add(PropMeshBuilder b, Material mat, string name)
         {
             if (b.Empty) return;
-            parts.Add(new PropMeshPart(b.ToMesh(name), mat));
+            var mesh = b.ToMesh(name);
+            LowPoly.Sanitize(mesh);
+            if (mesh.vertexCount == 0) { UnityEngine.Object.Destroy(mesh); return; }
+            parts.Add(new PropMeshPart(mesh, mat));
         }
     }
 

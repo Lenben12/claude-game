@@ -269,5 +269,52 @@ Chopper Shop (Heli-Lieferung) · FinTube (Videos) · KRILL.tv (Livestream) · Fo
 | 39 | Ladebildschirme | Echte Meeres-Fakten + Tipps |
 | 40 | Meeresschutz | Leicht und lustig: Rücksicht bringt Fans, Tierstörung bringt Hater |
 
+## 15. Neuer Grafikstil + 40 Fragen zu Design und UI (11.10.2026)
+
+**Grafikstil geändert:** Der semi-realistische Look ist raus („zu detailliert, zu realistisch, sieht nach KI aus“). Neu: **Low Poly wie How to Fish und Safari-TV**: kantige, flach schattierte Dreiecke, einfarbige Flächen ohne Fototexturen, helle Pastellfarben, kantiges türkises Wasser, eckige Palmen mit rotbraunen Stämmen, Bohnen-Figuren mit Glupschaugen.
+
+| # | Thema | Entscheidung |
+|---|---|---|
+| 1 | Menü-Hintergrund | Die Taucher-Crew sitzt am Steg |
+| 2 | Logo | Wasser-/Blasen-Schrift |
+| 3 | HUD-Anordnung | **Geld + Follower unten rechts**, **Tauch-Anzeige (Ort/Tiefe) oben links**, Tag/Uhrzeit oben rechts bleibt; **keine dunkelblauen Kasten-Hintergründe** mehr |
+| 4 | Menü-Stimmung | Ukulele & Strand |
+| 5 | HUD-Stil | Freie Schrift mit Schatten/Umriss, ohne Kästen |
+| 6 | Aufgabe | Nur kurz einblenden, per Taste wieder anzeigen |
+| 7 | Fadenkreuz | Kleiner Punkt immer |
+| 8 | Geld/Follower | Zwei Zeilen mit Icon, Zuwachs ploppt kurz auf |
+| 9 | Luft | Ring mit Restzeit, rot blinkend bei wenig Luft |
+| 10 | Tauch-Info oben links | Ort + Tiefe + Max-Tiefe |
+| 11 | Warnungen | Roter Bildschirmrand + Piepen |
+| 12 | Clip-Zähler | Kamera-Icon mit Zahl (grün gesichert, orange ungesichert) |
+| 13 | Handy-Ort | **Im 3D-Bild in der Hand**, eigene Hand sichtbar |
+| 14 | Handy offen | Welt läuft weiter |
+| 15 | Handy-Look | Altes verkratztes Handy, später upgradebar |
+| 16 | App-Icons | Flach & bunt |
+| 17 | Tagebuch | Alle Tiere als **graue Umrisse**; erst nach dem Finden farbig mit Name, größter Größe und Größen-Farbe |
+| 18 | Unentdeckt | Silhouette |
+| 19 | Detailseite | Rekord-Balken + Steckbrief |
+| 20 | Neuer Eintrag | Handy-Popup oben + Ping |
+| 21 | Hände | Neopren mit bunter Manschette |
+| 22 | Lampe | Nur in der Hand, wenn eingeschaltet |
+| 23 | Kamera-Modell | Kleiner als bisher |
+| 24 | Sucher | Camcorder-Rahmen mit REC |
+| 25 | Wasserfarbe flach | Helles Türkis |
+| 26 | Sichtweite flach | Weit, ca. 40 m |
+| 27 | Lichtstrahlen | Deutlich |
+| 28 | Oberfläche von unten | Hell glitzernd, kantig |
+| 29 | Nacht | Heller Mondlicht-Look |
+| 30 | Sterne | Viele + Mond |
+| 31 | Tiefsee-Leuchten | Viele bunte Partikel |
+| 32 | Lampenlicht | Warmes Gelb |
+| 33 | Insel | **Komplett überarbeiten:** viel mehr zu erkunden, viele Sammelobjekte und Secrets, mehr Dschungel, Leuchtturm, Bucht, schönerer Steg, viel mehr Details |
+| 34 | Tauchplätze | **Auf mehrere kleine Inseln verteilt** (jede Site hat eine Mini-Insel als Landmarke) |
+| 35 | Seekarte | Gezeichnete Draufsicht |
+| 36 | Markierung | Bojen + Wegpunkt im HUD |
+| 37 | Schrift | Verspielt rund |
+| 38 | UI-Farben | Hell & sonnig (Weiß, Sand, Türkis, Koralle) |
+| 39 | Namen im Co-op | Ja, mit Lautsprecher-Symbol |
+| 40 | Ladebildschirm | Unterwasser-Animation mit Fakten und Tipps |
+
 ## 12. Offene Punkte
 Werden in den nächsten Frage-Runden geklärt.

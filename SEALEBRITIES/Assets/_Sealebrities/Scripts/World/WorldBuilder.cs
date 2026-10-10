@@ -2,24 +2,25 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.Rendering;
 
 namespace Sealebrities
 {
-    /// Entry point of the World module: builds terrain, ocean, sky and the day/night cycle, then runs the
-    /// props builders (IslandProps, UnderwaterDecor) and fills WorldInfo. Heavy math runs on worker threads
-    /// while this coroutine keeps the loading screen alive.
+    /// Entry point of the World module: builds the low-poly mesh terrain, ocean, shoreline foam, sky and the day/night
+    /// cycle, then runs the props builders (IslandProps, UnderwaterDecor) and fills WorldInfo. Heavy math runs on worker
+    /// threads while this coroutine keeps the loading screen alive.
     public static class WorldBuilder
     {
-        public static Terrain Terrain { get; private set; }
+        /// The terrain as data (exact surface heights, chunk meshes' source). Null until built.
+        public static WorldTerrainData Ground { get; private set; }
         public static WorldOcean Ocean { get; private set; }
+        public static WorldCoast Coast { get; private set; }
         public static WorldDayNight DayNight { get; private set; }
 
         static readonly Vector3 MenuCameraPosition = new Vector3(300f, 55f, -230f);
         static readonly Vector3 MenuCameraLookAt = new Vector3(60f, 10f, 20f);
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { Terrain = null; Ocean = null; DayNight = null; }
+        static void ResetStatics() { Ground = null; Ocean = null; Coast = null; DayNight = null; }
 
         public static IEnumerator Build(Transform root, Action<float, string> progress)
         {
@@ -32,76 +33,49 @@ namespace Sealebrities
             Report(progress, 0.01f, "Insel wird vermessen …", "Surveying the island …");
             yield return null;
             var job = new WorldGenJob();
-            job.StartHeightsAndTextures();
-            while (!job.HeightsDone)
+            job.Start();
+            while (!job.Done)
             {
-                Report(progress, 0.02f + 0.26f * job.HeightProgress, "Insel wird vermessen …", "Surveying the island …");
+                Report(progress, 0.02f + 0.32f * job.Progress, "Insel wird vermessen …", "Surveying the island …");
                 yield return null;
             }
-            if (job.Heights == null)
+            if (job.Error != null) Debug.LogException(job.Error);
+            var terrain = job.Terrain;
+            if (terrain == null)
             {
-                if (job.Error != null) Debug.LogException(job.Error);
-                Debug.LogError("Sealebrities: heightfield generation failed – using a flat seabed.");
-                job.Heights = FallbackHeights();
+                Debug.LogError("Sealebrities: terrain generation failed – using a flat seabed.");
+                try { terrain = WorldGenJob.FlatFallback(); }
+                catch (Exception e) { Debug.LogException(e); terrain = null; }
             }
-            job.StartSplat();
+            else Debug.Log("Sealebrities: low-poly terrain " + terrain.TriangleCount + " triangles in " + terrain.Chunks.Length + " chunks.");
 
-            while (!job.TexturesDone)
+            // the exact triangulated surface is the ground truth for props, creatures, boat and player
+            Ground = terrain;
+            WorldInfo.Terrain = null;
+            WorldInfo.HeightProvider = terrain != null ? terrain.Height : (Func<float, float, float>)null;
+
+            // ---------------------------------------------------------------- terrain meshes
+            Report(progress, 0.35f, "Terrain wird geformt …", "Shaping the terrain …");
+            yield return null;
+            if (terrain != null)
             {
-                Report(progress, 0.28f + 0.06f * job.TextureProgress, "Sand, Fels und Dschungel werden gemalt …", "Painting sand, rock and jungle …");
-                yield return null;
+                yield return Guard(WorldTerrain.CreateObjects(world, terrain,
+                    p => Report(progress, 0.35f + 0.25f * p, "Terrain wird geformt …", "Shaping the terrain …")), "Terrain");
             }
-            EnsureTexturePixels(job);
-
-            // ---------------------------------------------------------------- terrain
-            Report(progress, 0.36f, "Texturen werden geladen …", "Loading textures …");
-            yield return null;
-            var layers = WorldTextures.CreateTerrainLayers(job.TerrainPixels);
-            job.TerrainPixels = null;
-
-            Report(progress, 0.42f, "Terrain wird geformt …", "Shaping the terrain …");
-            yield return null;
-            var td = new TerrainData { name = "SB_TerrainData" };
-            td.heightmapResolution = WorldLayout.HeightmapResolution;
-            td.size = new Vector3(WorldLayout.TerrainSize, WorldLayout.TerrainHeightRange, WorldLayout.TerrainSize);
-            td.SetHeights(0, 0, job.Heights);
-            yield return null;
-
-            while (!job.SplatDone)
-            {
-                Report(progress, 0.5f + 0.06f * job.SplatProgress, "Meeresboden wird eingefärbt …", "Coloring the seabed …");
-                yield return null;
-            }
-            Report(progress, 0.57f, "Meeresboden wird eingefärbt …", "Coloring the seabed …");
-            yield return null;
-            td.alphamapResolution = WorldGenJob.AlphamapResolution;
-            td.baseMapResolution = 1024;
-            td.terrainLayers = layers;
-            if (job.Splat != null) td.SetAlphamaps(0, 0, job.Splat);
-            else
-            {
-                if (job.Error != null) Debug.LogException(job.Error);
-                Debug.LogError("Sealebrities: splatmap generation failed – terrain uses its first layer only.");
-            }
-            job.Splat = null;
-            job.Heights = null;
-            yield return null;
-
-            Terrain = CreateTerrainObject(world, td);
-            WorldInfo.Terrain = Terrain;
             FillWorldInfo();
             Report(progress, 0.62f, "Himmel und Meer …", "Sky and sea …");
             yield return null;
 
-            // ---------------------------------------------------------------- ocean & sky
-            var ripples = job.OceanRipples != null ? WorldTextures.Make(job.OceanRipples, 256, true, "SB_OceanRipples", TextureWrapMode.Repeat, 8) : null;
-            Ocean = WorldOcean.Create(world, ripples);
-            var starTex = job.StarDot != null ? WorldTextures.Make(job.StarDot, 32, false, "SB_StarDot", TextureWrapMode.Clamp, 1) : null;
-            var moonTex = job.Moon != null ? WorldTextures.Make(job.Moon, 128, false, "SB_Moon", TextureWrapMode.Clamp, 1) : null;
-            var cloudTex = job.Clouds != null ? WorldTextures.Make(job.Clouds, WorldGenJob.CloudTextureSize, false, "SB_Clouds", TextureWrapMode.Clamp, 4) : null;
-            job.OceanRipples = job.StarDot = job.Moon = job.Clouds = null;
-            DayNight = WorldSky.Create(world, starTex, moonTex, cloudTex);
-            WorldInfo.Sun = RenderSettings.sun;
+            // ---------------------------------------------------------------- ocean, coast & sky
+            try { Ocean = WorldOcean.Create(world, job.Water); }
+            catch (Exception e) { Debug.LogError("Sealebrities: ocean failed."); Debug.LogException(e); }
+            try { Coast = WorldCoast.Create(world, job.Coast); }
+            catch (Exception e) { Debug.LogError("Sealebrities: shoreline foam failed."); Debug.LogException(e); }
+            job.Water = null; job.Coast = null;
+            yield return null;
+            try { DayNight = WorldSky.Create(world); }
+            catch (Exception e) { Debug.LogError("Sealebrities: sky failed."); Debug.LogException(e); }
+            if (WorldInfo.Sun == null) WorldInfo.Sun = RenderSettings.sun;
             Report(progress, 0.66f, "Himmel und Meer …", "Sky and sea …");
             yield return null;
 
@@ -151,38 +125,6 @@ namespace Sealebrities
             }
         }
 
-        static Terrain CreateTerrainObject(Transform parent, TerrainData td)
-        {
-            var go = Terrain.CreateTerrainGameObject(td);
-            go.name = "Terrain";
-            go.transform.SetParent(parent, false);
-            go.transform.position = new Vector3(-WorldLayout.TerrainSize * 0.5f, WorldLayout.TerrainMinY, -WorldLayout.TerrainSize * 0.5f);
-            go.isStatic = false;
-
-            var t = go.GetComponent<Terrain>();
-            var mat = MaterialLibrary.Terrain();
-            mat.EnableKeyword("_NORMALMAP");
-            if (mat.HasProperty("_EnableInstancedPerPixelNormal"))
-            {
-                mat.SetFloat("_EnableInstancedPerPixelNormal", 1f);
-                mat.EnableKeyword("_TERRAIN_INSTANCED_PERPIXEL_NORMAL");
-            }
-            t.materialTemplate = mat;
-            t.drawInstanced = true;
-            t.heightmapPixelError = 5f;
-            t.basemapDistance = 500f;
-            t.heightmapMaximumLOD = 0;
-            t.drawTreesAndFoliage = false;
-            t.allowAutoConnect = false;
-            t.shadowCastingMode = ShadowCastingMode.On;
-            t.reflectionProbeUsage = ReflectionProbeUsage.BlendProbesAndSkybox;
-            t.Flush();
-
-            if (go.GetComponent<TerrainCollider>() == null)
-                go.AddComponent<TerrainCollider>().terrainData = td;
-            return t;
-        }
-
         static void FillWorldInfo()
         {
             float sea = Waves.SeaLevel;
@@ -205,26 +147,6 @@ namespace Sealebrities
             WorldInfo.LighthousePosition = new Vector3(lh.x, WorldInfo.GroundHeight(lh), lh.z);
             WorldInfo.MenuCameraPosition = MenuCameraPosition;
             WorldInfo.MenuCameraLookAt = MenuCameraLookAt;
-        }
-
-        static float[,] FallbackHeights()
-        {
-            int res = WorldLayout.HeightmapResolution;
-            var h = new float[res, res];
-            float n = (-20f - WorldLayout.TerrainMinY) / WorldLayout.TerrainHeightRange;
-            for (int z = 0; z < res; z++)
-                for (int x = 0; x < res; x++) h[z, x] = n;
-            return h;
-        }
-
-        /// Fills any texture that failed to generate on the worker threads with a small synchronous version.
-        static void EnsureTexturePixels(WorldGenJob job)
-        {
-            if (job.Error != null) Debug.LogException(job.Error);
-            int count = Enum.GetValues(typeof(WorldSurface)).Length;
-            if (job.TerrainPixels == null || job.TerrainPixels.Length != count) job.TerrainPixels = new WorldPixels[count];
-            for (int i = 0; i < count; i++)
-                if (job.TerrainPixels[i] == null) job.TerrainPixels[i] = WorldTextureGen.Terrain((WorldSurface)i, 64);
         }
     }
 }

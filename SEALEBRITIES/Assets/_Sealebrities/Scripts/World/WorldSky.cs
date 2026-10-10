@@ -3,34 +3,34 @@ using UnityEngine.Rendering;
 
 namespace Sealebrities
 {
-    /// Builds the sky: sun and moon lights, procedural skybox, a sky-only realtime reflection probe and the
-    /// camera-centered star, moon and cloud layers. The WorldDayNight component animates all of it.
+    /// Builds the low-poly sky: sun and moon lights, a pastel procedural skybox, a sky-only realtime reflection probe,
+    /// camera-centered faceted stars and moon, and drifting low-poly cloud puffs. WorldDayNight animates all of it.
     public static class WorldSky
     {
-        public const int StarQueue = 2900, MoonQueue = 2905, CloudQueue = 2910;
+        public const int StarQueue = 2900, MoonQueue = 2905;
 
-        public static WorldDayNight Create(Transform parent, Texture2D starTex, Texture2D moonTex, Texture2D cloudTex)
+        public static WorldDayNight Create(Transform parent)
         {
             var root = new GameObject("Sky");
             root.transform.SetParent(parent, false);
 
             DisableForeignDirectionalLights();
 
-            // ---- sun (the only shadow-casting light, also RenderSettings.sun so URP and the skybox use it)
+            // ---- sun (shadow-casting main light by day, RenderSettings.sun so URP and the skybox use it)
             var sunGo = new GameObject("Sun");
             sunGo.transform.SetParent(root.transform, false);
             var sun = sunGo.AddComponent<Light>();
             sun.type = LightType.Directional;
             sun.shadows = LightShadows.Soft;
-            sun.shadowStrength = 0.85f;
+            sun.shadowStrength = 0.62f;
             sun.shadowBias = 0.05f;
             sun.shadowNormalBias = 0.4f;
             sun.renderMode = LightRenderMode.ForcePixel;
-            sun.intensity = 1.2f;
-            sun.color = new Color(1f, 0.8f, 0.6f);
+            sun.intensity = 1.4f;
+            sun.color = new Color(1f, 0.92f, 0.82f);
             RenderSettings.sun = sun;
 
-            // ---- moon: weak, bluish, no shadows
+            // ---- moon: soft bluish light, no shadows; becomes the main light (and lights the skybox) at night
             var moonGo = new GameObject("Moon");
             moonGo.transform.SetParent(root.transform, false);
             var moon = moonGo.AddComponent<Light>();
@@ -38,13 +38,13 @@ namespace Sealebrities
             moon.shadows = LightShadows.None;
             moon.renderMode = LightRenderMode.ForcePixel;
             moon.intensity = 0f;
-            moon.color = new Color(0.55f, 0.66f, 1f);
+            moon.color = new Color(0.62f, 0.72f, 1f);
             moon.enabled = false;
 
             // shadow distance: URP asset value set by the editor setup (QualitySettings.shadowDistance is ignored by URP)
             QualitySettings.realtimeReflectionProbes = true;
 
-            // ---- skybox
+            // ---- skybox: Unity's procedural sky, tuned light and pastel (values animated by WorldDayNight)
             Material sky = null;
             var skyShader = Shader.Find("Skybox/Procedural");
             if (skyShader != null)
@@ -55,11 +55,11 @@ namespace Sealebrities
                 sky.DisableKeyword("_SUNDISK_SIMPLE");
                 sky.EnableKeyword("_SUNDISK_HIGH_QUALITY");
                 sky.SetFloat("_SunSize", 0.045f);
-                sky.SetFloat("_SunSizeConvergence", 5f);
+                sky.SetFloat("_SunSizeConvergence", 3.5f);
                 sky.SetFloat("_AtmosphereThickness", 1f);
-                sky.SetColor("_SkyTint", new Color(0.45f, 0.5f, 0.62f));
-                sky.SetColor("_GroundColor", new Color(0.15f, 0.25f, 0.31f));
-                sky.SetFloat("_Exposure", 1.2f);
+                sky.SetColor("_SkyTint", new Color(0.40f, 0.50f, 0.64f));
+                sky.SetColor("_GroundColor", new Color(0.40f, 0.55f, 0.66f));
+                sky.SetFloat("_Exposure", 2.8f);
                 RenderSettings.skybox = sky;
             }
             else Debug.LogWarning("Sealebrities: Skybox/Procedural shader not found – sky falls back to the camera background.");
@@ -68,7 +68,7 @@ namespace Sealebrities
             RenderSettings.defaultReflectionMode = DefaultReflectionMode.Skybox;
             RenderSettings.reflectionIntensity = 1f;
 
-            // ---- sky-only reflection probe covering the whole map (water and wet surfaces reflect the current sky)
+            // ---- sky-only reflection probe covering the whole map (the water's soft glints reflect the current sky)
             var probeGo = new GameObject("SkyReflection");
             probeGo.transform.SetParent(root.transform, false);
             probeGo.transform.position = new Vector3(0f, 20f, 0f);
@@ -76,7 +76,7 @@ namespace Sealebrities
             probe.mode = ReflectionProbeMode.Realtime;
             probe.refreshMode = ReflectionProbeRefreshMode.ViaScripting;
             probe.timeSlicingMode = ReflectionProbeTimeSlicingMode.NoTimeSlicing;
-            probe.resolution = 128;
+            probe.resolution = 64;
             probe.hdr = true;
             probe.clearFlags = ReflectionProbeClearFlags.Skybox;
             probe.cullingMask = 0;
@@ -87,18 +87,17 @@ namespace Sealebrities
             probe.blendDistance = 0f;
             probe.intensity = 1f;
 
-            // ---- camera-centered sky layers
-            var starMat = SkyMaterial(MaterialLibrary.ParticlesUnlit != null ? MaterialLibrary.ParticlesUnlit : MaterialLibrary.UnlitShader, starTex, StarQueue, "SB_Stars");
-            var stars = SkyObject(root.transform, "Stars", BuildStars(1700, 7331), starMat);
+            // ---- camera-centered sky layers (vertex colored, untextured)
+            var vcShader = MaterialLibrary.ParticlesUnlit != null ? MaterialLibrary.ParticlesUnlit : MaterialLibrary.UnlitShader;
+            var starMat = SkyMaterial(vcShader, StarQueue, "SB_Stars");
+            var stars = SkyObject(root.transform, "Stars", BuildStars(950, 7331), starMat);
+            var moonMat = SkyMaterial(vcShader, MoonQueue, "SB_MoonDisc");
+            var moonDisc = SkyObject(root.transform, "MoonDisc", BuildMoonDisc(), moonMat);
 
-            var moonMat = SkyMaterial(MaterialLibrary.UnlitShader, moonTex, MoonQueue, "SB_MoonDisc");
-            var moonDisc = SkyObject(root.transform, "MoonDisc", BuildQuad(), moonMat);
-
-            var cloudMat = SkyMaterial(MaterialLibrary.UnlitShader, cloudTex, CloudQueue, "SB_Clouds");
-            var clouds = SkyObject(root.transform, "Clouds", BuildCloudDome(), cloudMat);
+            var clouds = new WorldClouds(root.transform);
 
             var dn = root.AddComponent<WorldDayNight>();
-            dn.Init(sun, moon, sky, probe, stars, starMat, moonDisc, moonMat, clouds, cloudMat);
+            dn.Init(sun, moon, sky, probe, stars, starMat, moonDisc, moonMat, clouds);
             WorldInfo.Sun = sun;
             dn.ApplyNow();
             return dn;
@@ -115,10 +114,9 @@ namespace Sealebrities
             }
         }
 
-        static Material SkyMaterial(Shader shader, Texture2D tex, int queue, string name)
+        static Material SkyMaterial(Shader shader, int queue, string name)
         {
             var m = new Material(shader) { name = name };
-            if (tex != null) m.SetTexture("_BaseMap", tex);
             m.SetColor("_BaseColor", new Color(1f, 1f, 1f, 0f));
             MaterialLibrary.MakeTransparent(m, true);
             m.renderQueue = queue;
@@ -142,95 +140,92 @@ namespace Sealebrities
         }
 
         // ------------------------------------------------------------------ meshes (unit radius, scaled at runtime)
+        /// Tiny flat diamonds (4 vertices each) on the unit sphere; brightness lives in the vertex alpha.
         static Mesh BuildStars(int count, int seed)
         {
             var rng = new System.Random(seed);
             var v = new Vector3[count * 4];
-            var uv = new Vector2[count * 4];
             var col = new Color[count * 4];
             var tris = new int[count * 6];
             for (int s = 0; s < count; s++)
             {
-                float y = 0.03f + 0.97f * (float)rng.NextDouble();
+                float y = 0.04f + 0.96f * (float)rng.NextDouble();
                 float phi = (float)rng.NextDouble() * Mathf.PI * 2f;
                 float rr = Mathf.Sqrt(1f - y * y);
                 var dir = new Vector3(rr * Mathf.Cos(phi), y, rr * Mathf.Sin(phi));
                 var t1 = Vector3.Cross(dir, Mathf.Abs(dir.y) > 0.95f ? Vector3.right : Vector3.up).normalized;
                 var t2 = Vector3.Cross(dir, t1);
                 float r3 = (float)rng.NextDouble();
-                float size = Mathf.Lerp(0.0022f, 0.0058f, r3 * r3 * r3);
-                float bright = 0.35f + 0.65f * (float)(rng.NextDouble() * rng.NextDouble());
+                float size = Mathf.Lerp(0.0018f, 0.0042f, r3 * r3 * r3);
+                float bright = 0.45f + 0.55f * (float)(rng.NextDouble() * rng.NextDouble());
                 float tintPick = (float)rng.NextDouble();
-                Color tint = tintPick < 0.18f ? new Color(0.75f, 0.85f, 1f) : tintPick < 0.3f ? new Color(1f, 0.9f, 0.72f) : Color.white;
-                float horizon = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.03f, 0.22f, y));
+                Color tint = tintPick < 0.2f ? new Color(0.78f, 0.88f, 1f) : tintPick < 0.32f ? new Color(1f, 0.92f, 0.75f) : Color.white;
+                float horizon = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.04f, 0.2f, y));
                 var c = new Color(tint.r, tint.g, tint.b, bright * horizon);
 
                 int b = s * 4;
-                v[b + 0] = dir + (-t1 - t2) * size; uv[b + 0] = new Vector2(0f, 0f);
-                v[b + 1] = dir + (t1 - t2) * size; uv[b + 1] = new Vector2(1f, 0f);
-                v[b + 2] = dir + (t1 + t2) * size; uv[b + 2] = new Vector2(1f, 1f);
-                v[b + 3] = dir + (-t1 + t2) * size; uv[b + 3] = new Vector2(0f, 1f);
+                v[b + 0] = dir - t1 * size;
+                v[b + 1] = dir + t2 * size;
+                v[b + 2] = dir + t1 * size;
+                v[b + 3] = dir - t2 * size;
                 col[b] = col[b + 1] = col[b + 2] = col[b + 3] = c;
                 int t = s * 6;
                 tris[t] = b; tris[t + 1] = b + 1; tris[t + 2] = b + 2;
                 tris[t + 3] = b; tris[t + 4] = b + 2; tris[t + 5] = b + 3;
             }
             var m = new Mesh { name = "SB_Stars" };
-            m.vertices = v; m.uv = uv; m.colors = col; m.triangles = tris;
+            m.vertices = v; m.colors = col; m.triangles = tris;
             m.bounds = new Bounds(Vector3.zero, Vector3.one * 2.2f);
             return m;
         }
 
-        static Mesh BuildQuad()
+        /// Faceted moon: a 12-sided disc of alternating light/pale triangles with three flat, darker "maria" polygons.
+        static Mesh BuildMoonDisc()
         {
-            var m = new Mesh { name = "SB_MoonQuad" };
-            m.vertices = new[] { new Vector3(-0.5f, -0.5f, 0f), new Vector3(0.5f, -0.5f, 0f), new Vector3(0.5f, 0.5f, 0f), new Vector3(-0.5f, 0.5f, 0f) };
-            m.uv = new[] { new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(0f, 1f) };
-            m.triangles = new[] { 0, 2, 1, 0, 3, 2 };
+            const int seg = 12;
+            var verts = new System.Collections.Generic.List<Vector3>();
+            var cols = new System.Collections.Generic.List<Color>();
+            var tris = new System.Collections.Generic.List<int>();
+            var light = new Color(0.97f, 0.96f, 0.9f, 1f);
+            var pale = new Color(0.9f, 0.9f, 0.86f, 1f);
+            for (int i = 0; i < seg; i++)
+            {
+                float a0 = (i + 0.25f) / seg * Mathf.PI * 2f, a1 = (i + 1.25f) / seg * Mathf.PI * 2f;
+                int b = verts.Count;
+                verts.Add(Vector3.zero);
+                verts.Add(new Vector3(Mathf.Cos(a1), Mathf.Sin(a1), 0f) * 0.5f);
+                verts.Add(new Vector3(Mathf.Cos(a0), Mathf.Sin(a0), 0f) * 0.5f);
+                var c = (i & 1) == 0 ? light : pale;
+                cols.Add(c); cols.Add(c); cols.Add(c);
+                tris.Add(b); tris.Add(b + 1); tris.Add(b + 2);
+            }
+            AddMare(verts, cols, tris, new Vector2(-0.14f, 0.12f), 0.12f, 6, 0.3f);
+            AddMare(verts, cols, tris, new Vector2(0.15f, -0.06f), 0.09f, 5, 1.1f);
+            AddMare(verts, cols, tris, new Vector2(-0.04f, -0.2f), 0.065f, 5, 2.0f);
+            var m = new Mesh { name = "SB_MoonDisc" };
+            m.SetVertices(verts);
+            m.SetColors(cols);
+            m.SetTriangles(tris, 0);
             m.RecalculateNormals();
             m.bounds = new Bounds(Vector3.zero, Vector3.one * 1.5f);
             return m;
         }
 
-        /// Hemisphere whose UVs project a flat cloud layer: zenith at the texture center, horizon at the rim.
-        static Mesh BuildCloudDome()
+        static void AddMare(System.Collections.Generic.List<Vector3> v, System.Collections.Generic.List<Color> c,
+                            System.Collections.Generic.List<int> t, Vector2 center, float r, int sides, float rot)
         {
-            float[] elev = { -2f, 0f, 1.5f, 3f, 5f, 7.5f, 10f, 13f, 17f, 22f, 28f, 35f, 44f, 55f, 68f, 80f, 90f };
-            const int seg = 64;
-            int rows = elev.Length;
-            var v = new Vector3[rows * (seg + 1)];
-            var uv = new Vector2[v.Length];
-            for (int r = 0; r < rows; r++)
+            var col = new Color(0.78f, 0.79f, 0.8f, 1f);
+            var ctr = new Vector3(center.x, center.y, -0.002f);
+            for (int i = 0; i < sides; i++)
             {
-                float e = elev[r] * Mathf.Deg2Rad;
-                float y = Mathf.Sin(e), h = Mathf.Cos(e);
-                for (int s = 0; s <= seg; s++)
-                {
-                    float a = s / (float)seg * Mathf.PI * 2f;
-                    var d = new Vector3(h * Mathf.Cos(a), y, h * Mathf.Sin(a));
-                    int k = r * (seg + 1) + s;
-                    v[k] = d;
-                    float py = Mathf.Max(d.y, 0.012f);
-                    float px = d.x / py, pz = d.z / py;
-                    float len = Mathf.Sqrt(px * px + pz * pz);
-                    float rho = len / (len + 2f);
-                    uv[k] = len > 1e-5f ? new Vector2(0.5f + 0.5f * rho * px / len, 0.5f + 0.5f * rho * pz / len) : new Vector2(0.5f, 0.5f);
-                }
+                float a0 = rot + i / (float)sides * Mathf.PI * 2f, a1 = rot + (i + 1) / (float)sides * Mathf.PI * 2f;
+                int b = v.Count;
+                v.Add(ctr);
+                v.Add(ctr + new Vector3(Mathf.Cos(a1), Mathf.Sin(a1), 0f) * r);
+                v.Add(ctr + new Vector3(Mathf.Cos(a0), Mathf.Sin(a0), 0f) * r);
+                c.Add(col); c.Add(col); c.Add(col);
+                t.Add(b); t.Add(b + 1); t.Add(b + 2);
             }
-            var tris = new int[(rows - 1) * seg * 6];
-            int t = 0;
-            for (int r = 0; r < rows - 1; r++)
-                for (int s = 0; s < seg; s++)
-                {
-                    int a = r * (seg + 1) + s, b = a + 1, c = a + seg + 1, d = c + 1;
-                    tris[t++] = a; tris[t++] = c; tris[t++] = b;
-                    tris[t++] = b; tris[t++] = c; tris[t++] = d;
-                }
-            var m = new Mesh { name = "SB_CloudDome" };
-            m.vertices = v; m.uv = uv; m.triangles = tris;
-            m.RecalculateNormals();
-            m.bounds = new Bounds(Vector3.zero, Vector3.one * 2.2f);
-            return m;
         }
     }
 }

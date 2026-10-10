@@ -64,17 +64,20 @@ namespace Sealebrities
         static Material BubbleMaterial()
         {
             if (mat != null) return mat;
+            // cartoon bubble (low-poly look, matches the FX bubbles): crisp white outline, faint body, small highlight
             tex = new Texture2D(32, 32, TextureFormat.RGBA32, false) { name = "SB_FaunaBubble", wrapMode = TextureWrapMode.Clamp };
             var px = new Color32[32 * 32];
+            const float Aa = 1.1f / 16f, Outer = 0.92f, Inner = 0.74f;
             for (int y = 0; y < 32; y++)
                 for (int x = 0; x < 32; x++)
                 {
                     float dx = (x + 0.5f) / 16f - 1f, dy = (y + 0.5f) / 16f - 1f;
                     float d = Mathf.Sqrt(dx * dx + dy * dy);
-                    float ring = Mathf.Clamp01(1f - Mathf.Abs(d - 0.82f) * 7f);
-                    float fill = d < 0.85f ? 0.18f : 0f;
-                    float hl = Mathf.Clamp01(1f - ((dx + 0.35f) * (dx + 0.35f) + (dy - 0.35f) * (dy - 0.35f)) * 18f);
-                    float a = Mathf.Clamp01(Mathf.Max(ring, fill) + hl);
+                    float inside = Mathf.Clamp01((Outer - d) / Aa + 0.5f);
+                    float rim = inside * Mathf.Clamp01((d - Inner) / Aa + 0.5f);
+                    float hx = dx + 0.3f, hy = dy - 0.3f;
+                    float hl = Mathf.Clamp01((0.17f - Mathf.Sqrt(hx * hx + hy * hy)) / Aa + 0.5f);
+                    float a = Mathf.Clamp01(Mathf.Max(Mathf.Max(rim * 0.95f, hl), inside * 0.2f));
                     px[y * 32 + x] = new Color32(255, 255, 255, (byte)(a * 255f));
                 }
             tex.SetPixels32(px);

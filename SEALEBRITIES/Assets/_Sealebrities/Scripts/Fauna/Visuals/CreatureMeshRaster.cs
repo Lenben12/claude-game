@@ -11,6 +11,73 @@ namespace Sealebrities
         /// Shading callback: slot, interpolated uv, unit normal (model space), position -> color with alpha.
         public delegate Color Shader(int slot, Vector2 uv, Vector3 normal, Vector3 pos);
 
+        /// 3/4 icon camera direction per body plan (camera looks along fwd; it sits front-left above the animal).
+        public static void IconView(SpeciesDef s, out Vector3 fwd, out Vector3 up)
+        {
+            up = Vector3.up;
+            switch (s.plan)
+            {
+                case BodyPlan.Ray: fwd = new Vector3(0.45f, -0.82f, -0.38f); break;
+                case BodyPlan.Jelly: fwd = new Vector3(0.15f, -0.32f, -1f); break;
+                case BodyPlan.Seahorse: fwd = new Vector3(1f, -0.12f, -0.35f); break;
+                case BodyPlan.Turtle: fwd = new Vector3(0.7f, -0.6f, -0.6f); break;
+                case BodyPlan.Octopus:
+                case BodyPlan.VampireSquid: fwd = new Vector3(0.85f, -0.45f, -0.45f); break;
+                case BodyPlan.Sunfish: fwd = new Vector3(1f, -0.12f, -0.35f); break;
+                case BodyPlan.Eel: fwd = new Vector3(0.55f, -0.75f, -0.35f); break;
+                case BodyPlan.SeaLion: fwd = new Vector3(1f, -0.32f, -0.5f); break;
+                case BodyPlan.Shark:
+                    fwd = s.variant == "hammer" ? new Vector3(0.75f, -0.6f, -0.45f) : (s.variant == "whale" ? new Vector3(0.85f, -0.45f, -0.45f) : new Vector3(1f, -0.3f, -0.45f));
+                    break;
+                default: fwd = new Vector3(1f, -0.22f, -0.45f); break;
+            }
+            fwd = fwd.normalized;
+        }
+
+        /// Managed rasterization of the faceted model (flat normals, point-sampled color blocks, solid slot colors).
+        /// Used for the icon fallback when GPU rendering is unavailable.
+        public static Color32[] RenderFlat(CreatureMeshBake bake, int size)
+        {
+            var ctx = bake.Ctx;
+            var s = ctx.S;
+            var f = bake.Flat;
+            IconView(s, out Vector3 fwd, out Vector3 up);
+            var tris = new IList<int>[CreatureMeshSlot.Count];
+            for (int i = 0; i < tris.Length; i++) tris[i] = f.Tris[i];
+            var transparent = new bool[CreatureMeshSlot.Count];
+            if (ctx.Layout == CreatureMeshLayout.Bell) { transparent[CreatureMeshSlot.Skin] = true; transparent[CreatureMeshSlot.Shell] = true; transparent[CreatureMeshSlot.Extra] = true; }
+            var look = CreatureMeshEyes.Look(ctx.EyeStyle);
+            Vector3 side = CreatureMeshMath.Norm(Vector3.Cross(Vector3.up, fwd));
+            Vector3 key = CreatureMeshMath.Norm(-fwd * 0.55f + Vector3.up * 0.75f + side * 0.3f);
+            Color glow = CreatureMeshColors.Glow(ctx);
+            Shader shade = (slot, uv, n, pos) =>
+            {
+                Color a;
+                bool emissive = false;
+                switch (slot)
+                {
+                    case CreatureMeshSlot.Skin:
+                        a = ctx.Layout == CreatureMeshLayout.Bell ? CreatureMeshColors.Bell(s) : (bake.Skin != null ? bake.Skin.Sample(uv) : s.colorA);
+                        break;
+                    case CreatureMeshSlot.Fin: a = bake.Fins != null ? bake.Fins.Sample(uv) : s.colorC; break;
+                    case CreatureMeshSlot.Eye: a = look.Sclera; break;
+                    case CreatureMeshSlot.Pupil: a = look.Iris; break;
+                    case CreatureMeshSlot.Mouth: a = CreatureMeshColors.Mouth; break;
+                    case CreatureMeshSlot.Teeth: a = CreatureMeshColors.Tooth; break;
+                    case CreatureMeshSlot.Glow: a = glow; emissive = true; break;
+                    case CreatureMeshSlot.Shell:
+                        a = bake.Shell != null ? bake.Shell.Sample(uv) : CreatureMeshColors.Shell(s);
+                        break;
+                    default: a = CreatureMeshColors.Extra(s); break;
+                }
+                if (emissive) return new Color(a.r, a.g, a.b, 1f);
+                float d = Math.Max(0f, Vector3.Dot(n, key));
+                float l = 0.5f + 0.1f * n.y + 0.62f * d;
+                return new Color(a.r * l, a.g * l, a.b * l, a.a);
+            };
+            return Render(f.Verts, f.Uvs, f.Normals, tris, transparent, size, fwd, up, shade);
+        }
+
         public static Color32[] Render(IList<Vector3> verts, IList<Vector2> uvs, Vector3[] normals, IList<int>[] tris, bool[] transparent,
                                        int size, Vector3 viewDir, Vector3 upDir, Shader shade, float margin = 0.07f)
         {

@@ -153,7 +153,7 @@ namespace Sealebrities
             rope.positionCount = ropePts.Length;
             rope.widthMultiplier = 0.025f;
             rope.numCapVertices = 2;
-            rope.sharedMaterial = MaterialLibrary.Unlit(new Color(0.42f, 0.37f, 0.28f));
+            rope.sharedMaterial = MaterialLibrary.Unlit(new Color(0.8f, 0.7f, 0.48f));   // flat rope color (low-poly look)
             rope.shadowCastingMode = ShadowCastingMode.Off;
             rope.receiveShadows = false;
             rope.enabled = false;

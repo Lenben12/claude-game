@@ -4,47 +4,53 @@ using UnityEngine.Rendering;
 namespace Sealebrities
 {
     /// Procedural textures and transparent particle materials used by the FX module.
+    /// Low-poly look: clean graphic shapes with crisp anti-aliased edges instead of soft photographic blobs.
     static class FXAssets
     {
-        /// Soft round speck (white, alpha falloff).
-        public static Texture2D SoftDot(int size)
+        /// Clean round speck: solid white disc with a ~1 px anti-aliased edge.
+        public static Texture2D CleanDot(int size)
         {
             var px = new Color32[size * size];
             float half = size * 0.5f;
+            float aa = 1.2f / half;   // edge width in normalized radius units
             for (int y = 0; y < size; y++)
             for (int x = 0; x < size; x++)
             {
                 float dx = (x + 0.5f - half) / half, dy = (y + 0.5f - half) / half;
                 float r = Mathf.Sqrt(dx * dx + dy * dy);
-                float a = FXMath.Clamp01(1f - r);
-                a = a * a * (3f - 2f * a);
+                float a = FXMath.Clamp01((0.9f - r) / aa + 0.5f);
                 px[y * size + x] = new Color32(255, 255, 255, (byte)(a * 255f));
             }
-            return Finish("FX_SoftDot", size, size, px, TextureWrapMode.Clamp);
+            return Finish("FX_CleanDot", size, size, px, TextureWrapMode.Clamp);
         }
 
-        /// Air bubble: bright rim, faint body, small specular highlight.
-        public static Texture2D BubbleRing(int size)
+        /// Cartoon air bubble: crisp white outline, faint see-through body and a small solid highlight.
+        public static Texture2D CleanBubble(int size)
         {
             var px = new Color32[size * size];
             float half = size * 0.5f;
+            float aa = 1.1f / half;
+            const float Outer = 0.92f, Inner = 0.74f;
             for (int y = 0; y < size; y++)
             for (int x = 0; x < size; x++)
             {
                 float dx = (x + 0.5f - half) / half, dy = (y + 0.5f - half) / half;
                 float r = Mathf.Sqrt(dx * dx + dy * dy);
-                float rim = Mathf.Exp(-Mathf.Pow((r - 0.78f) / 0.11f, 2f));
-                float body = r < 0.8f ? 0.14f : 0f;
-                float hx = dx + 0.34f, hy = dy - 0.34f;
-                float hl = Mathf.Exp(-(hx * hx + hy * hy) / 0.018f);
-                float a = FXMath.Clamp01(rim * 0.9f + body + hl);
-                if (r > 0.98f) a = 0f;
-                px[y * size + x] = new Color32(255, 255, 255, (byte)(a * 255f));
+                float inside = Coverage(Outer - r, aa);          // whole bubble disc
+                float rim = inside * Coverage(r - Inner, aa);     // ring between Inner and Outer
+                float hx = dx + 0.3f, hy = dy - 0.3f;             // highlight up-left
+                float hl = Coverage(0.17f - Mathf.Sqrt(hx * hx + hy * hy), aa);
+                float a = Mathf.Max(Mathf.Max(rim * 0.95f, hl), inside * 0.2f);
+                px[y * size + x] = new Color32(255, 255, 255, (byte)(FXMath.Clamp01(a) * 255f));
             }
-            return Finish("FX_Bubble", size, size, px, TextureWrapMode.Clamp);
+            return Finish("FX_CleanBubble", size, size, px, TextureWrapMode.Clamp);
         }
 
-        /// God ray strip: gaussian across the width, fades in just below the surface (v = 1) and dies out with length.
+        /// Signed distance (positive = inside) to 0..1 coverage over an anti-aliasing width.
+        static float Coverage(float sd, float aa) => FXMath.Clamp01(sd / aa + 0.5f);
+
+        /// God ray strip: a flat band with soft edges across the width (graphic, not gaussian), fading in just
+        /// below the surface (v = 1) and dying out with length.
         public static Texture2D GodRay(int w, int h)
         {
             var px = new Color32[w * h];
@@ -52,13 +58,11 @@ namespace Sealebrities
             {
                 float v = (y + 0.5f) / h;   // 1 = top (surface)
                 float s = 1f - v;
-                float vertical = FXMath.SmoothRange(0f, 0.07f, s) * (1f - FXMath.SmoothRange(0.25f, 1f, s));
+                float vertical = FXMath.SmoothRange(0f, 0.06f, s) * (1f - FXMath.SmoothRange(0.3f, 1f, s));
                 for (int x = 0; x < w; x++)
                 {
-                    float u = (x + 0.5f) / w - 0.5f;
-                    float across = Mathf.Exp(-(u * u) / (2f * 0.17f * 0.17f));
-                    // soften the hard edges at u = +-0.5
-                    across *= 1f - FXMath.SmoothRange(0.38f, 0.5f, Mathf.Abs(u));
+                    float u = Mathf.Abs((x + 0.5f) / w - 0.5f);
+                    float across = 1f - FXMath.SmoothRange(0.26f, 0.48f, u);
                     float a = FXMath.Clamp01(across * vertical);
                     px[y * w + x] = new Color32(255, 255, 255, (byte)(a * 255f));
                 }

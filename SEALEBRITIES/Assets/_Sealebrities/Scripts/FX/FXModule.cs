@@ -5,6 +5,8 @@ namespace Sealebrities
     /// FX module entry point: global post-processing volume, fog and camera background (above/underwater),
     /// animated caustics (sun light cookie), camera-following particles (marine snow, exhale bubbles, splash,
     /// god rays) and fully procedural audio (ambience, breathing, heartbeat, jingles).
+    /// Art direction: clean low-poly "How to Fish" look (neutral tonemapping, soft bloom, no grain, bright
+    /// turquoise shallows fading to dark blue / near black in the deep via fog, crisp cartoon particles).
     public static class FXModule
     {
         static FXDirector director;

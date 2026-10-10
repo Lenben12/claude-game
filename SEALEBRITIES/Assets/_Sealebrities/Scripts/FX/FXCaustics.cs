@@ -8,14 +8,18 @@ namespace Sealebrities
     /// Animated caustics projected by the sun (light cookie) while the camera is underwater, shallow and it is day.
     /// 16 tileable, looping frames are generated on a worker thread; the cookie texture is re-composed ~15x per
     /// second by blending neighbouring frames and fading toward white (= no effect) with the caustic strength.
+    /// Low-poly look: clean, graphic light lines with low contrast (the cookie never darkens the sun by more than
+    /// ~20 %), only in the shallow reef (fully on to 7 m, gone by 16 m).
     sealed class FXCaustics
     {
         const int Size = 256;
         const int FrameCount = 16;
-        const float LoopSeconds = 3.2f;
+        const float LoopSeconds = 3.6f;
         const float UploadInterval = 1f / 15f;
-        const float TileMeters = 10f;
-        const float MaxDepth = 35f;
+        const float TileMeters = 11f;
+        const float FadeStart = 7f;
+        const float MaxDepth = 16f;
+        const float MaxStrength = 0.8f;
         const int Seed = 4711;
 
         Task<byte[][]> task;
@@ -141,8 +145,8 @@ namespace Sealebrities
             }
             if (sun == null || !EnsureReady()) return;
 
-            float depthFade = 1f - FXMath.SmoothRange(24f, MaxDepth, f.depth);
-            float target = (f.underwater && f.depth < MaxDepth) ? f.under01 * f.day01 * depthFade : 0f;
+            float depthFade = 1f - FXMath.SmoothRange(FadeStart, MaxDepth, f.depth);
+            float target = (f.underwater && f.depth < MaxDepth) ? MaxStrength * f.under01 * f.day01 * depthFade : 0f;
             if (!f.underwater || (target <= 0f && strength <= 0.01f))
             {
                 if (applied) Release();
@@ -287,10 +291,12 @@ namespace Sealebrities
                         float widthMod = 0.5f + 0.5f * MathF.Sin(Tau * (u + 2f * v) + tw + 0.7f);
                         float ea = a.Edge(wu, wv) * cellA;   // pixels
                         float eb = b.Edge(wu + 0.37f, wv + 0.11f) * cellB;
-                        float ca = Line(ea, 1.5f + 1.6f * widthMod, 5f + 4f * widthMod);
-                        float cb = Line(eb, 1.1f, 3.5f) * 0.38f;
+                        float ca = Band(ea, 1.5f + 1.3f * widthMod, 0.9f, 4.5f);
+                        float cb = Band(eb, 0.9f, 0.8f, 3f) * 0.35f;
                         float c = ca + cb * (1f - ca);
-                        float val = 0.46f + 0.54f * FXMath.Clamp01(c);   // average ~0.6 of the sunlight
+                        // low contrast: between the lines the cookie keeps 78 % of the sunlight at full strength
+                        // (~82 % at the MaxStrength cap), the lines get the full sun
+                        float val = 0.78f + 0.22f * FXMath.Clamp01(c);
                         buf[y * size + x] = (byte)(val * 255f + 0.5f);
                     }
                 }
@@ -299,12 +305,15 @@ namespace Sealebrities
             return result;
         }
 
-        /// Bright filament with a soft glow; e = distance to the cell border in pixels.
-        static float Line(float e, float sigma, float glow)
+        /// Clean graphic light line (flat band with an anti-aliased edge) plus a faint glow;
+        /// e = distance to the cell border in pixels.
+        static float Band(float e, float halfWidth, float soft, float glow)
         {
-            float core = MathF.Exp(-(e * e) / (2f * sigma * sigma));
-            float halo = MathF.Exp(-e / glow);
-            return FXMath.Clamp01(core * 0.8f + halo * 0.3f);
+            float x = (e - (halfWidth - soft)) / (2f * soft);
+            x = FXMath.Clamp01(x);
+            float core = 1f - x * x * (3f - 2f * x);
+            float halo = MathF.Exp(-e / glow) * 0.18f;
+            return FXMath.Clamp01(core + halo * (1f - core));
         }
     }
 }

@@ -5,13 +5,14 @@ using UnityEngine;
 namespace Sealebrities
 {
     /// A thin double-faced fin: columns run along s (base line), rows from the base (r = 0) to the edge (r = 1).
+    /// Low-poly fins use very few columns (the outline becomes a handful of flat triangles) and one row.
     internal sealed class CreatureMeshFin
     {
         public Func<float, Vector3> Base;        // s -> point on the body
         public Func<float, Vector3> Edge;        // s -> outer edge point
         public Func<float, Vector3> Normal;      // optional fin plane normal (otherwise derived)
         public Func<float, float, Vector3> Bend; // optional extra offset (s, r): cupping, ripples
-        public int Cols = 10, Rows = 4;
+        public int Cols = 4, Rows = 1;
         public float Thickness = 0.008f;         // at the base, tapers to 0 at the edge
         public int Band;                         // fin texture band 0..3
         public Func<float, float, Vector2> Uv;   // optional (s, r) -> uv override
@@ -61,29 +62,59 @@ namespace Sealebrities
             return sw.Build(b, slot, skin);
         }
 
-        /// Eye ball: texture center (pupil) faces lookDir; texture +y follows upRef.
-        public static void Eye(CreatureMeshBuilder b, Vector3 center, Vector3 lookDir, Vector3 upRef, float radius, float depthScale, CreatureMeshSkinFn skin)
+        // ------------------------------------------------------------------------------------------ cartoon eyes
+
+        /// Goggle eye: faceted sclera ball, black pupil lens on its front, white glint (friendly styles).
+        /// radius is the anatomical eye size; the eye style scales it (toy eyes for reef fish, tiny ones for the deep).
+        public static void Eye(CreatureMeshContext ctx, Vector3 center, Vector3 lookDir, float radius, CreatureMeshSkinFn skin)
         {
-            var sw = Ellipsoid(center, lookDir, upRef, radius, radius, radius * depthScale, 9, 18);
-            sw.Uv = (t, v) =>
+            var b = ctx.B;
+            var L = CreatureMeshEyes.Look(ctx.EyeStyle);
+            float R = radius * L.Scale;
+            Vector3 look = CreatureMeshMath.Norm(lookDir);
+            if (look.sqrMagnitude < 0.5f) look = Vector3.forward;
+            Vector3 up = Vector3.up - look * Vector3.Dot(Vector3.up, look);
+            up = up.sqrMagnitude > 1e-4f ? CreatureMeshMath.Norm(up) : CreatureMeshMath.Perp(look);
+            Vector3 fwd = Vector3.forward - look * Vector3.Dot(Vector3.forward, look);
+            fwd = fwd.sqrMagnitude > 1e-4f ? CreatureMeshMath.Norm(fwd) : Vector3.Cross(look, up);
+
+            const float depth = 0.92f;
+            int rings = R > 0.025f ? 6 : 5;
+            Ellipsoid(b, CreatureMeshSlot.Eye, center, look, up, R, R, R * depth, rings, 8, Vector2.zero, Vector2.zero, skin);
+
+            float p = L.Pupil;
+            float pw = p * L.PupilW, ph = p * L.PupilH;
+            float lateral = Math.Max(pw, ph);
+            float along = R * depth * CreatureMeshMath.Sqrt(Math.Max(0.05f, 1f - lateral * lateral)) * 0.97f;
+            Vector3 pc = center + look * along;
+            float pDepth = R * p * 0.42f;
+            Ellipsoid(b, CreatureMeshSlot.Pupil, pc, look, up, R * pw, R * ph, pDepth, 4, 6, Vector2.zero, Vector2.zero, skin);
+
+            if (L.Glint > 0f)
             {
-                // polar angle from the pupil pole: 0 .. 1 at the equator
-                float rho = CreatureMeshMath.Clamp01((float)Math.Acos(CreatureMeshMath.Clamp(1f - 2f * t, -1f, 1f)) / CreatureMeshMath.HalfPi);
-                float a = v * CreatureMeshMath.TwoPi;
-                return new Vector2(0.5f + 0.5f * rho * CreatureMeshMath.Sin(a), 0.5f - 0.5f * rho * CreatureMeshMath.Cos(a));
-            };
-            sw.Build(b, CreatureMeshSlot.Eye, skin);
+                float g = R * L.Glint;
+                Vector3 gc = pc + look * (pDepth * 0.8f) + up * (R * ph * 0.42f) + fwd * (R * pw * 0.3f);
+                Ellipsoid(b, CreatureMeshSlot.Teeth, gc, look, up, g, g, g * 0.6f, 3, 4, Vector2.zero, Vector2.zero, skin);
+            }
         }
 
-        /// Places a pair of eyes on a sweep surface at (t, thetaRight) and the mirrored side.
-        public static void EyePair(CreatureMeshBuilder b, CreatureMeshSweep body, float t, float theta, float radius, float forwardLook, float embed, float depthScale, CreatureMeshSkinFn skin)
+        /// Places a pair of eyes on a sweep surface at (t, thetaRight) and the mirrored side. embed: how deep the
+        /// eye ball sinks into the head (fraction of its radius; ~0.35 = goggle, ~0.6 = flush).
+        public static void EyePair(CreatureMeshContext ctx, CreatureMeshSweep body, float t, float theta, float radius, float forwardLook, float embed, CreatureMeshSkinFn skin)
         {
+            var L = CreatureMeshEyes.Look(ctx.EyeStyle);
             Vector3 p = body.Point(t, theta);
             Vector3 n = body.Normal(t, theta);
             Vector3 look = CreatureMeshMath.Norm(n + Vector3.forward * forwardLook);
-            Vector3 c = p - n * (radius * embed);
-            Eye(b, c, look, Vector3.up, radius, depthScale, skin);
-            Eye(b, CreatureMeshMath.MirrorX(c), CreatureMeshMath.MirrorX(look), Vector3.up, radius, depthScale, skin);
+            Vector3 c = p - n * (radius * L.Scale * embed);
+            Eye(ctx, c, look, radius, skin);
+            Eye(ctx, CreatureMeshMath.MirrorX(c), CreatureMeshMath.MirrorX(look), radius, skin);
+        }
+
+        /// Small dark mouth blob (cartoon "o" / smile) at a point, facing fwd.
+        public static void Mouth(CreatureMeshBuilder b, Vector3 center, Vector3 fwd, float halfW, float halfH, float depth, CreatureMeshSkinFn skin)
+        {
+            Ellipsoid(b, CreatureMeshSlot.Mouth, center, fwd, Vector3.up, halfW, halfH, depth, 4, 6, Vector2.zero, Vector2.zero, skin);
         }
 
         // ------------------------------------------------------------------------------------------ cone / tube
@@ -245,6 +276,21 @@ namespace Sealebrities
                     b.Quad(slot, a, bb, bb + 1, a + 1, flip);
                 }
             return start;
+        }
+
+        /// Faceted low pyramid over a convex polygon (shell plates): corners + raised apex, one flat color (uv).
+        public static void Plate(CreatureMeshBuilder b, int slot, Vector3[] corners, Vector3 apex, Vector3 outward, Vector2 uv, BoneWeight w)
+        {
+            int n = corners.Length;
+            int start = b.Count;
+            for (int i = 0; i < n; i++) b.Add(corners[i], uv, w);
+            int ai = b.Add(apex, uv, w);
+            for (int i = 0; i < n; i++)
+            {
+                int a = start + i, c = start + (i + 1) % n;
+                Vector3 cr = b.Cross(a, c, ai);
+                if (Vector3.Dot(cr, outward) >= 0f) b.Tri(slot, a, c, ai); else b.Tri(slot, a, ai, c);
+            }
         }
 
         // ------------------------------------------------------------------------------------------ chains

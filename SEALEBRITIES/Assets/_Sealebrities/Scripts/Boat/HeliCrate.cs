@@ -60,46 +60,54 @@ namespace Sealebrities
             Delivery = d;
             svc.Register(this);
 
+            // wooden shop crate: plank panels, dark corner frame, orange "Chopper Shop" band
             var body = new BoatMeshSet();
-            body[BoatMats.Crate].Box(new Vector3(0f, Height * 0.5f, 0f), new Vector3(Size, Height, Size), Quaternion.identity, 1f, true);
-            var st = body[BoatMats.Strap];
+            body[BoatMats.Crate].Box(new Vector3(0f, Height * 0.5f, 0f), new Vector3(Size, Height, Size));
+            var fr = body[BoatMats.CrateDark];
             float h = Size * 0.5f + 0.008f;
             for (int sx = -1; sx <= 1; sx += 2)
                 for (int sz = -1; sz <= 1; sz += 2)
-                    st.Box(new Vector3(sx * (h - 0.02f), Height * 0.5f, sz * (h - 0.02f)), new Vector3(0.05f, Height + 0.01f, 0.05f));
+                    fr.Box(new Vector3(sx * (h - 0.025f), Height * 0.5f, sz * (h - 0.025f)), new Vector3(0.07f, Height + 0.01f, 0.07f));
             for (int k = 0; k < 2; k++)
             {
-                float y = k == 0 ? 0.025f : Height - 0.025f;
-                st.Box(new Vector3(0f, y, h - 0.02f), new Vector3(Size + 0.01f, 0.05f, 0.05f));
-                st.Box(new Vector3(0f, y, -(h - 0.02f)), new Vector3(Size + 0.01f, 0.05f, 0.05f));
-                st.Box(new Vector3(h - 0.02f, y, 0f), new Vector3(0.05f, 0.05f, Size + 0.01f));
-                st.Box(new Vector3(-(h - 0.02f), y, 0f), new Vector3(0.05f, 0.05f, Size + 0.01f));
+                float y = k == 0 ? 0.035f : Height - 0.035f;
+                fr.Box(new Vector3(0f, y, h - 0.025f), new Vector3(Size + 0.01f, 0.07f, 0.07f));
+                fr.Box(new Vector3(0f, y, -(h - 0.025f)), new Vector3(Size + 0.01f, 0.07f, 0.07f));
+                fr.Box(new Vector3(h - 0.025f, y, 0f), new Vector3(0.07f, 0.07f, Size + 0.01f));
+                fr.Box(new Vector3(-(h - 0.025f), y, 0f), new Vector3(0.07f, 0.07f, Size + 0.01f));
             }
+            // plank seams on the side panels (thin dark strips)
+            for (int k = 1; k < 3; k++)
+            {
+                float y = Height * k / 3f;
+                fr.Box(new Vector3(0f, y, 0f), new Vector3(Size + 0.006f, 0.012f, Size + 0.006f));
+            }
+            body[BoatMats.CrateBand].Box(new Vector3(0f, Height * 0.5f, 0f), new Vector3(Size + 0.014f, 0.13f, Size + 0.014f));
             BoatOwnedMesh.Own(body.Build("Body", transform, true));
 
             var ps = new BoatMeshSet();
-            ps[BoatMats.BobberRed].Box(Vector3.zero, new Vector3(0.42f, 0.16f, 0.32f), 2f);
-            ps[BoatMats.Strap].Box(Vector3.zero, new Vector3(0.44f, 0.04f, 0.06f));
-            pack = BoatOwnedMesh.Own(ps.Build("ChutePack", transform, new Vector3(0f, Height + 0.08f, 0f), Quaternion.identity, true)).transform;
+            ps[BoatMats.ChuteRed].TaperBox(Vector3.zero, new Vector2(0.44f, 0.34f), new Vector2(0.36f, 0.26f), 0.17f, Quaternion.identity);
+            ps[BoatMats.Strap].Box(Vector3.zero, new Vector3(0.46f, 0.05f, 0.07f));
+            pack = BoatOwnedMesh.Own(ps.Build("ChutePack", transform, new Vector3(0f, Height + 0.085f, 0f), Quaternion.identity, true)).transform;
 
             if (hanging)
             {
                 var ss = new BoatMeshSet();
                 for (int sx = -1; sx <= 1; sx += 2)
                     for (int sz = -1; sz <= 1; sz += 2)
-                        ss[BoatMats.Rope].Cylinder(new Vector3(sx * 0.4f, Height, sz * 0.4f), slingApex, 0.012f, 0.012f, 5, false, false);
+                        ss[BoatMats.Rope].Cylinder(new Vector3(sx * 0.4f, Height, sz * 0.4f), slingApex, 0.016f, 0.016f, 4, false, false);
                 sling = BoatOwnedMesh.Own(ss.Build("Sling", transform, false)).transform;
             }
 
-            // parachute: canopy dome + suspension lines (pivot at the crate top)
+            // parachute: faceted dome of red/white gores (pivot at the crate top) + suspension lines
             var cs = new BoatMeshSet();
-            cs[BoatMats.Chute].Ellipsoid(new Vector3(0f, ChuteHeight, 0f), new Vector3(2.1f, 1.1f, 2.1f), Quaternion.identity, 24, 7, 0f, 90f);
+            BuildCanopy(cs, new Vector3(0f, ChuteHeight, 0f), 2.1f, 1.1f, 12, 3);
             for (int k = 0; k < 8; k++)
             {
                 float a = k / 8f * Mathf.PI * 2f;
-                Vector3 rim = new Vector3(Mathf.Cos(a) * 2.08f, ChuteHeight, Mathf.Sin(a) * 2.08f);
+                Vector3 rim = new Vector3(Mathf.Cos(a) * 2.02f, ChuteHeight, Mathf.Sin(a) * 2.02f);
                 Vector3 attach = new Vector3(Mathf.Sign(Mathf.Cos(a)) * 0.3f, 0.05f, Mathf.Sign(Mathf.Sin(a) + 0.001f) * 0.3f);
-                cs[BoatMats.Rope].Cylinder(attach, rim, 0.008f, 0.008f, 4, false, false);
+                cs[BoatMats.Rope].Cylinder(attach, rim, 0.012f, 0.012f, 3, false, false);
             }
             // owned mesh is attached while the canopy is still active so its OnDestroy is guaranteed to run
             var chuteGo = BoatOwnedMesh.Own(cs.Build("Parachute", transform, new Vector3(0f, Height, 0f), Quaternion.identity, true));
@@ -111,6 +119,31 @@ namespace Sealebrities
             col.center = new Vector3(0f, Height * 0.5f, 0f);
             col.size = new Vector3(Size, Height, Size);
         }
+
+        /// Faceted hemisphere canopy with alternating red/white gores. Inner faces are separate geometry (so the shared
+        /// one-sided matte materials work from below too).
+        static void BuildCanopy(BoatMeshSet set, Vector3 c, float r, float h, int gores, int rings)
+        {
+            for (int k = 0; k < gores; k++)
+            {
+                var b = set[k % 2 == 0 ? BoatMats.ChuteRed : BoatMats.ChuteWhite];
+                float a0 = k / (float)gores * Mathf.PI * 2f, a1 = (k + 1) / (float)gores * Mathf.PI * 2f;
+                for (int ri = 0; ri < rings; ri++)
+                {
+                    float l0 = ri / (float)rings * Mathf.PI * 0.5f, l1 = (ri + 1) / (float)rings * Mathf.PI * 0.5f;
+                    Vector3 p00 = c + Dome(a0, l0, r, h), p10 = c + Dome(a1, l0, r, h);
+                    Vector3 p11 = c + Dome(a1, l1, r, h), p01 = c + Dome(a0, l1, r, h);
+                    Vector3 outward = (p00 + p10 + p11 + p01) * 0.25f - (c - Vector3.up * h * 0.3f);
+                    b.QuadOut(p00, p10, p11, p01, outward);
+                    // inner side, pulled in by 1 % so it never shares depth with the outer side
+                    Vector3 i00 = c + (p00 - c) * 0.99f, i10 = c + (p10 - c) * 0.99f, i11 = c + (p11 - c) * 0.99f, i01 = c + (p01 - c) * 0.99f;
+                    b.QuadOut(i00, i10, i11, i01, -outward);
+                }
+            }
+        }
+
+        static Vector3 Dome(float lon, float lat, float r, float h)
+            => new Vector3(Mathf.Cos(lat) * Mathf.Cos(lon) * r, Mathf.Sin(lat) * h, Mathf.Cos(lat) * Mathf.Sin(lon) * r);
 
         void OnDestroy()
         {

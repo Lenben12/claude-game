@@ -7,15 +7,16 @@ namespace Sealebrities
     /// Material slots of a creature mesh (one sub-mesh per used slot).
     internal static class CreatureMeshSlot
     {
-        public const int Skin = 0;   // painted body texture + normal map
-        public const int Fin = 1;    // painted fin texture (4 bands) + normal map; arms of cephalopods
-        public const int Eye = 2;    // shared eye texture per eye style
+        public const int Skin = 0;   // body: small point-filtered color-block texture
+        public const int Fin = 1;    // fins / arms: color-block atlas (4 bands)
+        public const int Eye = 2;    // sclera (solid color per eye style)
         public const int Mouth = 3;  // dark mouth interior, nostrils, gill holes
-        public const int Teeth = 4;  // ivory teeth, whiskers
+        public const int Teeth = 4;  // white: teeth, whiskers, eye highlights
         public const int Glow = 5;   // emissive lure / photophores
-        public const int Shell = 6;  // turtle carapace, jelly gonads
+        public const int Shell = 6;  // turtle carapace plates (palette texture), jelly gonads
         public const int Extra = 7;  // jelly tentacles / oral arms
-        public const int Count = 8;
+        public const int Pupil = 8;  // black pupils
+        public const int Count = 9;
     }
 
     /// Skin weight callback: vertex position, anchor (ring center or fin base) and a curve parameter.
@@ -24,14 +25,14 @@ namespace Sealebrities
     /// Managed geometry accumulator (vertices, uvs, bone weights, triangles per material slot).
     internal sealed class CreatureMeshBuilder
     {
-        public readonly List<Vector3> Verts = new List<Vector3>(4096);
-        public readonly List<Vector2> Uvs = new List<Vector2>(4096);
-        public readonly List<BoneWeight> Weights = new List<BoneWeight>(4096);
+        public readonly List<Vector3> Verts = new List<Vector3>(2048);
+        public readonly List<Vector2> Uvs = new List<Vector2>(2048);
+        public readonly List<BoneWeight> Weights = new List<BoneWeight>(2048);
         public readonly List<int>[] Tris = new List<int>[CreatureMeshSlot.Count];
 
         public CreatureMeshBuilder()
         {
-            for (int i = 0; i < Tris.Length; i++) Tris[i] = new List<int>(1024);
+            for (int i = 0; i < Tris.Length; i++) Tris[i] = new List<int>(512);
         }
 
         public int Count => Verts.Count;
@@ -65,104 +66,6 @@ namespace Sealebrities
             for (int i = from; i < to; i++) Verts[i] = f(Verts[i]);
         }
 
-        /// Mirrors vertices [from, to) across the YZ plane into new vertices (with flipped winding) and
-        /// remaps their bone weights through boneMirror (bone index -> mirrored bone index). Triangles
-        /// (added after triFromPerSlot, see TriCounts) that reference only that range are duplicated.
-        public void MirrorRange(int from, int to, int[] triFromPerSlot, Func<int, int> boneMirror)
-        {
-            int offset = Verts.Count - from;
-            for (int i = from; i < to; i++)
-            {
-                Vector3 p = Verts[i];
-                Add(new Vector3(-p.x, p.y, p.z), Uvs[i], MapBones(Weights[i], boneMirror));
-            }
-            for (int s = 0; s < Tris.Length; s++)
-            {
-                var l = Tris[s];
-                int start = triFromPerSlot != null ? triFromPerSlot[s] : 0;
-                int end = l.Count;
-                start -= start % 3;
-                for (int k = start; k + 2 < end; k += 3)
-                {
-                    int a = l[k], b = l[k + 1], c = l[k + 2];
-                    if (a < from || a >= to || b < from || b >= to || c < from || c >= to) continue;
-                    l.Add(a + offset); l.Add(c + offset); l.Add(b + offset);
-                }
-            }
-        }
-
-        public int[] TriCounts()
-        {
-            var r = new int[Tris.Length];
-            for (int i = 0; i < Tris.Length; i++) r[i] = Tris[i].Count;
-            return r;
-        }
-
-        static BoneWeight MapBones(BoneWeight w, Func<int, int> map)
-        {
-            if (map == null) return w;
-            w.boneIndex0 = map(w.boneIndex0);
-            w.boneIndex1 = map(w.boneIndex1);
-            w.boneIndex2 = map(w.boneIndex2);
-            w.boneIndex3 = map(w.boneIndex3);
-            return w;
-        }
-
-        /// Area-weighted vertex normals; vertices sharing a position (uv seams, caps) are smoothed together
-        /// when their normals point roughly the same way (keeps two-sided fins and creases intact).
-        public Vector3[] ComputeNormals()
-        {
-            int n = Verts.Count;
-            var acc = new Vector3[n];
-            for (int s = 0; s < Tris.Length; s++)
-            {
-                var l = Tris[s];
-                for (int k = 0; k + 2 < l.Count; k += 3)
-                {
-                    int a = l[k], b = l[k + 1], c = l[k + 2];
-                    Vector3 fn = Vector3.Cross(Verts[b] - Verts[a], Verts[c] - Verts[a]);
-                    acc[a] += fn; acc[b] += fn; acc[c] += fn;
-                }
-            }
-            var unit = new Vector3[n];
-            for (int i = 0; i < n; i++) unit[i] = CreatureMeshMath.Norm(acc[i]);
-
-            var groups = new Dictionary<long, List<int>>(n);
-            for (int i = 0; i < n; i++)
-            {
-                long key = PosKey(Verts[i]);
-                if (!groups.TryGetValue(key, out var g)) { g = new List<int>(2); groups[key] = g; }
-                g.Add(i);
-            }
-            var result = new Vector3[n];
-            for (int i = 0; i < n; i++) result[i] = unit[i];
-            foreach (var kv in groups)
-            {
-                var g = kv.Value;
-                if (g.Count < 2) continue;
-                for (int x = 0; x < g.Count; x++)
-                {
-                    int i = g[x];
-                    Vector3 sum = acc[i];
-                    for (int y = 0; y < g.Count; y++)
-                    {
-                        if (y == x) continue;
-                        int j = g[y];
-                        if (Vector3.Dot(unit[i], unit[j]) > 0.35f) sum += acc[j];
-                    }
-                    result[i] = CreatureMeshMath.Norm(sum);
-                }
-            }
-            for (int i = 0; i < n; i++) if (result[i].sqrMagnitude < 0.5f) result[i] = Vector3.up;
-            return result;
-        }
-
-        static long PosKey(Vector3 p)
-        {
-            long x = (long)Math.Round(p.x * 20000.0), y = (long)Math.Round(p.y * 20000.0), z = (long)Math.Round(p.z * 20000.0);
-            unchecked { return (x * 73856093L) ^ (y * 19349663L) ^ (z * 83492791L); }
-        }
-
         public Bounds ComputeBounds()
         {
             if (Verts.Count == 0) return new Bounds(Vector3.zero, Vector3.one);
@@ -174,6 +77,105 @@ namespace Sealebrities
                 if (p.x > mx.x) mx.x = p.x; if (p.y > mx.y) mx.y = p.y; if (p.z > mx.z) mx.z = p.z;
             }
             return new Bounds((mn + mx) * 0.5f, mx - mn);
+        }
+    }
+
+    /// Faceted (flat shaded) version of a builder: every triangle owns its three vertices and the face normal.
+    /// Degenerate triangles (collapsed poles, zero-size caps) are dropped, invalid positions are zeroed and bone
+    /// weights are sorted / normalized for Unity. Slots flagged in facetUv get the triangle's centroid uv on all
+    /// three corners, so a point-filtered block texture paints each facet in one flat color (low-poly mottling).
+    /// Pure managed code: runs on the background bake thread.
+    internal sealed class CreatureMeshFlat
+    {
+        public Vector3[] Verts;
+        public Vector2[] Uvs;
+        public Vector3[] Normals;
+        public BoneWeight[] Weights;
+        public readonly int[][] Tris = new int[CreatureMeshSlot.Count][];
+
+        public int Count => Verts != null ? Verts.Length : 0;
+        public int TriangleCount { get { int n = 0; for (int i = 0; i < Tris.Length; i++) n += Tris[i].Length / 3; return n; } }
+
+        public static CreatureMeshFlat From(CreatureMeshBuilder b, bool[] facetUv)
+        {
+            var src = b.Verts;
+            var keep = new List<int>[CreatureMeshSlot.Count];
+            int total = 0;
+            for (int s = 0; s < CreatureMeshSlot.Count; s++)
+            {
+                var l = b.Tris[s];
+                var k = new List<int>(l.Count / 3);
+                for (int t = 0; t + 2 < l.Count; t += 3)
+                {
+                    Vector3 pa = Valid(src[l[t]]), pb = Valid(src[l[t + 1]]), pc = Valid(src[l[t + 2]]);
+                    if (Vector3.Cross(pb - pa, pc - pa).sqrMagnitude < 1e-16f) continue;
+                    k.Add(t);
+                }
+                keep[s] = k;
+                total += k.Count * 3;
+            }
+
+            var f = new CreatureMeshFlat
+            {
+                Verts = new Vector3[total],
+                Uvs = new Vector2[total],
+                Normals = new Vector3[total],
+                Weights = new BoneWeight[total],
+            };
+            int o = 0;
+            for (int s = 0; s < CreatureMeshSlot.Count; s++)
+            {
+                var l = b.Tris[s];
+                var k = keep[s];
+                var idx = new int[k.Count * 3];
+                bool facet = facetUv != null && s < facetUv.Length && facetUv[s];
+                for (int q = 0; q < k.Count; q++)
+                {
+                    int t = k[q];
+                    int ia = l[t], ib = l[t + 1], ic = l[t + 2];
+                    Vector3 pa = Valid(src[ia]), pb = Valid(src[ib]), pc = Valid(src[ic]);
+                    Vector3 n = CreatureMeshMath.Norm(Vector3.Cross(pb - pa, pc - pa));
+                    Vector2 ua = b.Uvs[ia], ub = b.Uvs[ib], uc = b.Uvs[ic];
+                    if (facet) { Vector2 m = (ua + ub + uc) / 3f; ua = ub = uc = m; }
+                    f.Verts[o] = pa; f.Uvs[o] = ua; f.Normals[o] = n; f.Weights[o] = Sorted(b.Weights[ia]); idx[q * 3] = o; o++;
+                    f.Verts[o] = pb; f.Uvs[o] = ub; f.Normals[o] = n; f.Weights[o] = Sorted(b.Weights[ib]); idx[q * 3 + 1] = o; o++;
+                    f.Verts[o] = pc; f.Uvs[o] = uc; f.Normals[o] = n; f.Weights[o] = Sorted(b.Weights[ic]); idx[q * 3 + 2] = o; o++;
+                }
+                f.Tris[s] = idx;
+            }
+            return f;
+        }
+
+        static bool Finite(float x) => !(float.IsNaN(x) || float.IsInfinity(x));
+
+        static Vector3 Valid(Vector3 p) => Finite(p.x) && Finite(p.y) && Finite(p.z) ? p : Vector3.zero;
+
+        /// Unity expects weights in descending order (lower skin quality settings use the first entries).
+        static BoneWeight Sorted(BoneWeight w)
+        {
+            int i0 = w.boneIndex0, i1 = w.boneIndex1, i2 = w.boneIndex2, i3 = w.boneIndex3;
+            float w0 = Finite(w.weight0) ? Math.Max(0f, w.weight0) : 0f, w1 = Finite(w.weight1) ? Math.Max(0f, w.weight1) : 0f;
+            float w2 = Finite(w.weight2) ? Math.Max(0f, w.weight2) : 0f, w3 = Finite(w.weight3) ? Math.Max(0f, w.weight3) : 0f;
+            // tiny sorting network (descending)
+            Swap(ref w0, ref i0, ref w1, ref i1); Swap(ref w2, ref i2, ref w3, ref i3);
+            Swap(ref w0, ref i0, ref w2, ref i2); Swap(ref w1, ref i1, ref w3, ref i3);
+            Swap(ref w1, ref i1, ref w2, ref i2);
+            float sum = w0 + w1 + w2 + w3;
+            if (sum <= 1e-6f) { w0 = 1f; w1 = w2 = w3 = 0f; sum = 1f; }
+            return new BoneWeight
+            {
+                boneIndex0 = i0, weight0 = w0 / sum,
+                boneIndex1 = w1 > 0f ? i1 : 0, weight1 = w1 / sum,
+                boneIndex2 = w2 > 0f ? i2 : 0, weight2 = w2 / sum,
+                boneIndex3 = w3 > 0f ? i3 : 0, weight3 = w3 / sum,
+            };
+        }
+
+        static void Swap(ref float wa, ref int ia, ref float wb, ref int ib)
+        {
+            if (wb <= wa) return;
+            float tw = wa; wa = wb; wb = tw;
+            int ti = ia; ia = ib; ib = ti;
         }
     }
 
@@ -215,7 +217,6 @@ namespace Sealebrities
             float s = 1f - t;
             Put(x.boneIndex0, x.weight0 * s); Put(x.boneIndex1, x.weight1 * s); Put(x.boneIndex2, x.weight2 * s); Put(x.boneIndex3, x.weight3 * s);
             Put(y.boneIndex0, y.weight0 * t); Put(y.boneIndex1, y.weight1 * t); Put(y.boneIndex2, y.weight2 * t); Put(y.boneIndex3, y.weight3 * t);
-            // selection sort descending
             for (int i = 0; i < n; i++)
                 for (int j = i + 1; j < n; j++)
                     if (wt[j] > wt[i]) { float tw = wt[i]; wt[i] = wt[j]; wt[j] = tw; int ti = idx[i]; idx[i] = idx[j]; idx[j] = ti; }

@@ -5,8 +5,9 @@ using UnityEngine.Rendering;
 
 namespace Sealebrities
 {
-    /// Blue-water drop-off (wall-edge rock formations, sea whips, sparse coral, boulders) and the deep trench
-    /// (basalt spires, hydrothermal vents, whale skeleton, bioluminescence). Also a generic fallback for unknown sites.
+    /// Blue-water drop-off (chunky wall-edge rock formations, sea whips, sparse coral, boulders) and the deep trench
+    /// (faceted basalt spires, black-smoker vents with glowing mouths, a chunky whale skeleton, bioluminescent specks).
+    /// Also a generic fallback for unknown sites. Low-poly flat colors; the glowing bits stay emissive.
     public static class PropDeep
     {
         static float G(float x, float z) => PropGround.H(x, z);
@@ -78,7 +79,7 @@ namespace Sealebrities
                 Vector3 sc = new Vector3(s * PropUtil.Range(rng, 1f, 1.4f), s * PropUtil.Range(rng, 0.6f, 1f), s);
                 Vector3 p = new Vector3(x, g - sc.y * 0.3f, z);
                 Quaternion r = Quaternion.Euler(PropUtil.Range(rng, -15f, 15f), PropUtil.Range(rng, 0f, 360f), PropUtil.Range(rng, -15f, 15f));
-                var mesh = PropRocks.Mesh(sc, rng.Next(), 7, 0.25f);
+                var mesh = PropRocks.Mesh(sc, rng.Next(), 1, 0.16f);
                 batch.Add(mesh, i % 3 == 0 ? PropMats.RockDark : PropMats.Rock, Matrix4x4.TRS(p, r, Vector3.one));
                 PropCol.Mesh(cols, mesh, p, r, Vector3.one, "Boulder");
                 if (PropRun.Due()) yield return null;
@@ -139,7 +140,7 @@ namespace Sealebrities
                 if (pos.y < g) pos.y = g;
                 pos.y -= sc.y * 0.25f;
                 Quaternion r = Quaternion.Euler(PropUtil.Range(rng, -12f, 12f), PropUtil.Range(rng, 0f, 360f), PropUtil.Range(rng, -12f, 12f));
-                var mesh = PropRocks.Mesh(sc, rng.Next(), 7, 0.24f);
+                var mesh = PropRocks.Mesh(sc, rng.Next(), 1, 0.16f);
                 batch.Add(mesh, mat, Matrix4x4.TRS(pos, r, Vector3.one));
                 if (s > 1.8f) PropCol.Mesh(cols, mesh, pos, r, Vector3.one, "WallRock");
                 // a sea fan or sponge clinging to the formation
@@ -216,9 +217,10 @@ namespace Sealebrities
                 var sb = new PropMeshBuilder();
                 Spire(sb, h, br, rng.Next());
                 var mesh = sb.ToMesh("Spire");
+                LowPoly.Sanitize(mesh);
                 Vector3 p = new Vector3(x, g - 1.2f, z);
                 Quaternion r = Quaternion.Euler(PropUtil.Range(rng, -6f, 6f), PropUtil.Range(rng, 0f, 360f), PropUtil.Range(rng, -6f, 6f));
-                batch.Add(mesh, PropMats.Basalt, Matrix4x4.TRS(p, r, Vector3.one));
+                batch.Add(mesh, spires % 3 == 0 ? PropMats.Chimney : PropMats.Basalt, Matrix4x4.TRS(p, r, Vector3.one));
                 PropCol.Mesh(cols, mesh, p, r, Vector3.one, "Spire");
                 spacing.Add(x, z, br + 4f);
                 spirePos.Add(new Vector3(x, g, z));
@@ -240,11 +242,11 @@ namespace Sealebrities
                 Quaternion r = Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f);
                 if (s > 1.8f)
                 {
-                    var mesh = PropRocks.Mesh(sc, rng.Next(), 6, 0.3f);
+                    var mesh = PropRocks.Mesh(sc, rng.Next(), 1, 0.2f);
                     batch.Add(mesh, PropMats.Basalt, Matrix4x4.TRS(p, r, Vector3.one));
                     PropCol.Mesh(cols, mesh, p, r, Vector3.one, "Basalt");
                 }
-                else PropRocks.Build(batch.B(PropMats.Basalt, p), p, sc, r, rng.Next(), 5, 0.3f);
+                else PropRocks.Build(batch.B(PropMats.Basalt, p), p, sc, r, rng.Next(), s > 1f ? 1 : 0, 0.2f);
             }
 
             // ---------------------------------------------------------------- bioluminescent specks
@@ -263,7 +265,7 @@ namespace Sealebrities
                 float g = G(x, z);
                 if (-g < 55f) continue;
                 Vector3 p = new Vector3(x, g + PropUtil.Range(rng, 0.03f, 1f) * (rng.NextDouble() < 0.2 ? 6f : 1f), z);
-                glow.B(rng.NextDouble() < 0.7 ? PropMats.Bio : PropMats.BioGreen, p).Octa(p, PropUtil.Range(rng, 0.02f, 0.06f));
+                glow.B(rng.NextDouble() < 0.7 ? PropMats.Bio : PropMats.BioGreen, p).Octa(p, PropUtil.Range(rng, 0.025f, 0.07f));
                 specks++;
             }
             // drifting glow clouds
@@ -279,36 +281,32 @@ namespace Sealebrities
             glow.Flush(decor, "TrenchGlow", ShadowCastingMode.Off, 90f, false);
         }
 
-        /// Craggy tapered basalt spire (lathe + noise displacement), local base at the origin.
+        /// Faceted tapered spire: 6-sided rings with jittered radii (no smooth normals), local base at the origin.
         static void Spire(PropMeshBuilder b, float h, float baseR, int seed)
         {
-            const int K = 11;
+            const int K = 7, sides = 6;
             var prof = new Vector2[K];
             float ph = (seed % 100) * 0.1f;
             for (int i = 0; i < K; i++)
             {
                 float t = (float)i / (K - 1);
-                float r = baseR * Mathf.Pow(1f - t, 0.85f) * (1f + 0.15f * Mathf.Sin(t * 7f + ph)) + 0.12f;
+                float r = baseR * Mathf.Pow(1f - t, 0.85f) * (1f + 0.14f * Mathf.Sin(t * 7f + ph)) + 0.15f;
                 prof[i] = new Vector2(i == K - 1 ? 0f : r, t * h);
             }
-            int vs = b.VertexCount, ts = b.IndexCount;
-            b.Lathe(Vector3.zero, Quaternion.identity, prof, 12, 3f, 0.25f, (a, t) => 1f + 0.28f * (PropNoise.Value(a * 7f, t * 5f + ph, seed, 7) - 0.5f) * 2f);
-            Vector3 off = new Vector3(seed % 53, seed % 31, seed % 17);
-            for (int i = vs; i < b.VertexCount; i++)
+            b.Lathe(Vector3.zero, Quaternion.identity, prof, sides, 1f, 1f, (a, t) =>
             {
-                Vector3 v = b.V[i];
-                float n = PropNoise.Fbm3(v * 0.35f + off, 3, seed & 0xFFFF) - 0.5f;
-                b.V[i] = v + b.N[i] * n * baseR * 0.35f;
-            }
-            b.SmoothNormals(vs, ts);
+                int ai = Mathf.RoundToInt(a * sides) % sides;
+                int ti = Mathf.RoundToInt(t * (K - 1));
+                return 1f + 0.3f * (PropNoise.Hash01(ai, ti, seed) - 0.5f) * 2f;
+            });
         }
 
         static void Vent(Transform decor, PropBatch batch, PropBatch glow, Transform cols, System.Random rng, Vector3 p)
         {
-            PropRocks.Build(batch.B(PropMats.Basalt, p), p - Vector3.up * 0.7f, new Vector3(2.8f, 1.3f, 2.5f), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), rng.Next(), 6, 0.3f);
+            PropRocks.Build(batch.B(PropMats.Basalt, p), p - Vector3.up * 0.7f, new Vector3(2.8f, 1.3f, 2.5f), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), rng.Next(), 1, 0.2f);
             float r = PropUtil.Range(rng, 0.75f, 1.0f);
             float total = PropUtil.Range(rng, 3.5f, 7.5f);
-            int segs = 4;
+            const int segs = 4;
             Vector3 cur = p + Vector3.up * 0.2f;
             var chim = batch.B(PropMats.Chimney, p);
             for (int i = 0; i < segs; i++)
@@ -316,20 +314,20 @@ namespace Sealebrities
                 float h = total / segs;
                 float rTop = r * PropUtil.Range(rng, 0.72f, 0.88f);
                 Quaternion q = Quaternion.Euler(PropUtil.Range(rng, -7f, 7f), PropUtil.Range(rng, 0f, 360f), PropUtil.Range(rng, -7f, 7f));
-                chim.Cylinder(cur, q, r * PropUtil.Range(rng, 1.0f, 1.15f), rTop, h, 8, false, i == segs - 1, 2f, 1f);
+                chim.Cylinder(cur, q, r * PropUtil.Range(rng, 1.0f, 1.15f), rTop, h, 6, false, i == segs - 1);
                 // lumpy mineral crust
                 if (rng.NextDouble() < 0.7)
-                    PropRocks.Build(chim, cur + q * new Vector3(r * 0.7f, h * 0.5f, 0f), new Vector3(r * 0.5f, h * 0.4f, r * 0.5f), q, rng.Next(), 3, 0.3f);
+                    PropRocks.Build(chim, cur + q * new Vector3(r * 0.7f, h * 0.5f, 0f), new Vector3(r * 0.5f, h * 0.4f, r * 0.5f), q, rng.Next(), 0, 0.2f);
                 cur += q * new Vector3(0f, h, 0f);
                 r = rTop;
             }
             Vector3 top = cur;
-            glow.B(PropMats.VentGlow, top).Torus(top - Vector3.up * 0.05f, Quaternion.identity, r * 0.75f, 0.09f, 12, 5);
-            glow.B(PropMats.VentGlow, top).Disk(top + Vector3.up * 0.01f, r * 0.7f, 10, Quaternion.identity, true);
+            glow.B(PropMats.VentGlow, top).Torus(top - Vector3.up * 0.05f, Quaternion.identity, r * 0.75f, 0.11f, 6, 3);
+            glow.B(PropMats.VentGlow, top).Disk(top + Vector3.up * 0.01f, r * 0.7f, 6, Quaternion.identity, true);
             PropCol.Capsule(cols, (p + top) * 0.5f, r + 0.15f, (top - p).magnitude + 0.5f, Quaternion.identity);
 
-            // tube worms around the base
-            for (int i = 0; i < 28; i++)
+            // tube worms around the base (white tubes, glowing red plumes)
+            for (int i = 0; i < 24; i++)
             {
                 float a = PropUtil.Range(rng, 0f, Mathf.PI * 2f), d = PropUtil.Range(rng, 1.6f, 3f);
                 float x = p.x + Mathf.Cos(a) * d, z = p.z + Mathf.Sin(a) * d;
@@ -337,8 +335,8 @@ namespace Sealebrities
                 float h = PropUtil.Range(rng, 0.35f, 1.2f);
                 Vector3 b0 = new Vector3(x, g - 0.1f, z);
                 Vector3 b1 = b0 + new Vector3(PropUtil.Range(rng, -0.12f, 0.12f), h, PropUtil.Range(rng, -0.12f, 0.12f));
-                batch.B(PropMats.TubeWorm, b0).Rod(b0, b1, 0.035f, 0.03f, 5);
-                glow.B(PropMats.WormPlume, b0).Blob(b1 + Vector3.up * 0.06f, new Vector3(0.05f, 0.09f, 0.05f), Quaternion.identity, 2, null);
+                batch.B(PropMats.TubeWorm, b0).Rod(b0, b1, 0.045f, 0.04f, 4);
+                glow.B(PropMats.WormPlume, b0).Octa(b1 + Vector3.up * 0.07f, new Vector3(0.07f, 0.1f, 0.07f));
             }
 
             var light = PropUtil.AddPointLight(decor, top + Vector3.up * 0.7f, new Color(1f, 0.45f, 0.15f), 11f, 2.4f, "VentGlow");
@@ -348,12 +346,12 @@ namespace Sealebrities
             PropInfo.VentPositions.Add(top);
         }
 
-        /// ~20 m whale skeleton lying on the seabed. Local: z = body axis (skull at +z), y up, origin on the ground.
+        /// Chunky ~20 m whale skeleton lying on the seabed. Local: z = body axis (skull at +z), y up, origin on the ground.
         static void WhaleSkeleton(PropMeshBuilder b, System.Random rng)
         {
-            // spine
+            // spine: vertebrae as short 6-sided drums with little spikes
             var spine = new List<Vector3>();
-            for (float z = -10f; z <= 6f; z += 0.4f)
+            for (float z = -10f; z <= 6f; z += 0.55f)
             {
                 float y = z < -4f ? Mathf.Lerp(-0.25f, 0.85f, (z + 10f) / 6f) : 0.85f + 0.1f * Mathf.Sin(z * 0.3f);
                 spine.Add(new Vector3(Mathf.Sin(z * 0.22f) * 0.7f, y, z));
@@ -361,73 +359,75 @@ namespace Sealebrities
             for (int i = 0; i < spine.Count; i++)
             {
                 Vector3 p = spine[i];
-                Vector3 dir = (i + 1 < spine.Count ? spine[i + 1] - p : p - spine[i - 1]).normalized;
+                Vector3 dir = (i + 1 < spine.Count ? spine[i + 1] - p : p - spine[i - 1]);
+                dir = dir.sqrMagnitude > 1e-6f ? dir.normalized : Vector3.forward;
                 float t = (p.z + 10f) / 16f;
-                float vr = Mathf.Lerp(0.12f, 0.28f, t);
-                b.Rod(p - dir * 0.12f, p + dir * 0.12f, vr, vr, 7, true, 1f, 1f);
-                Vector3 upv = Vector3.Cross(dir, Vector3.right).normalized;
+                float vr = Mathf.Lerp(0.14f, 0.3f, t);
+                b.Rod(p - dir * 0.16f, p + dir * 0.16f, vr, vr, 6, true);
+                Vector3 upv = Vector3.Cross(dir, Vector3.right);
+                upv = upv.sqrMagnitude > 1e-6f ? upv.normalized : Vector3.up;
                 if (upv.y < 0f) upv = -upv;
-                b.Rod(p, p + upv * Mathf.Lerp(0.25f, 0.6f, t), 0.05f, 0.025f, 4);
+                b.Cylinder(p, Quaternion.FromToRotation(Vector3.up, upv), 0.08f, 0f, Mathf.Lerp(0.3f, 0.65f, t), 4);
                 if (t > 0.15f && t < 0.75f)
                 {
-                    Vector3 side = Vector3.Cross(Vector3.up, dir).normalized;
-                    b.Rod(p, p + side * 0.45f * t, 0.04f, 0.02f, 4);
-                    b.Rod(p, p - side * 0.45f * t, 0.04f, 0.02f, 4);
+                    Vector3 side = Vector3.Cross(Vector3.up, dir);
+                    side = side.sqrMagnitude > 1e-6f ? side.normalized : Vector3.right;
+                    b.Rod(p, p + side * 0.5f * t, 0.06f, 0.03f, 4);
+                    b.Rod(p, p - side * 0.5f * t, 0.06f, 0.03f, 4);
                 }
             }
-            // ribs
-            var pts = new Vector3[5];
-            var rad = new[] { 0.08f, 0.075f, 0.065f, 0.055f, 0.045f };
-            for (int k = 0; k < 13; k++)
+            // ribs: 4-sided arches
+            var pts = new Vector3[4];
+            var rad = new[] { 0.1f, 0.09f, 0.075f, 0.06f };
+            for (int k = 0; k < 12; k++)
             {
-                float z = 5.2f - k * 0.55f;
-                int si = Mathf.Clamp(Mathf.RoundToInt((z + 10f) / 0.4f), 0, spine.Count - 1);
+                float z = 5.2f - k * 0.6f;
+                int si = Mathf.Clamp(Mathf.RoundToInt((z + 10f) / 0.55f), 0, spine.Count - 1);
                 Vector3 sp = spine[si];
-                float len = Mathf.Lerp(1f, 0.55f, k / 12f);
+                float len = Mathf.Lerp(1f, 0.55f, k / 11f);
                 for (int s = -1; s <= 1; s += 2)
                 {
                     if (rng.NextDouble() < 0.14) continue;
                     bool fallen = rng.NextDouble() < 0.12;
-                    Vector3 side = new Vector3(s, 0f, 0f);
                     if (!fallen)
                     {
-                        pts[0] = sp + side * 0.2f;
-                        pts[1] = sp + side * 1.2f * len + Vector3.up * 0.25f + Vector3.back * 0.15f;
-                        pts[2] = new Vector3(sp.x + s * 1.85f * len, 0.75f, sp.z - 0.35f);
-                        pts[3] = new Vector3(sp.x + s * 1.7f * len, 0.15f, sp.z - 0.5f);
-                        pts[4] = new Vector3(sp.x + s * 1.45f * len, -0.15f, sp.z - 0.55f);
+                        pts[0] = sp + new Vector3(s * 0.2f, 0f, 0f);
+                        pts[1] = sp + new Vector3(s * 1.3f * len, 0.25f, -0.15f);
+                        pts[2] = new Vector3(sp.x + s * 1.8f * len, 0.55f, sp.z - 0.4f);
+                        pts[3] = new Vector3(sp.x + s * 1.5f * len, -0.15f, sp.z - 0.55f);
                     }
                     else
                     {
                         float zz = sp.z + PropUtil.Range(rng, -1f, 1f);
                         float x0 = sp.x + s * PropUtil.Range(rng, 2f, 3.2f);
-                        for (int q = 0; q < 5; q++) pts[q] = new Vector3(x0 + s * q * 0.45f, 0.06f + Mathf.Sin(q * 0.8f) * 0.15f, zz + q * 0.3f);
+                        for (int q = 0; q < 4; q++) pts[q] = new Vector3(x0 + s * q * 0.6f, 0.06f + Mathf.Sin(q * 0.9f) * 0.15f, zz + q * 0.4f);
                     }
-                    b.Tube(pts, rad, 5, 1f, 1f, true);
+                    b.Tube(pts, rad, 4, 1f, 1f, true);
                 }
             }
-            // skull: cranium + flattened rostrum
-            b.Blob(new Vector3(0f, 0.75f, 7.2f), new Vector3(1.35f, 0.75f, 1.3f), Quaternion.identity, 6, d => 1f + (PropNoise.Fbm3(d * 2f, 3, 4242) - 0.5f) * 0.2f);
-            b.Cylinder(new Vector3(0f, 0.55f, 8f), Quaternion.Euler(87f, 0f, 0f), 0.9f, 0.22f, 4.2f, 10, false, true, 2f, 1f);
+            // skull: faceted cranium + 6-sided rostrum cone
+            var radii = PropRocks.Jitter(rng, 1, 0.08f, 1, 0.7f);
+            b.Ico(new Vector3(0f, 0.75f, 7.2f), new Vector3(1.35f, 0.75f, 1.3f), Quaternion.identity, 1, radii);
+            b.Cylinder(new Vector3(0f, 0.55f, 8f), Quaternion.Euler(87f, 0f, 0f), 0.9f, 0.2f, 4.2f, 6, false, true);
             // jaw bones (one displaced)
-            var jaw = new Vector3[5];
-            var jr = new[] { 0.14f, 0.13f, 0.12f, 0.1f, 0.08f };
+            var jaw = new Vector3[4];
+            var jr = new[] { 0.16f, 0.14f, 0.12f, 0.09f };
             for (int s = -1; s <= 1; s += 2)
             {
                 bool moved = s > 0;
-                for (int q = 0; q < 5; q++)
+                for (int q = 0; q < 4; q++)
                 {
-                    float t = q / 4f;
+                    float t = q / 3f;
                     float x = s * (0.9f + Mathf.Sin(t * Mathf.PI) * 0.6f) + (moved ? s * 1.4f : 0f);
                     jaw[q] = new Vector3(x, 0.12f + Mathf.Sin(t * Mathf.PI) * 0.15f, 6.2f + t * 5.2f + (moved ? -1.2f : 0f));
                 }
-                b.Tube(jaw, jr, 6, 1f, 1f, true);
+                b.Tube(jaw, jr, 5, 1f, 1f, true);
             }
             // flipper bones on the ground
-            for (int i = 0; i < 6; i++)
+            for (int i = 0; i < 5; i++)
             {
-                Vector3 a = new Vector3(2.4f + i * 0.25f, 0.06f, 3.6f - i * 0.3f);
-                b.Rod(a, a + new Vector3(0.6f, 0.02f, -0.15f), 0.06f, 0.04f, 5, true);
+                Vector3 a = new Vector3(2.4f + i * 0.3f, 0.06f, 3.6f - i * 0.35f);
+                b.Rod(a, a + new Vector3(0.6f, 0.02f, -0.15f), 0.07f, 0.05f, 4, true);
             }
         }
 
@@ -444,7 +444,7 @@ namespace Sealebrities
                 if (-g < 4f) continue;
                 float s = PropUtil.Range(rng, 0.5f, 3f);
                 Vector3 p = new Vector3(x, g - s * 0.2f, z);
-                PropRocks.Build(batch.B(PropMats.Rock, p), p, new Vector3(s * 1.2f, s * 0.7f, s), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), rng.Next(), 5);
+                PropRocks.Build(batch.B(PropMats.Rock, p), p, new Vector3(s * 1.2f, s * 0.7f, s), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), rng.Next(), s > 1.2f ? 1 : 0);
                 if (rng.NextDouble() < 0.5) PropReef.Place(batch, rng, new Vector3(x + 1.5f, G(x + 1.5f, z), z), Vector3.up, PropCoralType.Whip, 1f, -3f);
                 if (PropRun.Due()) yield return null;
             }

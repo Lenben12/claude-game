@@ -119,7 +119,7 @@ namespace Sealebrities
             float h = Mathf.Clamp(s.bodyHeight, 0.05f, 1f);
             body.transform.localScale = new Vector3(w, h, s.plan == BodyPlan.Ray ? 0.7f : 1f);
             var r = body.GetComponent<Renderer>();
-            r.sharedMaterial = MaterialLibrary.Opaque(s.colorA, 0.45f);
+            r.sharedMaterial = LowPoly.Mat(s.colorA);
 
             var tail = GameObject.CreatePrimitive(PrimitiveType.Cube);
             tail.name = "Tail";
@@ -132,7 +132,7 @@ namespace Sealebrities
             tail.transform.localPosition = new Vector3(0f, 0f, -0.08f);
             tail.transform.localScale = new Vector3(0.02f, h * 0.8f, 0.16f);
             var tr = tail.GetComponent<Renderer>();
-            tr.sharedMaterial = MaterialLibrary.Opaque(s.colorC, 0.4f);
+            tr.sharedMaterial = LowPoly.Mat(s.colorC);
 
             var rig = root.AddComponent<CreatureRig>();
             rig.plan = s.plan;

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -15,18 +16,25 @@ namespace Sealebrities
         public bool poseValid;
     }
 
-    /// Procedural first-person hands: dark neoprene gloves and sleeves with a skin-colored wrist gap.
-    /// Idle sway, look lag, walking swing and breaststroke swimming. The left hand carries the dive lamp
-    /// (Goodman-style strap on the back of the hand) once a lamp is owned. The right hand rests out of view so the
-    /// filming module's camera model has the lower right area; it only joins the strokes while not aiming/recording.
+    /// Procedural first-person hands in the low-poly toy style: chunky faceted neoprene gloves with blocky fingers,
+    /// a teal cuff and sleeve stripe (matching the camera hand of the filming module). Idle sway, look lag, walking
+    /// swing and breaststroke swimming. The left hand carries a chunky dive lamp (Goodman-style strap on the back of
+    /// the hand) once a lamp is owned. The right hand rests out of view so the filming module's camera model has the
+    /// lower right area; it only joins the strokes while not aiming/recording.
     [DefaultExecutionOrder(60)]
     public class PlayerHands : MonoBehaviour
     {
+        // flat, matte palette colors (shared LowPoly materials, never destroyed here)
+        static readonly Color SuitAccent = LowPoly.Hex("#1FB5CC");
+        static readonly Color TorchYellow = LowPoly.Hex("#FFC63D");
+        static readonly Color TorchBlack = LowPoly.Hex("#2E3140");
+        static readonly Color TapeGrey = LowPoly.Hex("#A9AEB4");
+        static readonly Color LensGlass = LowPoly.Hex("#DCE9F0");
+
         PlayerController pc;
         PlayerHandRig left, right;
-        Mesh mSphere, mCapsule, mTaper, mCylinder, mFlare;
-        Texture2D neopreneTex;
-        Material neoprene, accent, skin, strap, tape, lensOff, lensOn, torchYellow, torchBlack, torchOrange;
+        Mesh mCapsule, mTaper, mCylinder, mFlare, mBlock, mBlockC;
+        Material neoprene, accent, strap, tape, lensOff, lensOn, torchYellow, torchBlack, torchOrange;
         int torchTier = -1;
         bool lensLit, built;
         float time, strokePhase, strokeW, rightW;
@@ -62,24 +70,22 @@ namespace Sealebrities
             k1q = Quaternion.Euler(-6f, 4f, -12f);
             k2q = Quaternion.Euler(-2f, -26f, -62f);
 
-            mSphere = PlayerMeshes.Sphere();
             mCapsule = PlayerMeshes.Capsule();
             mTaper = PlayerMeshes.Taper();
             mCylinder = PlayerMeshes.Cylinder();
             mFlare = PlayerMeshes.Flare();
-            neopreneTex = PlayerMeshes.NeopreneTexture(64);
+            mBlock = PlayerMeshes.Block();
+            mBlockC = PlayerMeshes.BlockCentered();
 
-            neoprene = MaterialLibrary.Textured(neopreneTex, new Color(0.13f, 0.14f, 0.16f), 0.32f);
-            neoprene.name = "SB_PlayerNeoprene";
-            accent = MaterialLibrary.Opaque(new Color(0.05f, 0.62f, 0.66f), 0.4f);
-            skin = MaterialLibrary.Opaque(new Color(0.88f, 0.64f, 0.5f), 0.42f);
-            strap = MaterialLibrary.Opaque(new Color(0.05f, 0.05f, 0.055f), 0.2f);
-            tape = MaterialLibrary.Opaque(new Color(0.62f, 0.63f, 0.64f), 0.28f);
-            torchYellow = MaterialLibrary.Opaque(new Color(1f, 0.76f, 0.08f), 0.55f);
-            torchBlack = MaterialLibrary.Opaque(new Color(0.07f, 0.07f, 0.08f), 0.6f, 0.35f);
-            torchOrange = MaterialLibrary.Opaque(new Color(1f, 0.45f, 0.08f), 0.5f);
-            lensOff = MaterialLibrary.Opaque(new Color(0.72f, 0.77f, 0.82f), 0.95f);
-            lensOn = MaterialLibrary.Emissive(new Color(1f, 0.97f, 0.9f), new Color(1f, 0.92f, 0.75f), 3f);
+            neoprene = ViewModelMat(LowPoly.Mat(LowPoly.Neoprene));
+            accent = ViewModelMat(LowPoly.Mat(SuitAccent));
+            strap = ViewModelMat(LowPoly.Mat(LowPoly.Ink));
+            tape = ViewModelMat(LowPoly.Mat(TapeGrey));
+            torchYellow = ViewModelMat(LowPoly.Mat(TorchYellow));
+            torchBlack = ViewModelMat(LowPoly.Mat(TorchBlack));
+            torchOrange = ViewModelMat(LowPoly.Mat(LowPoly.SuitOrange));
+            lensOff = ViewModelMat(LowPoly.Mat(LensGlass));
+            lensOn = ViewModelMat(MaterialLibrary.Emissive(new Color(1f, 0.97f, 0.9f), new Color(1f, 0.92f, 0.75f), 3f));
 
             left = BuildArm("LeftArm", false);
             right = BuildArm("RightArm", true);
@@ -92,40 +98,41 @@ namespace Sealebrities
             rig.geo = Node(rig.arm, "Geo", Vector3.zero);
             if (mirror) rig.geo.localScale = new Vector3(-1f, 1f, 1f);
 
-            // sleeve (neoprene suit) from the elbow to just before the wrist, teal stripe, bare wrist gap
-            Part(rig.geo, "Sleeve", mTaper, neoprene, new Vector3(0f, -0.004f, -0.385f), new Vector3(0.088f, 0.078f, 0.34f));
-            Part(rig.geo, "Stripe", mCylinder, accent, new Vector3(0f, -0.004f, -0.1f), new Vector3(0.09f, 0.08f, 0.016f));
-            Part(rig.geo, "Wrist", mCapsule, skin, new Vector3(0f, -0.003f, -0.06f), new Vector3(0.062f, 0.054f, 0.08f));
+            // sleeve (neoprene suit) from the elbow to the wrist with a teal stripe, chunky teal glove cuff
+            Part(rig.geo, "Sleeve", mTaper, neoprene, new Vector3(0f, -0.004f, -0.385f), new Vector3(0.09f, 0.08f, 0.34f));
+            Part(rig.geo, "Stripe", mCylinder, accent, new Vector3(0f, -0.004f, -0.1f), new Vector3(0.093f, 0.083f, 0.02f));
+            Part(rig.geo, "Cuff", mCylinder, accent, new Vector3(0f, -0.003f, -0.062f), new Vector3(0.08f, 0.07f, 0.042f));
 
-            // glove (palm down, fingers along +Z, thumb on +X for the left hand)
+            // glove (palm down, fingers along +Z, thumb on +X for the left hand): a blocky mitten-like hand
             rig.hand = Node(rig.geo, "Hand", Vector3.zero);
-            Part(rig.hand, "GloveCuff", mTaper, neoprene, new Vector3(0f, 0f, -0.014f), new Vector3(0.074f, 0.062f, 0.06f));
-            Part(rig.hand, "Palm", mSphere, neoprene, new Vector3(0f, 0.002f, 0.068f), new Vector3(0.09f, 0.036f, 0.112f));
+            Part(rig.hand, "GloveCuff", mTaper, neoprene, new Vector3(0f, 0f, -0.024f), new Vector3(0.074f, 0.062f, 0.06f));
+            Part(rig.hand, "Palm", mBlockC, neoprene, new Vector3(0f, 0.002f, 0.064f), new Vector3(0.088f, 0.038f, 0.1f));
 
             float[] xs = { -0.031f, -0.0105f, 0.0105f, 0.031f };    // pinky .. index
-            float[] zs = { 0.106f, 0.114f, 0.116f, 0.112f };
+            float[] zs = { 0.106f, 0.112f, 0.114f, 0.11f };
             float[] len1 = { 0.030f, 0.038f, 0.041f, 0.038f };
             float[] len2 = { 0.024f, 0.030f, 0.032f, 0.029f };
-            float[] w = { 0.0165f, 0.0185f, 0.019f, 0.0185f };
+            float[] w = { 0.0175f, 0.0195f, 0.02f, 0.0195f };
             for (int i = 0; i < 4; i++)
             {
                 Transform k = Node(rig.hand, "Finger" + i, new Vector3(xs[i], 0.002f, zs[i]));
-                Part(k, "Proximal", mCapsule, neoprene, new Vector3(0f, 0f, -0.006f), new Vector3(w[i], w[i] * 0.88f, len1[i] + 0.012f));
+                Part(k, "Proximal", mBlock, neoprene, new Vector3(0f, 0f, -0.006f), new Vector3(w[i], w[i] * 0.9f, len1[i] + 0.01f));
                 Transform m = Node(k, "Joint", new Vector3(0f, 0f, len1[i]));
-                Part(m, "Distal", mCapsule, neoprene, new Vector3(0f, 0f, -0.005f), new Vector3(w[i] * 0.94f, w[i] * 0.84f, len2[i] + 0.008f));
+                Part(m, "Distal", mBlock, neoprene, new Vector3(0f, 0f, -0.004f), new Vector3(w[i] * 0.95f, w[i] * 0.86f, len2[i] + 0.006f));
                 rig.knuckle[i] = k;
                 rig.middle[i] = m;
             }
 
             rig.thumb1 = Node(rig.hand, "Thumb", new Vector3(0.042f, -0.01f, 0.04f));
             rig.thumb1.localRotation = Quaternion.Euler(12f, 38f, -35f);
-            Part(rig.thumb1, "Proximal", mCapsule, neoprene, new Vector3(0f, 0f, -0.006f), new Vector3(0.022f, 0.019f, 0.045f));
+            Part(rig.thumb1, "Proximal", mBlock, neoprene, new Vector3(0f, 0f, -0.006f), new Vector3(0.023f, 0.02f, 0.044f));
             rig.thumb2 = Node(rig.thumb1, "Joint", new Vector3(0f, 0f, 0.036f));
-            Part(rig.thumb2, "Distal", mCapsule, neoprene, new Vector3(0f, 0f, -0.004f), new Vector3(0.02f, 0.017f, 0.034f));
+            Part(rig.thumb2, "Distal", mBlock, neoprene, new Vector3(0f, 0f, -0.004f), new Vector3(0.021f, 0.018f, 0.032f));
             return rig;
         }
 
-        /// Dive lamp strapped to the back of the left glove; the model changes with the lamp tier.
+        /// Chunky dive lamp strapped to the back of the left glove; the model changes with the lamp tier
+        /// (1: yellow with duct tape, 2: black with an orange switch, 3: black with an orange head and ring).
         void RebuildTorch(int tier)
         {
             torchTier = tier;
@@ -140,33 +147,54 @@ namespace Sealebrities
 
             Transform t = Node(left.hand, "Lamp", new Vector3(0f, 0.03f, 0.02f));
             left.torch = t;
-            float bodyR = tier == 1 ? 0.042f : tier == 2 ? 0.05f : 0.054f;
+            float bodyR = tier == 1 ? 0.046f : tier == 2 ? 0.054f : 0.058f;
             float len = tier == 1 ? 0.12f : tier == 2 ? 0.11f : 0.13f;
-            float headR = tier == 1 ? 0.056f : tier == 2 ? 0.078f : 0.084f;
+            float headR = tier == 1 ? 0.062f : tier == 2 ? 0.082f : 0.088f;
             const float y = 0.008f;
             const float z0 = -0.02f;
 
-            Part(t, "Strap", mCylinder, strap, new Vector3(0f, -0.03f, 0.035f), new Vector3(0.1f, 0.054f, 0.024f));
+            Part(t, "Strap", mBlockC, strap, new Vector3(0f, -0.03f, 0.047f), new Vector3(0.1f, 0.05f, 0.026f));
             Part(t, "Body", mCylinder, tier == 1 ? torchYellow : torchBlack, new Vector3(0f, y, z0), new Vector3(bodyR, bodyR, len));
-            Part(t, "Head", mFlare, tier == 1 ? torchBlack : tier == 3 ? torchOrange : torchBlack, new Vector3(0f, y, z0 + len), new Vector3(headR, headR, 0.045f));
-            Transform lens = Part(t, "Lens", mCylinder, lensOff, new Vector3(0f, y, z0 + len + 0.042f), new Vector3(headR * 0.84f, headR * 0.84f, 0.005f));
+            Part(t, "Head", mFlare, tier == 3 ? torchOrange : torchBlack, new Vector3(0f, y, z0 + len), new Vector3(headR, headR, 0.045f));
+            Transform lens = Part(t, "Lens", mCylinder, lensOff, new Vector3(0f, y, z0 + len + 0.042f), new Vector3(headR * 0.82f, headR * 0.82f, 0.006f));
             left.lens = lens.GetComponent<Renderer>();
+            Part(t, "TailCap", mCylinder, tier == 1 ? torchBlack : torchOrange, new Vector3(0f, y, z0 - 0.012f), new Vector3(bodyR * 0.9f, bodyR * 0.9f, 0.014f));
 
             if (tier == 1)
             {
                 // the famous duct tape
-                Part(t, "Tape", mCylinder, tape, new Vector3(0f, y, 0.02f), new Vector3(bodyR * 1.1f, bodyR * 1.1f, 0.03f));
-                Part(t, "Tape2", mCylinder, tape, new Vector3(0f, y, 0.075f), new Vector3(bodyR * 1.08f, bodyR * 1.08f, 0.014f), new Vector3(0f, 0f, 0f));
+                Part(t, "Tape", mCylinder, tape, new Vector3(0f, y, 0.02f), new Vector3(bodyR * 1.12f, bodyR * 1.12f, 0.03f));
+                Part(t, "Tape2", mCylinder, tape, new Vector3(0f, y, 0.075f), new Vector3(bodyR * 1.1f, bodyR * 1.1f, 0.016f), new Vector3(0f, 0f, 22f));
             }
             else if (tier == 2)
             {
-                Part(t, "Switch", mCapsule, torchOrange, new Vector3(0f, y + bodyR * 0.48f, 0.01f), new Vector3(0.012f, 0.01f, 0.03f));
+                Part(t, "Switch", mBlock, torchOrange, new Vector3(0f, y + bodyR * 0.5f, 0f), new Vector3(0.016f, 0.012f, 0.032f));
             }
             else
             {
-                Part(t, "Ring", mCylinder, torchOrange, new Vector3(0f, y, z0 + len - 0.014f), new Vector3(bodyR * 1.07f, bodyR * 1.07f, 0.012f));
-                Part(t, "Switch", mCapsule, torchOrange, new Vector3(0f, y + bodyR * 0.48f, 0.01f), new Vector3(0.012f, 0.01f, 0.03f));
+                Part(t, "Ring", mCylinder, torchOrange, new Vector3(0f, y, z0 + len - 0.016f), new Vector3(bodyR * 1.09f, bodyR * 1.09f, 0.014f));
+                Part(t, "Switch", mBlock, torchOrange, new Vector3(0f, y + bodyR * 0.5f, 0f), new Vector3(0.016f, 0.012f, 0.032f));
             }
+        }
+
+        /// Same render queue as the filming module's camera model (FilmMaterials.ViewModelQueue): opaque shader, drawn
+        /// in the transparent pass before the ocean surface, so the hands stay out of the depth-normals prepass and the
+        /// screen-space AO (huge sample disc this close to the eye) no longer mottles their flat colors.
+        public const int ViewModelQueue = 2600;
+        static readonly Dictionary<Material, Material> viewModelMats = new Dictionary<Material, Material>();
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { viewModelMats.Clear(); }
+
+        /// Cached copy of a shared world material on the view-model queue (the shared one is never modified).
+        static Material ViewModelMat(Material shared)
+        {
+            if (shared == null) return null;
+            if (viewModelMats.TryGetValue(shared, out var m) && m != null) return m;
+            m = new Material(shared) { name = shared.name + "_VM" };
+            m.renderQueue = ViewModelQueue;
+            viewModelMats[shared] = m;
+            return m;
         }
 
         static Transform Node(Transform parent, string name, Vector3 pos)
@@ -347,13 +375,13 @@ namespace Sealebrities
 
         void OnDestroy()
         {
-            if (mSphere != null) Destroy(mSphere);
+            // meshes are owned by this view model; the materials are shared LowPoly/MaterialLibrary instances
             if (mCapsule != null) Destroy(mCapsule);
             if (mTaper != null) Destroy(mTaper);
             if (mCylinder != null) Destroy(mCylinder);
             if (mFlare != null) Destroy(mFlare);
-            if (neoprene != null) Destroy(neoprene);
-            if (neopreneTex != null) Destroy(neopreneTex);
+            if (mBlock != null) Destroy(mBlock);
+            if (mBlockC != null) Destroy(mBlockC);
         }
     }
 }

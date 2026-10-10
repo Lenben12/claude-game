@@ -42,26 +42,7 @@ namespace Sealebrities
 
         // ------------------------------------------------------------------------------------------ view
 
-        static void ViewFor(SpeciesDef s, out Vector3 fwd, out Vector3 up)
-        {
-            up = Vector3.up;
-            switch (s.plan)
-            {
-                case BodyPlan.Ray: fwd = new Vector3(0.45f, -0.82f, -0.38f); break;
-                case BodyPlan.Jelly: fwd = new Vector3(0.15f, -0.32f, -1f); break;
-                case BodyPlan.Seahorse: fwd = new Vector3(1f, -0.12f, -0.3f); break;
-                case BodyPlan.Turtle: fwd = new Vector3(0.7f, -0.62f, -0.55f); break;
-                case BodyPlan.Octopus:
-                case BodyPlan.VampireSquid: fwd = new Vector3(0.85f, -0.45f, -0.45f); break;
-                case BodyPlan.Sunfish: fwd = new Vector3(1f, -0.1f, -0.3f); break;
-                case BodyPlan.Eel: fwd = new Vector3(0.55f, -0.75f, -0.35f); break;
-                case BodyPlan.Shark:
-                    fwd = s.variant == "hammer" ? new Vector3(0.75f, -0.6f, -0.45f) : (s.variant == "whale" ? new Vector3(0.85f, -0.45f, -0.4f) : new Vector3(1f, -0.3f, -0.4f));
-                    break;
-                default: fwd = new Vector3(1f, -0.22f, -0.4f); break;
-            }
-            fwd = fwd.normalized;
-        }
+        static void ViewFor(SpeciesDef s, out Vector3 fwd, out Vector3 up) => CreatureMeshRaster.IconView(s, out fwd, out up);
 
         /// Icon-only pose: eels get a gentle S-curve so they fill the frame.
         static void Pose(SpeciesDef s, CreatureRig rig)
@@ -161,9 +142,10 @@ namespace Sealebrities
                     data.renderShadows = false;
                 }
 
-                key = MakeLight("SB_IconKey", (fwd * 0.55f + Vector3.down * 0.75f + right * 0.35f).normalized, new Color(1f, 0.97f, 0.92f), 1.25f);
-                fill = MakeLight("SB_IconFill", (fwd * 0.45f + Vector3.up * 0.35f - right * 0.7f).normalized, new Color(0.62f, 0.78f, 1f), 0.45f);
-                rim = MakeLight("SB_IconRim", (-fwd + Vector3.down * 0.35f).normalized, new Color(0.8f, 0.9f, 1f), 0.6f);
+                // bright, neutral studio light: one clear key from the upper front so every facet reads, soft fill, small rim
+                key = MakeLight("SB_IconKey", (fwd * 0.5f + Vector3.down * 0.8f + right * 0.3f).normalized, new Color(1f, 0.98f, 0.95f), 1.15f);
+                fill = MakeLight("SB_IconFill", (fwd * 0.5f + Vector3.up * 0.25f - right * 0.75f).normalized, new Color(0.9f, 0.94f, 1f), 0.42f);
+                rim = MakeLight("SB_IconRim", (-fwd + Vector3.down * 0.35f).normalized, new Color(0.95f, 0.97f, 1f), 0.35f);
 
                 var lights = Object.FindObjectsByType<Light>();
                 for (int i = 0; i < lights.Length; i++)
@@ -175,7 +157,7 @@ namespace Sealebrities
                 }
                 RenderSettings.sun = key.GetComponent<Light>();
                 RenderSettings.fog = false;
-                var amb = new Color(0.36f, 0.41f, 0.48f);
+                var amb = new Color(0.5f, 0.52f, 0.55f);
                 RenderSettings.ambientMode = AmbientMode.Flat;
                 RenderSettings.ambientLight = amb;
                 var sh = new SphericalHarmonicsL2();
@@ -288,52 +270,8 @@ namespace Sealebrities
         static Texture2D RenderCpu(SpeciesDef s)
         {
             var bake = CreatureMeshBakery.Get(s);
-            if (!bake.HasPixels) bake = CreatureMeshBake.Make(s);
-            var ctx = bake.Ctx;
-            var b = ctx.B;
-            ViewFor(s, out Vector3 fwd, out Vector3 up);
-            var normals = b.ComputeNormals();
-            var tris = new IList<int>[CreatureMeshSlot.Count];
-            for (int i = 0; i < tris.Length; i++) tris[i] = b.Tris[i];
-            var transparent = new bool[CreatureMeshSlot.Count];
-            if (ctx.Layout == CreatureMeshLayout.Bell) { transparent[CreatureMeshSlot.Skin] = true; transparent[CreatureMeshSlot.Shell] = true; transparent[CreatureMeshSlot.Extra] = true; }
-            var eye = CreatureMeshPaint.Eye(ctx.EyeStyle, 64);
-            Vector3 light = (-fwd * 0.5f + Vector3.up * 0.8f).normalized;
-            Color lure = ctx.LureColor;
-            CreatureMeshRaster.Shader shade = (slot, uv, n, pos) =>
-            {
-                Color a;
-                bool emissive = false;
-                switch (slot)
-                {
-                    case CreatureMeshSlot.Skin: a = Sample(bake.Skin, bake.SkinW, bake.SkinH, uv); break;
-                    case CreatureMeshSlot.Fin: a = Sample(bake.Fins, bake.FinW, bake.FinH, uv); break;
-                    case CreatureMeshSlot.Eye: a = eye.Sample(uv); break;
-                    case CreatureMeshSlot.Mouth: a = new Color(0.17f, 0.05f, 0.05f); break;
-                    case CreatureMeshSlot.Teeth: a = new Color(0.93f, 0.9f, 0.82f); break;
-                    case CreatureMeshSlot.Glow: a = s.plan == BodyPlan.Anglerfish ? lure : s.colorC; emissive = true; break;
-                    case CreatureMeshSlot.Shell:
-                        a = bake.Shell != null ? Sample(bake.Shell, bake.ShellW, bake.ShellH, uv) : new Color(s.colorB.r, s.colorB.g, s.colorB.b, 0.7f);
-                        break;
-                    default: a = new Color(s.colorC.r, s.colorC.g, s.colorC.b, 0.42f); break;
-                }
-                if (emissive) return new Color(a.r, a.g, a.b, 1f);
-                float d = Mathf.Max(0f, Vector3.Dot(n, light));
-                float l = 0.38f + 0.12f * n.y + 0.8f * d;
-                return new Color(a.r * l, a.g * l, a.b * l, a.a);
-            };
-            var px = CreatureMeshRaster.Render(b.Verts, b.Uvs, normals, tris, transparent, Size, fwd, up, shade);
+            var px = CreatureMeshRaster.RenderFlat(bake, Size);
             return MakeIcon(px);
-        }
-
-        static Color Sample(Color32[] px, int w, int h, Vector2 uv)
-        {
-            if (px == null || w <= 0 || h <= 0) return Color.gray;
-            int x = Mathf.Clamp((int)(uv.x * w), 0, w - 1);
-            int y = (int)(uv.y * h);
-            y = ((y % h) + h) % h;
-            Color32 c = px[y * w + x];
-            return new Color(c.r / 255f, c.g / 255f, c.b / 255f, c.a / 255f);
         }
 
         /// Last resort: a flat side-profile silhouette in the species colors.

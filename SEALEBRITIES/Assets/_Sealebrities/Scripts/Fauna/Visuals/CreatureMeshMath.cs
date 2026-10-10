@@ -191,7 +191,7 @@ namespace Sealebrities
         }
     }
 
-    /// Deterministic hash noise (gradient noise, fBm, Worley cells) for procedural skin painting.
+    /// Deterministic per-cell random values (pattern blocks, mottling, small per-part variation).
     internal static class CreatureMeshNoise
     {
         static uint Hash(int x, int y, int z, int seed)
@@ -209,96 +209,5 @@ namespace Sealebrities
 
         /// Random value in [0, 1).
         public static float Rand(int x, int y, int z, int seed) => (Hash(x, y, z, seed) & 0xFFFFFF) / 16777216f;
-
-        static int Floor(float x) { int i = (int)x; return x < i ? i - 1 : i; }
-
-        static float Grad(int x, int y, int z, int seed, float dx, float dy, float dz)
-        {
-            switch (Hash(x, y, z, seed) % 12u)
-            {
-                case 0: return dx + dy;
-                case 1: return -dx + dy;
-                case 2: return dx - dy;
-                case 3: return -dx - dy;
-                case 4: return dx + dz;
-                case 5: return -dx + dz;
-                case 6: return dx - dz;
-                case 7: return -dx - dz;
-                case 8: return dy + dz;
-                case 9: return -dy + dz;
-                case 10: return dy - dz;
-                default: return -dy - dz;
-            }
-        }
-
-        /// Gradient noise in roughly [0, 1] (0.5 average).
-        public static float Perlin(float x, float y, float z, int seed)
-        {
-            int xi = Floor(x), yi = Floor(y), zi = Floor(z);
-            float fx = x - xi, fy = y - yi, fz = z - zi;
-            float u = fx * fx * fx * (fx * (fx * 6f - 15f) + 10f);
-            float v = fy * fy * fy * (fy * (fy * 6f - 15f) + 10f);
-            float w = fz * fz * fz * (fz * (fz * 6f - 15f) + 10f);
-            float n000 = Grad(xi, yi, zi, seed, fx, fy, fz);
-            float n100 = Grad(xi + 1, yi, zi, seed, fx - 1f, fy, fz);
-            float n010 = Grad(xi, yi + 1, zi, seed, fx, fy - 1f, fz);
-            float n110 = Grad(xi + 1, yi + 1, zi, seed, fx - 1f, fy - 1f, fz);
-            float n001 = Grad(xi, yi, zi + 1, seed, fx, fy, fz - 1f);
-            float n101 = Grad(xi + 1, yi, zi + 1, seed, fx - 1f, fy, fz - 1f);
-            float n011 = Grad(xi, yi + 1, zi + 1, seed, fx, fy - 1f, fz - 1f);
-            float n111 = Grad(xi + 1, yi + 1, zi + 1, seed, fx - 1f, fy - 1f, fz - 1f);
-            float x00 = n000 + (n100 - n000) * u, x10 = n010 + (n110 - n010) * u;
-            float x01 = n001 + (n101 - n001) * u, x11 = n011 + (n111 - n011) * u;
-            float y0 = x00 + (x10 - x00) * v, y1 = x01 + (x11 - x01) * v;
-            float r = y0 + (y1 - y0) * w;
-            return CreatureMeshMath.Clamp01(r * 0.5f + 0.5f);
-        }
-
-        public static float Perlin(Vector3 p, int seed) => Perlin(p.x, p.y, p.z, seed);
-
-        public static float Fbm(float x, float y, float z, int octaves, int seed)
-        {
-            float sum = 0f, amp = 0.5f, norm = 0f;
-            for (int o = 0; o < octaves; o++)
-            {
-                sum += amp * Perlin(x, y, z, seed + o * 131);
-                norm += amp;
-                x = x * 2.03f + 17.1f; y = y * 2.03f + 3.7f; z = z * 2.03f + 9.3f;
-                amp *= 0.5f;
-            }
-            return sum / norm;
-        }
-
-        public static float Fbm(Vector3 p, int octaves, int seed) => Fbm(p.x, p.y, p.z, octaves, seed);
-
-        /// 3D Worley noise. Returns F1 (distance to the nearest feature point, cell units); f2 = second nearest,
-        /// cellRand = random 0..1 of the nearest cell (for per-spot variation).
-        public static float Worley(float x, float y, float z, int seed, out float f2, out float cellRand)
-        {
-            int xi = Floor(x), yi = Floor(y), zi = Floor(z);
-            float d1 = 1e9f, d2 = 1e9f;
-            cellRand = 0f;
-            for (int dz = -1; dz <= 1; dz++)
-                for (int dy = -1; dy <= 1; dy++)
-                    for (int dx = -1; dx <= 1; dx++)
-                    {
-                        int cx = xi + dx, cy = yi + dy, cz = zi + dz;
-                        float px = cx + Rand(cx, cy, cz, seed);
-                        float py = cy + Rand(cx, cy, cz, seed + 1);
-                        float pz = cz + Rand(cx, cy, cz, seed + 2);
-                        float ex = px - x, ey = py - y, ez = pz - z;
-                        float d = ex * ex + ey * ey + ez * ez;
-                        if (d < d1)
-                        {
-                            d2 = d1; d1 = d;
-                            cellRand = Rand(cx, cy, cz, seed + 3);
-                        }
-                        else if (d < d2) d2 = d;
-                    }
-            f2 = (float)Math.Sqrt(d2);
-            return (float)Math.Sqrt(d1);
-        }
-
-        public static float Worley(Vector3 p, int seed, out float f2, out float cellRand) => Worley(p.x, p.y, p.z, seed, out f2, out cellRand);
     }
 }

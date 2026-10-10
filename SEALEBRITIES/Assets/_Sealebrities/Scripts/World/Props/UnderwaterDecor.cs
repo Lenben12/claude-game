@@ -59,7 +59,8 @@ namespace Sealebrities
             PropInfo.UnderwaterBuilt = true;
         }
 
-        /// Marker buoy at the site center: orange body with white band, pole, flag in the site's map color, night blinker.
+        /// Chunky low-poly marker buoy at the site center: orange 8-sided body with a white band, pole, a faceted flag
+        /// in the site's map color and a night blinker.
         static void CreateBuoy(Transform parent, DiveSite site)
         {
             var go = new GameObject("Buoy_" + site.id);
@@ -70,43 +71,36 @@ namespace Sealebrities
             var body = new PropMeshBuilder();
             body.Lathe(Vector3.zero, Quaternion.identity, new[]
             {
-                new Vector2(0f, -0.62f), new Vector2(0.22f, -0.58f), new Vector2(0.42f, -0.32f), new Vector2(0.47f, -0.02f),
-                new Vector2(0.47f, 0.3f), new Vector2(0.3f, 0.52f), new Vector2(0.1f, 0.63f), new Vector2(0f, 0.64f),
-            }, 18, 1f, 1f);
+                new Vector2(0f, -0.62f), new Vector2(0.3f, -0.55f), new Vector2(0.5f, -0.2f),
+                new Vector2(0.5f, 0.3f), new Vector2(0.28f, 0.56f), new Vector2(0f, 0.64f),
+            }, 8, 1f, 1f);
             PropUtil.MeshObject(t, "Body", body.ToMesh("BuoyBody"), PropMats.BuoyOrange, Vector3.zero, Quaternion.identity);
 
             var band = new PropMeshBuilder();
-            band.Cylinder(new Vector3(0f, 0.04f, 0f), Quaternion.identity, 0.475f, 0.475f, 0.18f, 18);
+            band.Cylinder(new Vector3(0f, -0.02f, 0f), Quaternion.identity, 0.515f, 0.515f, 0.24f, 8);
             PropUtil.MeshObject(t, "Band", band.ToMesh("BuoyBand"), PropMats.BuoyWhite, Vector3.zero, Quaternion.identity);
 
             var pole = new PropMeshBuilder();
-            pole.Rod(new Vector3(0f, 0.55f, 0f), new Vector3(0f, 2.15f, 0f), 0.035f, 0.03f, 6, true);
-            pole.Torus(new Vector3(0f, 1.75f, 0f), Quaternion.identity, 0.16f, 0.015f, 10, 4);
-            pole.Rod(new Vector3(0f, -0.62f, 0f), new Vector3(0f, -5.5f, 0f), 0.015f, 0.015f, 4);
+            pole.Rod(new Vector3(0f, 0.55f, 0f), new Vector3(0f, 2.15f, 0f), 0.05f, 0.045f, 6, true);
+            pole.Torus(new Vector3(0f, 1.75f, 0f), Quaternion.identity, 0.17f, 0.025f, 8, 3);
+            pole.Rod(new Vector3(0f, -0.62f, 0f), new Vector3(0f, -5.5f, 0f), 0.025f, 0.025f, 3);
             PropUtil.MeshObject(t, "Pole", pole.ToMesh("BuoyPole"), PropMats.Metal, Vector3.zero, Quaternion.identity);
 
             var blink = PropMats.EmissiveInstance(new Color(1f, 0.92f, 0.6f), Color.black);
             var bulb = new PropMeshBuilder();
-            bulb.Blob(new Vector3(0f, 2.2f, 0f), Vector3.one * 0.075f, Quaternion.identity, 3, null);
+            bulb.Ico(new Vector3(0f, 2.22f, 0f), Vector3.one * 0.09f, Quaternion.identity, 0);
             PropUtil.MeshObject(t, "Blinker", bulb.ToMesh("BuoyBlinker"), blink, Vector3.zero, Quaternion.identity, false);
 
+            // flag: two kinked flat segments, two-sided
             var flagPivot = new GameObject("FlagPivot").transform;
             flagPivot.SetParent(t, false);
             flagPivot.localPosition = new Vector3(0f, 1.98f, 0f);
             var flag = new PropMeshBuilder();
-            const int fs = 4;
-            for (int i = 0; i <= fs; i++)
-            {
-                float u = (float)i / fs;
-                float wave = Mathf.Sin(u * 5f) * 0.04f * u;
-                flag.Vert(new Vector3(0.03f + u * 0.72f, 0f, wave), Vector3.forward, new Vector2(u, 1f));
-                flag.Vert(new Vector3(0.03f + u * 0.72f, -0.44f, wave), Vector3.forward, new Vector2(u, 0f));
-            }
-            for (int i = 0; i < fs; i++)
-            {
-                int a = i * 2;
-                flag.Quad(a + 1, a, a + 2, a + 3);
-            }
+            Vector3 a0 = new Vector3(0.04f, 0f, 0f), a1 = new Vector3(0.04f, -0.46f, 0f);
+            Vector3 m0 = new Vector3(0.42f, -0.01f, 0.06f), m1 = new Vector3(0.42f, -0.45f, 0.06f);
+            Vector3 e0 = new Vector3(0.78f, -0.03f, 0f), e1 = new Vector3(0.78f, -0.43f, 0f);
+            flag.Quad2(a0, m0, m1, a1, Vector3.forward);
+            flag.Quad2(m0, e0, e1, m1, Vector3.forward);
             PropUtil.MeshObject(flagPivot, "Flag", flag.ToMesh("BuoyFlag"), PropMats.Flag(site.mapColor), Vector3.zero, Quaternion.identity);
 
             var b = go.AddComponent<PropBuoy>();

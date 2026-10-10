@@ -5,10 +5,13 @@ namespace Sealebrities
 {
     /// Soft additive light shafts below the surface, slanted along the refracted sun direction.
     /// All shafts live in one dynamic mesh (one draw call); each quad is billboarded around its own axis.
+    /// Low-poly look: a few clean, flat bands (no gaussian haze), only in the bright shallows.
     sealed class FXGodRays
     {
-        const int Count = 10;
-        const float MaxDepth = 15f;
+        const int Count = 8;
+        const float FadeStart = 6f;
+        const float MaxDepth = 14f;
+        const float Alpha = 0.3f;
 
         readonly GameObject go;
         readonly Mesh mesh;
@@ -30,7 +33,7 @@ namespace Sealebrities
         float master;
         bool visible, needRespawn = true;
 
-        static readonly Color RayTint = new Color(0.78f, 0.93f, 1f, 1f);
+        static readonly Color RayTint = new Color(0.86f, 0.97f, 1f, 1f);   // ~LowPoly.Foam with a turquoise touch
 
         public FXGodRays(Transform parent)
         {
@@ -80,7 +83,7 @@ namespace Sealebrities
         public void Tick(FXFrame f)
         {
             Light sun = WorldInfo.Sun;
-            float depthFade = 1f - FXMath.SmoothRange(7f, MaxDepth, f.depth);
+            float depthFade = 1f - FXMath.SmoothRange(FadeStart, MaxDepth, f.depth);
             float target = (f.underwater && sun != null && f.depth < MaxDepth) ? f.under01 * f.day01 * depthFade : 0f;
             master = Mathf.MoveTowards(master, target, f.dt / 0.6f);
 
@@ -132,7 +135,7 @@ namespace Sealebrities
                 }
 
                 float env = Mathf.Sin(Mathf.PI * Mathf.Clamp01(age[i] / life[i]));
-                float alpha = master * env * gain[i] * 0.42f;
+                float alpha = master * env * gain[i] * Alpha;
 
                 float ax = anchor[i].x, az = anchor[i].y;
                 var top = new Vector3(ax, Waves.HeightAt(ax, az) - 0.15f, az);

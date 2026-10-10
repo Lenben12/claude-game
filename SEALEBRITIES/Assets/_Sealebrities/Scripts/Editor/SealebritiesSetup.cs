@@ -148,6 +148,9 @@ namespace Sealebrities.EditorTools
             Try("always included shaders cleanup", RemoveHeavyAlwaysIncludedShaders);
             if (AddAlwaysIncludedShaders) Try("always included shaders", SetupAlwaysIncludedShaders);
             Try("URP asset", SetupRenderPipelineAssets);
+            Try("PC URP asset (MSAA 4x, soft shadows)", SetupPcPipelineAsset);
+            Try("PC renderer (screen space ambient occlusion)", SetupPcRendererSsao);
+            Try("fog shader variants", SetupFogVariants);
             Try("boot scene", SetupScene);
             Try("build settings", () =>
             {
@@ -252,38 +255,42 @@ namespace Sealebrities.EditorTools
         }
 
         // ------------------------------------------------------------------ shader stripping protection
-        static Texture2D flatNormal;
+        public const string ObsoleteIncludesFolder = Root + "/Obsolete/ShaderIncludes";
 
+        /// Include materials of the old semi-realistic look (normal/detail maps, alpha-clipped leaves, Unity Terrain).
+        /// The low-poly look uses none of these variants; materials in Resources are always built, so setup moves
+        /// them out of Resources (non-destructive) to keep their variants and the Terrain/Lit shader out of builds.
+        static readonly string[] ObsoleteIncludes =
+        {
+            "SB_Lit_Normal.mat", "SB_Lit_NormalEmissive.mat",
+            "SB_Lit_AlphaClip.mat", "SB_Lit_AlphaClipNormal.mat", "SB_Lit_AlphaClipEmissive.mat",
+            "SB_Lit_TransparentNormal.mat", "SB_Lit_TransparentNormalEmissive.mat",
+            "SB_Lit_OceanTop.mat", "SB_Lit_OceanUnder.mat",
+            "SB_TerrainLit.mat", "SB_TerrainLit_AddPass.mat", "SB_TerrainLit_BasePass.mat", "SB_TerrainLit_BasemapGen.mat",
+            "SB_FlatNormal.asset",
+        };
+
+        /// Keeps exactly the URP variants the low-poly modules create at runtime: flat opaque (LowPoly.Mat, block
+        /// textures), emissive (lamps, lure, glows, clouds), transparent one/two-sided (ocean top, glass, jelly) and
+        /// transparent emissive (ocean underside, jelly), plus unlit, particles and the procedural skybox.
         static void SetupShaderIncludes()
         {
-            flatNormal = FlatNormalTexture();
+            RetireObsoleteIncludes();
 
             Shader lit = Find("Universal Render Pipeline/Lit");
             Shader unlit = Find("Universal Render Pipeline/Unlit");
-            Shader terrain = Find("Universal Render Pipeline/Terrain/Lit");
             Shader particles = Find("Universal Render Pipeline/Particles/Unlit");
             Shader sky = Find("Skybox/Procedural");
 
             if (lit != null)
             {
-                // opaque family (props, boat, player, filming rig, creatures)
+                // opaque family (terrain chunks, props, boat, player, filming rig, creatures)
                 Save("SB_Lit_Opaque", Lit(lit));
-                Save("SB_Lit_Normal", WithNormal(Lit(lit)));
                 Save("SB_Lit_Emissive", WithEmission(Lit(lit)));
-                Save("SB_Lit_NormalEmissive", WithEmission(WithNormal(Lit(lit))));
-                // alpha-clipped leaves / sea fans
-                Save("SB_Lit_AlphaClip", WithAlphaClip(Lit(lit)));
-                Save("SB_Lit_AlphaClipNormal", WithAlphaClip(WithNormal(Lit(lit))));
-                Save("SB_Lit_AlphaClipEmissive", WithEmission(WithAlphaClip(Lit(lit))));
                 // transparent family: exactly MaterialLibrary.MakeTransparent (+ the keyword combos the modules use)
                 Save("SB_Lit_Transparent", Transparent(Lit(lit), false));
                 Save("SB_Lit_TransparentTwoSided", Transparent(Lit(lit), true));
                 Save("SB_Lit_TransparentEmissive", Transparent(WithEmission(Lit(lit)), true));
-                Save("SB_Lit_TransparentNormal", Transparent(WithNormal(Lit(lit)), false));
-                Save("SB_Lit_TransparentNormalEmissive", Transparent(WithEmission(WithNormal(Lit(lit))), false));
-                // ocean top / underside
-                Save("SB_Lit_OceanTop", Transparent(WithDetail(WithNormal(Lit(lit))), true));
-                Save("SB_Lit_OceanUnder", Transparent(WithEmission(WithDetail(WithNormal(Lit(lit)))), true));
             }
             if (unlit != null)
             {
@@ -291,27 +298,6 @@ namespace Sealebrities.EditorTools
                 var ut = Basic(unlit);
                 MaterialLibrary.MakeTransparent(ut, true);
                 Save("SB_Unlit_Transparent", ut);
-            }
-            if (terrain != null)
-            {
-                var m = new Material(terrain) { name = "SB_TerrainLit" };
-                m.EnableKeyword("_NORMALMAP");
-                if (m.HasProperty("_EnableInstancedPerPixelNormal"))
-                {
-                    m.SetFloat("_EnableInstancedPerPixelNormal", 1f);
-                    m.EnableKeyword("_TERRAIN_INSTANCED_PERPIXEL_NORMAL");
-                }
-                m.enableInstancing = true;
-                Save("SB_TerrainLit", m);
-
-                // The runtime terrain has 8 splat layers (layers 5-8 are drawn by the Add Pass) and a base map
-                // distance (Base Pass beyond it). No Terrain asset exists at build time, so these dependency shaders
-                // need their own include materials. The keywords are set unconditionally: only TerrainLit declares
-                // the _EnableInstancedPerPixelNormal property, the dependency shaders only declare the keyword.
-                SaveTerrainDependency(terrain, "AddPassShader", "Hidden/Universal Render Pipeline/Terrain/Lit (Add Pass)", "SB_TerrainLit_AddPass", true);
-                SaveTerrainDependency(terrain, "BaseMapShader", "Hidden/Universal Render Pipeline/Terrain/Lit (Base Pass)", "SB_TerrainLit_BasePass", true);
-                // the base map is regenerated at runtime
-                SaveTerrainDependency(terrain, "BaseMapGenShader", "Hidden/Universal Render Pipeline/Terrain/Lit (Basemap Gen)", "SB_TerrainLit_BasemapGen", false);
             }
             if (particles != null)
             {
@@ -329,25 +315,23 @@ namespace Sealebrities.EditorTools
             }
         }
 
-        static void SaveTerrainDependency(Shader terrain, string dependency, string fallbackName, string assetName, bool litKeywords)
+        /// Moves the include materials of the old look from Resources/ShaderIncludes to Obsolete/ShaderIncludes
+        /// (kept, not deleted; GUIDs survive). Idempotent: nothing happens once they are gone from Resources.
+        static void RetireObsoleteIncludes()
         {
-            Shader sh = null;
-            try { sh = terrain.GetDependency(dependency); }
-            catch (Exception) { sh = null; }
-            if (sh == null) sh = Shader.Find(fallbackName);
-            if (sh == null)
+            int moved = 0;
+            foreach (var file in ObsoleteIncludes)
             {
-                Debug.LogWarning("SEALEBRITIES setup: terrain dependency shader not found: " + fallbackName);
-                return;
+                string from = ShaderIncludesFolder + "/" + file;
+                if (string.IsNullOrEmpty(AssetDatabase.AssetPathToGUID(from)) || AssetDatabase.LoadMainAssetAtPath(from) == null) continue;
+                EnsureFolder(ObsoleteIncludesFolder);
+                string to = AssetDatabase.GenerateUniqueAssetPath(ObsoleteIncludesFolder + "/" + file);
+                string err = AssetDatabase.MoveAsset(from, to);
+                if (string.IsNullOrEmpty(err)) moved++;
+                else Debug.LogWarning("SEALEBRITIES setup: could not move " + from + " out of Resources: " + err);
             }
-            var m = new Material(sh);
-            if (litKeywords)
-            {
-                m.EnableKeyword("_NORMALMAP");
-                m.EnableKeyword("_TERRAIN_INSTANCED_PERPIXEL_NORMAL");
-                m.enableInstancing = true;
-            }
-            Save(assetName, m);
+            if (moved > 0)
+                Debug.Log("SEALEBRITIES setup: moved " + moved + " obsolete shader include asset(s) (normal/detail/alpha-clip/terrain) to " + ObsoleteIncludesFolder + ".");
         }
 
         static Shader Find(string name)
@@ -374,38 +358,11 @@ namespace Sealebrities.EditorTools
             return m;
         }
 
-        static Material WithNormal(Material m)
-        {
-            m.SetTexture("_BumpMap", flatNormal);
-            m.SetFloat("_BumpScale", 1f);
-            m.EnableKeyword("_NORMALMAP");
-            return m;
-        }
-
-        static Material WithDetail(Material m)
-        {
-            m.SetTexture("_DetailNormalMap", flatNormal);
-            m.SetFloat("_DetailNormalMapScale", 0.3f);
-            if (m.HasProperty("_DetailAlbedoMapScale")) m.SetFloat("_DetailAlbedoMapScale", 1f);
-            m.EnableKeyword("_DETAIL_MULX2");
-            return m;
-        }
-
         static Material WithEmission(Material m)
         {
             m.SetColor("_EmissionColor", new Color(0.5f, 0.5f, 0.5f, 1f));
             m.EnableKeyword("_EMISSION");
             m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
-            return m;
-        }
-
-        static Material WithAlphaClip(Material m)
-        {
-            m.SetFloat("_AlphaClip", 1f);
-            m.SetFloat("_Cutoff", 0.5f);
-            m.EnableKeyword("_ALPHATEST_ON");
-            m.SetOverrideTag("RenderType", "TransparentCutout");
-            m.renderQueue = (int)RenderQueue.AlphaTest;
             return m;
         }
 
@@ -454,20 +411,6 @@ namespace Sealebrities.EditorTools
                 EditorUtility.SetDirty(existing);
                 UnityEngine.Object.DestroyImmediate(m);
             }
-        }
-
-        static Texture2D FlatNormalTexture()
-        {
-            string path = ShaderIncludesFolder + "/SB_FlatNormal.asset";
-            var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
-            if (tex != null) return tex;
-            tex = new Texture2D(4, 4, TextureFormat.RGBA32, false, true) { name = "SB_FlatNormal" };
-            var px = new Color32[16];
-            for (int i = 0; i < px.Length; i++) px[i] = new Color32(128, 128, 255, 255);
-            tex.SetPixels32(px);
-            tex.Apply(false, false);
-            AssetDatabase.CreateAsset(tex, path);
-            return tex;
         }
 
         static bool OpenAlwaysIncluded(out SerializedObject so, out SerializedProperty list)
@@ -571,6 +514,221 @@ namespace Sealebrities.EditorTools
                     EditorUtility.SetDirty(a);
                 }
             }
+        }
+
+        // ------------------------------------------------------------------ low-poly look: PC renderer + URP asset
+        const string PcPipelineAssetPath = "Assets/Settings/PC_RPAsset.asset";
+        const string PcRendererPath = "Assets/Settings/PC_Renderer.asset";
+        const string SsaoTypeName = "UnityEngine.Rendering.Universal.ScreenSpaceAmbientOcclusion";
+        const string SsaoAssemblyQualifiedName = SsaoTypeName + ", Unity.RenderPipelines.Universal.Runtime";
+        const int MsaaSamples = 4;
+        // A small radius: the AO stays a soft contact shadow in the creases. With 0.3 m the sample disc around the
+        // first-person hands/lamp/camera (0.3-0.5 m from the eye) covered half the screen and left a blotchy,
+        // dirty-looking pattern on their flat colors.
+        const float SsaoIntensity = 0.6f;
+        const float SsaoRadius = 0.18f;
+
+        static RenderPipelineAsset PcPipelineAsset()
+        {
+            var a = AssetDatabase.LoadAssetAtPath<RenderPipelineAsset>(PcPipelineAssetPath);
+            if (a == null) a = GraphicsSettings.defaultRenderPipeline;
+            return a;
+        }
+
+        /// MSAA 4x keeps the faceted low-poly edges crisp (the FX module switches the main camera from post AA to
+        /// MSAA when the asset has it) and soft shadows give the slightly soft "toy diorama" shadow edge.
+        static void SetupPcPipelineAsset()
+        {
+            var asset = PcPipelineAsset();
+            if (asset == null)
+            {
+                Debug.LogWarning("SEALEBRITIES setup: PC URP asset not found (" + PcPipelineAssetPath + "): MSAA / soft shadows skipped.");
+                return;
+            }
+            var so = new SerializedObject(asset);
+            bool changed = false;
+            if (so.FindProperty("m_MSAA") == null) Debug.LogWarning("SEALEBRITIES setup: m_MSAA not found on " + asset.name + ".");
+            changed |= SetInt(so, "m_MSAA", MsaaSamples);
+            if (so.FindProperty("m_SoftShadowsSupported") == null) Debug.LogWarning("SEALEBRITIES setup: m_SoftShadowsSupported not found on " + asset.name + ".");
+            changed |= SetBool(so, "m_SoftShadowsSupported", true);
+            var quality = so.FindProperty("m_SoftShadowQuality");
+            if (quality != null && quality.intValue <= 0)
+            {
+                quality.intValue = 2;   // Medium: soft enough, cheaper than High on a GTX 1060
+                changed = true;
+            }
+            if (changed)
+            {
+                so.ApplyModifiedPropertiesWithoutUndo();
+                EditorUtility.SetDirty(asset);
+                AssetDatabase.SaveAssets();
+                Debug.Log("SEALEBRITIES setup: " + asset.name + " -> MSAA " + MsaaSamples + "x, soft shadows on.");
+            }
+            else Debug.Log("SEALEBRITIES setup: " + asset.name + " already has MSAA " + MsaaSamples + "x and soft shadows.");
+        }
+
+        static ScriptableObject PcRendererData()
+        {
+            var data = AssetDatabase.LoadAssetAtPath<ScriptableObject>(PcRendererPath);
+            if (data != null) return data;
+            // fallback: the first renderer of the PC pipeline asset
+            var asset = PcPipelineAsset();
+            if (asset == null) return null;
+            var list = new SerializedObject(asset).FindProperty("m_RendererDataList");
+            if (list == null || !list.isArray || list.arraySize == 0) return null;
+            return list.GetArrayElementAtIndex(0).objectReferenceValue as ScriptableObject;
+        }
+
+        static Type FindType(string assemblyQualifiedName, string fullName)
+        {
+            Type t = null;
+            try { t = Type.GetType(assemblyQualifiedName, false); } catch (Exception) { t = null; }
+            if (t != null) return t;
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                try { t = asm.GetType(fullName, false); } catch (Exception) { t = null; }
+                if (t != null) return t;
+            }
+            return null;
+        }
+
+        /// Soft ambient occlusion in the creases of the chunky low-poly props (How to Fish look). The feature
+        /// class may be internal in some URP versions, so it is created by reflection and wired into the
+        /// renderer's feature list + feature map exactly like the URP renderer inspector does. Idempotent.
+        static void SetupPcRendererSsao()
+        {
+            var data = PcRendererData();
+            if (data == null)
+            {
+                Debug.LogWarning("SEALEBRITIES setup: PC renderer data not found (" + PcRendererPath + "): SSAO skipped.");
+                return;
+            }
+            Type ssaoType = FindType(SsaoAssemblyQualifiedName, SsaoTypeName);
+            if (ssaoType == null || ssaoType.IsAbstract || !typeof(ScriptableObject).IsAssignableFrom(ssaoType))
+            {
+                Debug.LogWarning("SEALEBRITIES setup: URP type " + SsaoTypeName + " not found: SSAO skipped.");
+                return;
+            }
+
+            var so = new SerializedObject(data);
+            var features = so.FindProperty("m_RendererFeatures");
+            var map = so.FindProperty("m_RendererFeatureMap");
+            if (features == null || !features.isArray)
+            {
+                Debug.LogWarning("SEALEBRITIES setup: m_RendererFeatures not found on " + data.name + ": SSAO skipped.");
+                return;
+            }
+
+            ScriptableObject ssao = null;
+            for (int i = 0; i < features.arraySize; i++)
+            {
+                var o = features.GetArrayElementAtIndex(i).objectReferenceValue;
+                if (o != null && ssaoType.IsInstanceOfType(o)) { ssao = (ScriptableObject)o; break; }
+            }
+
+            bool created = false;
+            if (ssao == null)
+            {
+                ssao = ScriptableObject.CreateInstance(ssaoType);
+                if (ssao == null)
+                {
+                    Debug.LogWarning("SEALEBRITIES setup: could not create " + SsaoTypeName + ": SSAO skipped.");
+                    return;
+                }
+                ssao.name = ssaoType.Name;
+                AssetDatabase.AddObjectToAsset(ssao, data);
+
+                int n = features.arraySize;
+                int oldMapSize = map != null && map.isArray ? map.arraySize : 0;
+                features.arraySize = n + 1;
+                features.GetArrayElementAtIndex(n).objectReferenceValue = ssao;
+                if (map != null && map.isArray)
+                {
+                    // the map holds the local file id of every feature sub-asset (URP uses it to re-link features)
+                    map.arraySize = features.arraySize;
+                    for (int i = oldMapSize; i < features.arraySize; i++)
+                    {
+                        var o = features.GetArrayElementAtIndex(i).objectReferenceValue;
+                        long id = 0;
+                        if (o != null && AssetDatabase.TryGetGUIDAndLocalFileIdentifier(o, out string _, out long localId)) id = localId;
+                        map.GetArrayElementAtIndex(i).longValue = id;
+                    }
+                }
+                so.ApplyModifiedPropertiesWithoutUndo();
+                created = true;
+            }
+
+            var fso = new SerializedObject(ssao);
+            bool changed = false;
+            changed |= SetBool(fso, "m_Active", true);
+            changed |= SetFloatLogged(fso, "m_Settings.Intensity", SsaoIntensity, data.name);
+            changed |= SetFloatLogged(fso, "m_Settings.Radius", SsaoRadius, data.name);
+            changed |= SetBool(fso, "m_Settings.AfterOpaque", false);   // AO only on ambient light, under the fog
+            if (changed) fso.ApplyModifiedPropertiesWithoutUndo();
+
+            if (created || changed)
+            {
+                EditorUtility.SetDirty(ssao);
+                EditorUtility.SetDirty(data);
+                if (data is UnityEngine.Rendering.Universal.ScriptableRendererData rd) rd.SetDirty();
+                AssetDatabase.SaveAssets();
+                Debug.Log("SEALEBRITIES setup: " + (created ? "added" : "updated") + " Screen Space Ambient Occlusion on " + data.name +
+                          " (intensity " + SsaoIntensity + ", radius " + SsaoRadius + ").");
+            }
+            else Debug.Log("SEALEBRITIES setup: Screen Space Ambient Occlusion already configured on " + data.name + ".");
+        }
+
+        /// The FX module turns fog on at runtime (exponential squared), but the boot scene itself has fog off: with
+        /// "Automatic" fog stripping the player build would drop every fog shader variant and the underwater fog
+        /// would vanish in builds. Keep EXP + EXP2 explicitly; linear fog is never used (fewer variants).
+        static void SetupFogVariants()
+        {
+            var assets = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/GraphicsSettings.asset");
+            if (assets == null || assets.Length == 0 || assets[0] == null)
+            {
+                Debug.LogWarning("SEALEBRITIES setup: GraphicsSettings.asset not found: fog variants not pinned.");
+                return;
+            }
+            var so = new SerializedObject(assets[0]);
+            if (so.FindProperty("m_FogStripping") == null)
+            {
+                Debug.LogWarning("SEALEBRITIES setup: m_FogStripping not found in GraphicsSettings: fog variants not pinned.");
+                return;
+            }
+            bool changed = false;
+            changed |= SetInt(so, "m_FogStripping", 1);   // 1 = Custom
+            changed |= SetBool(so, "m_FogKeepExp", true);
+            changed |= SetBool(so, "m_FogKeepExp2", true);
+            changed |= SetBool(so, "m_FogKeepLinear", false);
+            if (changed)
+            {
+                so.ApplyModifiedPropertiesWithoutUndo();
+                AssetDatabase.SaveAssets();
+                Debug.Log("SEALEBRITIES setup: fog stripping set to Custom (keep Exponential + Exponential Squared).");
+            }
+        }
+
+        static bool SetInt(SerializedObject so, string prop, int v)
+        {
+            var p = so.FindProperty(prop);
+            if (p == null) return false;
+            if (p.propertyType != SerializedPropertyType.Integer && p.propertyType != SerializedPropertyType.Enum) return false;
+            if (p.intValue == v) return false;
+            p.intValue = v;
+            return true;
+        }
+
+        static bool SetFloatLogged(SerializedObject so, string prop, float v, string owner)
+        {
+            var p = so.FindProperty(prop);
+            if (p == null || p.propertyType != SerializedPropertyType.Float)
+            {
+                Debug.LogWarning("SEALEBRITIES setup: property " + prop + " not found on " + owner + ".");
+                return false;
+            }
+            if (Mathf.Approximately(p.floatValue, v)) return false;
+            p.floatValue = v;
+            return true;
         }
 
         static bool SetFloat(SerializedObject so, string prop, float v)
