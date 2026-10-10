@@ -1,0 +1,382 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace Sealebrities
+{
+    /// Cached main camera position (player camera, or the menu camera before the player exists).
+    public static class PropCam
+    {
+        static Camera cached;
+        static int frame = -1;
+        static Vector3 pos;
+        static bool valid;
+
+        public static Vector3 Position { get { Refresh(); return pos; } }
+        public static bool Valid { get { Refresh(); return valid; } }
+
+        static void Refresh()
+        {
+            int f = Time.frameCount;
+            if (f == frame) return;
+            frame = f;
+            Camera c = cached;
+            if (c == null || !c.isActiveAndEnabled)
+            {
+                c = Camera.main;
+                if (c == null && Refs.Player != null)
+                {
+                    var v = Refs.Player.View;
+                    if (v != null) c = v;
+                }
+                cached = c;
+            }
+            valid = c != null;
+            if (valid) pos = c.transform.position;
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { cached = null; frame = -1; valid = false; }
+    }
+
+    /// The hut bed: sleep until the next morning.
+    public class PropBed : MonoBehaviour, IInteractable
+    {
+        float lastUse = -100f;
+
+        public string GetPrompt()
+        {
+            if (!CanInteract()) return null;
+            return Loc.Tr("E – Schlafen (bis morgen früh)", "E – Sleep (until morning)");
+        }
+
+        public bool CanInteract() => GameManager.I != null && GameManager.I.InGame && Time.unscaledTime - lastUse > 3f;
+
+        public void Interact()
+        {
+            if (!CanInteract()) return;
+            // sleep only in the evening/night, or when something is waiting for "tomorrow morning"
+            // (an upload, or an order that is not due yet) – otherwise the bed would farm sponsor income
+            var s = GameManager.I.State;
+            bool evening = s.timeOfDay >= 0.75f || s.timeOfDay < GameManager.MorningTime;
+            bool waiting = s.pendingUploads.Count > 0 || s.deliveries.Exists(d => !d.dropped && !Shop.IsDue(d));
+            if (!evening && !waiting)
+            {
+                GameEvents.RaiseToast(Loc.Tr("Noch zu früh zum Schlafen (ab 18 Uhr).", "Too early to sleep (from 6 pm)."));
+                return;
+            }
+            lastUse = Time.unscaledTime;
+            if (s.timeOfDay < GameManager.MorningTime)
+            {
+                // After midnight the clock rollover already started the new day (sponsors, uploads, history).
+                // GameManager.SleepToMorning would advance the day a second time, so only skip to the morning here.
+                // (Workaround until the lead moves this case into GameManager.SleepToMorning.)
+                Fader.FadeThrough(WakeUpSameDay, 2f);
+                return;
+            }
+            GameManager.I.SleepToMorning();
+        }
+
+        static void WakeUpSameDay()
+        {
+            var gm = GameManager.I;
+            if (gm == null || !gm.InGame) return;
+            var st = gm.State;
+            st.timeOfDay = GameManager.MorningTime;
+            Progression.ResolvePendingUploads();   // uploads made after midnight still arrive "overnight"
+            GameEvents.RaiseDayStarted(st.day);    // same day number: player wakes in the hut, reef/boat refresh
+            gm.Save();
+        }
+    }
+
+    /// Lights (and an optional emissive material / particle system) that switch on at night via EnvState.Night01.
+    public class PropNightLight : MonoBehaviour
+    {
+        public Light[] lights = new Light[0];
+        public float[] baseIntensity = new float[0];
+        public Material emissive;
+        public Color emissiveColor = Color.white;
+        public float onAt = 0.15f, fullAt = 0.5f;
+        public bool flicker;
+        public float flickerAmount = 0.3f;
+        public ParticleSystem particles;
+        public float cullDistance = 180f;
+
+        float seed, lastEmis = -1f, nextCheck;
+        bool near = true, psOn;
+
+        public static PropNightLight Attach(GameObject go, Light light, Material emissive, Color emissiveColor, float onAt, float fullAt, bool flicker)
+        {
+            var nl = go.AddComponent<PropNightLight>();
+            if (light != null)
+            {
+                nl.lights = new[] { light };
+                nl.baseIntensity = new[] { light.intensity };
+                light.enabled = false;
+            }
+            nl.emissive = emissive;
+            nl.emissiveColor = emissiveColor;
+            nl.onAt = onAt;
+            nl.fullAt = fullAt;
+            nl.flicker = flicker;
+            return nl;
+        }
+
+        void Awake() { seed = Random.value * 100f; }
+
+        void Update()
+        {
+            float n = EnvState.Night01;
+            float k = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((n - onAt) / Mathf.Max(0.01f, fullAt - onAt)));
+            if (Time.time >= nextCheck)
+            {
+                nextCheck = Time.time + 0.5f + seed * 0.001f;
+                near = !PropCam.Valid || (PropCam.Position - transform.position).sqrMagnitude < cullDistance * cullDistance;
+            }
+            float f = 1f;
+            if (flicker && k > 0f)
+            {
+                float t = Time.time;
+                f = 1f - flickerAmount + flickerAmount * (Mathf.PerlinNoise(seed, t * 7f) * 1.4f + Mathf.PerlinNoise(seed + 9f, t * 17f) * 0.6f);
+            }
+            for (int i = 0; i < lights.Length; i++)
+            {
+                var l = lights[i];
+                if (l == null) continue;
+                bool on = near && k > 0.01f;
+                if (l.enabled != on) l.enabled = on;
+                if (on) l.intensity = baseIntensity[i] * k * f;
+            }
+            if (emissive != null)
+            {
+                float e = k * (flicker ? f : 1f);
+                if (Mathf.Abs(e - lastEmis) > 0.02f || (e == 0f && lastEmis != 0f))
+                {
+                    lastEmis = e;
+                    PropMats.SetEmission(emissive, emissiveColor * e);
+                }
+            }
+            if (particles != null)
+            {
+                bool want = k > 0.05f && near;
+                if (want != psOn)
+                {
+                    psOn = want;
+                    if (want) particles.Play(true);
+                    else particles.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+                }
+            }
+        }
+    }
+
+    /// Rotating lighthouse lamp with two spot lights and visible beams, active at night.
+    public class PropLighthouseLamp : MonoBehaviour
+    {
+        public Transform pivot;
+        public Light[] spots = new Light[0];
+        public float spotIntensity = 40f;
+        public Renderer[] beams = new Renderer[0];
+        public Material beamMat;
+        public Color beamColor = new Color(1f, 0.95f, 0.75f, 0.14f);
+        public Material lens;
+        public Color lensColor = new Color(3f, 2.6f, 1.6f);
+        public Light glow;
+        public float glowIntensity = 3f;
+        public float speed = 26f;
+
+        float lastK = -1f;
+
+        void Update()
+        {
+            float k = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((EnvState.Night01 - 0.3f) / 0.15f));
+            if (k > 0.001f && pivot != null) pivot.Rotate(0f, speed * Time.deltaTime, 0f, Space.Self);
+            if (Mathf.Abs(k - lastK) < 0.01f) return;
+            lastK = k;
+            bool on = k > 0.01f;
+            for (int i = 0; i < spots.Length; i++)
+            {
+                if (spots[i] == null) continue;
+                spots[i].enabled = on;
+                spots[i].intensity = spotIntensity * k;
+            }
+            for (int i = 0; i < beams.Length; i++) if (beams[i] != null) beams[i].enabled = on;
+            if (beamMat != null)
+            {
+                var c = beamColor;
+                c.a *= k;
+                beamMat.SetColor("_BaseColor", c);
+            }
+            PropMats.SetEmission(lens, lensColor * k);
+            if (glow != null)
+            {
+                glow.enabled = on;
+                glow.intensity = glowIntensity * k;
+            }
+        }
+    }
+
+    /// Wind sock swinging with a slowly changing wind.
+    public class PropWindsock : MonoBehaviour
+    {
+        public Transform sock;
+        public float baseYaw;
+        float seed, nextCheck;
+        bool near = true;
+
+        void Awake() { seed = Random.value * 50f; }
+
+        void Update()
+        {
+            if (sock == null) return;
+            if (Time.time >= nextCheck)
+            {
+                nextCheck = Time.time + 0.5f;
+                near = !PropCam.Valid || (PropCam.Position - transform.position).sqrMagnitude < 300f * 300f;
+            }
+            if (!near) return;
+            float t = Time.time;
+            float wind = 0.4f + 0.6f * Mathf.PerlinNoise(seed, t * 0.12f);
+            float yaw = baseYaw + (Mathf.PerlinNoise(seed + 3f, t * 0.05f) - 0.5f) * 80f + Mathf.Sin(t * 2.3f + seed) * 4f * wind;
+            float droop = Mathf.Lerp(62f, 6f, wind) + Mathf.Sin(t * 3.1f + seed) * 2.5f;
+            sock.localRotation = Quaternion.Euler(0f, yaw, -droop);
+        }
+    }
+
+    /// Gentle pendulum (tire swing).
+    public class PropSwing : MonoBehaviour
+    {
+        public float amplitude = 7f;
+        float seed;
+        void Awake() { seed = Random.value * 10f; }
+        void Update()
+        {
+            float t = Time.time + seed;
+            transform.localRotation = Quaternion.Euler(Mathf.Sin(t * 1.25f) * amplitude, 0f, Mathf.Sin(t * 0.61f) * amplitude * 0.4f);
+        }
+    }
+
+    /// Dive-site marker buoy floating on the shared wave function, with a fluttering flag and a night blinker.
+    public class PropBuoy : MonoBehaviour
+    {
+        public float x, z, yaw;
+        public float floatOffset = -0.15f;
+        public Transform flag;
+        public Material blinker;
+        public Color blinkColor = new Color(3f, 2.2f, 0.6f);
+
+        float phase, nextCheck;
+        bool near = true, blinkOn;
+        Quaternion tilt = Quaternion.identity;
+
+        void Awake() { phase = Random.value * 10f; }
+
+        void Update()
+        {
+            if (Time.time >= nextCheck)
+            {
+                nextCheck = Time.time + 1f;
+                near = !PropCam.Valid || (PropCam.Position - transform.position).sqrMagnitude < 900f * 900f;
+            }
+            float t = Time.time;
+            bool wantBlink = EnvState.Night01 > 0.2f && Mathf.Repeat(t + phase, 2f) < 0.25f;
+            if (wantBlink != blinkOn)
+            {
+                blinkOn = wantBlink;
+                PropMats.SetEmission(blinker, wantBlink ? blinkColor : Color.black);
+            }
+            if (!near) return;
+            float h = Waves.HeightAt(x, z);
+            Vector3 n = Waves.NormalAt(x, z);
+            Quaternion target = Quaternion.FromToRotation(Vector3.up, Vector3.SlerpUnclamped(Vector3.up, n, 1.6f));
+            tilt = Quaternion.Slerp(tilt, target, Mathf.Clamp01(Time.deltaTime * 3f));
+            transform.SetPositionAndRotation(new Vector3(x, h + floatOffset + Mathf.Sin(t * 1.7f + phase) * 0.03f, z), tilt * Quaternion.Euler(0f, yaw, 0f));
+            if (flag != null) flag.localRotation = Quaternion.Euler(0f, Mathf.Sin(t * 3.3f + phase) * 14f + Mathf.Sin(t * 7.1f) * 4f, 0f);
+        }
+    }
+
+    /// Enables a dive site's decor only while the main camera is within range of the site center (horizontal distance).
+    public class PropSiteActivation : MonoBehaviour
+    {
+        public GameObject target;
+        public Vector2 center;
+        public float radius = 550f;
+        float nextCheck;
+
+        public void Init(GameObject decor, Vector3 siteCenter, float range)
+        {
+            target = decor;
+            center = new Vector2(siteCenter.x, siteCenter.z);
+            radius = range;
+            nextCheck = 0f;
+        }
+
+        void Update()
+        {
+            if (target == null || Time.unscaledTime < nextCheck) return;
+            nextCheck = Time.unscaledTime + 0.25f;
+            if (!PropCam.Valid) return;
+            Vector3 p = PropCam.Position;
+            float d = Vector2.Distance(new Vector2(p.x, p.z), center);
+            bool active = target.activeSelf;
+            if (active && d > radius + 25f) target.SetActive(false);
+            else if (!active && d < radius) target.SetActive(true);
+        }
+    }
+
+    /// Single manager animating all kelp clusters of the kelp forest (bone chains of skinned meshes), distance culled.
+    public class PropKelpSway : MonoBehaviour
+    {
+        sealed class Cluster
+        {
+            public Vector3 center;
+            public Renderer rend;
+            public Transform[] bones;
+            public Quaternion[] baseRot;
+            public float[] phase;
+            public float[] amp;
+            public bool visible = true;
+        }
+
+        readonly List<Cluster> clusters = new List<Cluster>();
+        public float cullDistance = 175f;
+        public float animDistance = 85f;
+        int frameIndex;
+
+        public void Register(Vector3 center, Renderer rend, Transform[] bones, float[] phase, float[] amp)
+        {
+            var c = new Cluster { center = center, rend = rend, bones = bones, phase = phase, amp = amp, baseRot = new Quaternion[bones.Length] };
+            for (int i = 0; i < bones.Length; i++) c.baseRot[i] = bones[i].localRotation;
+            clusters.Add(c);
+        }
+
+        void Update()
+        {
+            frameIndex++;
+            Vector3 cam = PropCam.Position;
+            bool camValid = PropCam.Valid;
+            float t = Time.time;
+            float cull2 = cullDistance * cullDistance, anim2 = animDistance * animDistance;
+            for (int i = 0; i < clusters.Count; i++)
+            {
+                var c = clusters[i];
+                float d2 = camValid ? (c.center - cam).sqrMagnitude : 0f;
+                bool vis = d2 < cull2;
+                if (vis != c.visible)
+                {
+                    c.visible = vis;
+                    if (c.rend != null) c.rend.enabled = vis;
+                }
+                if (!vis) continue;
+                if (d2 > anim2 && ((frameIndex + i) % 3) != 0) continue;
+                var bones = c.bones;
+                for (int b = 0; b < bones.Length; b++)
+                {
+                    float ph = c.phase[b], a = c.amp[b];
+                    if (a <= 0f) continue;
+                    float ax = Mathf.Sin(t * 0.85f + ph) * a + Mathf.Sin(t * 0.33f + ph * 0.5f) * a * 0.6f;
+                    float az = Mathf.Cos(t * 0.63f + ph * 1.3f) * a * 0.7f;
+                    bones[b].localRotation = c.baseRot[b] * Quaternion.Euler(ax, 0f, az);
+                }
+            }
+        }
+    }
+}
