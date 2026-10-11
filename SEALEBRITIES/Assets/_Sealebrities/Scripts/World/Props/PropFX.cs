@@ -149,6 +149,87 @@ namespace Sealebrities
             return ps;
         }
 
+        /// Light grey grill smoke (E.1) – stopped until a fish sizzles.
+        public static ParticleSystem GrillSmoke(Transform parent, Vector3 pos)
+        {
+            var ps = Create(parent, "GrillSmoke", pos, Quaternion.Euler(-90f, 0f, 0f), ParticleMat("grill_smoke", PropTex.SoftDot, new Color(0.92f, 0.9f, 0.86f, 1f), false), 50);
+            var main = ps.main;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(2.2f, 3.4f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(0.5f, 0.9f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.25f, 0.5f);
+            main.startColor = new ParticleSystem.MinMaxGradient(new Color(1f, 1f, 1f, 0.5f));
+            main.playOnAwake = false;
+            var em = ps.emission;
+            em.rateOverTime = 9f;
+            var sh = ps.shape;
+            sh.shapeType = ParticleSystemShapeType.Cone;
+            sh.angle = 12f;
+            sh.radius = 0.22f;
+            var col = ps.colorOverLifetime;
+            col.enabled = true;
+            col.color = new ParticleSystem.MinMaxGradient(Grad(Color.white, 0.55f, Color.white, 0.3f, Color.white, 0f));
+            var sz = ps.sizeOverLifetime;
+            sz.enabled = true;
+            sz.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0f, 0.6f, 1f, 2.6f));
+            var noise = ps.noise;
+            noise.enabled = true;
+            noise.strength = 0.25f;
+            noise.frequency = 0.4f;
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            return ps;
+        }
+
+        /// Hissing air at an old air station (white puffs, stopped until it refills).
+        public static ParticleSystem Hiss(Transform parent, Vector3 pos)
+        {
+            var ps = Create(parent, "Hiss", pos, Quaternion.Euler(0f, 0f, 0f), ParticleMat("hiss", PropTex.SoftDot, new Color(1f, 1f, 1f, 0.6f), false), 30);
+            var main = ps.main;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.3f, 0.6f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(1.2f, 2.2f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.08f, 0.18f);
+            main.playOnAwake = false;
+            var em = ps.emission;
+            em.rateOverTime = 30f;
+            var sh = ps.shape;
+            sh.shapeType = ParticleSystemShapeType.Cone;
+            sh.angle = 20f;
+            sh.radius = 0.03f;
+            var col = ps.colorOverLifetime;
+            col.enabled = true;
+            col.color = new ParticleSystem.MinMaxGradient(Grad(Color.white, 0.6f, Color.white, 0.3f, Color.white, 0f));
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            return ps;
+        }
+
+        /// Orange smoke column (wrong-place chopper delivery beacon, L.12 – the Boat module may reuse it).
+        public static ParticleSystem SmokeBeacon(Transform parent, Vector3 pos)
+        {
+            var ps = Create(parent, "SmokeBeacon", pos, Quaternion.Euler(-90f, 0f, 0f), ParticleMat("beacon_smoke", PropTex.SoftDot, new Color(1f, 0.55f, 0.18f, 1f), false), 140);
+            var main = ps.main;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(6f, 9f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(2.4f, 3.6f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.8f, 1.6f);
+            main.startColor = new ParticleSystem.MinMaxGradient(new Color(1f, 1f, 1f, 0.7f));
+            var em = ps.emission;
+            em.rateOverTime = 14f;
+            var sh = ps.shape;
+            sh.shapeType = ParticleSystemShapeType.Cone;
+            sh.angle = 6f;
+            sh.radius = 0.2f;
+            var col = ps.colorOverLifetime;
+            col.enabled = true;
+            col.color = new ParticleSystem.MinMaxGradient(Grad(Color.white, 0.75f, Color.white, 0.45f, Color.white, 0f));
+            var sz = ps.sizeOverLifetime;
+            sz.enabled = true;
+            sz.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0f, 0.5f, 1f, 3.4f));
+            var noise = ps.noise;
+            noise.enabled = true;
+            noise.strength = 0.6f;
+            noise.frequency = 0.15f;
+            ps.Play(true);
+            return ps;
+        }
+
         /// Subtle golden glints around a collectible (a few particles per second, started/stopped by distance).
         public static ParticleSystem Sparkle(Transform parent, Vector3 pos, float radius)
         {

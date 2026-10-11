@@ -26,6 +26,15 @@ namespace Sealebrities
                 case BodyPlan.Sunfish: fwd = new Vector3(1f, -0.12f, -0.35f); break;
                 case BodyPlan.Eel: fwd = new Vector3(0.55f, -0.75f, -0.35f); break;
                 case BodyPlan.SeaLion: fwd = new Vector3(1f, -0.32f, -0.5f); break;
+                case BodyPlan.Crab: fwd = new Vector3(0.6f, -0.62f, -0.75f); break;
+                case BodyPlan.Starfish: fwd = new Vector3(0.25f, -1f, -0.45f); break;
+                case BodyPlan.Dolphin:
+                case BodyPlan.Whale: fwd = new Vector3(1f, -0.35f, -0.5f); break;
+                case BodyPlan.Bird:
+                case BodyPlan.Bat: fwd = new Vector3(0.8f, -0.55f, -0.6f); break;
+                case BodyPlan.Lizard: fwd = new Vector3(0.75f, -0.6f, -0.5f); break;
+                case BodyPlan.Quadruped:
+                case BodyPlan.Primate: fwd = new Vector3(1f, -0.3f, -0.6f); break;
                 case BodyPlan.Shark:
                     fwd = s.variant == "hammer" ? new Vector3(0.75f, -0.6f, -0.45f) : (s.variant == "whale" ? new Vector3(0.85f, -0.45f, -0.45f) : new Vector3(1f, -0.3f, -0.45f));
                     break;
@@ -57,7 +66,7 @@ namespace Sealebrities
                 switch (slot)
                 {
                     case CreatureMeshSlot.Skin:
-                        a = ctx.Layout == CreatureMeshLayout.Bell ? CreatureMeshColors.Bell(s) : (bake.Skin != null ? bake.Skin.Sample(uv) : s.colorA);
+                        a = ctx.Layout == CreatureMeshLayout.Bell ? CreatureMeshColors.Bell(s) : (bake.Skin != null ? bake.Skin.Sample(uv, ctx.SmoothTexture) : s.colorA);
                         break;
                     case CreatureMeshSlot.Fin: a = bake.Fins != null ? bake.Fins.Sample(uv) : s.colorC; break;
                     case CreatureMeshSlot.Eye: a = look.Sclera; break;

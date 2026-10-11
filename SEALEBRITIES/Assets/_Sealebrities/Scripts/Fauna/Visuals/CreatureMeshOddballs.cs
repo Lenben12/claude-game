@@ -25,7 +25,8 @@ namespace Sealebrities
                 new Vector3(0f, -0.42f, 0.088f), new Vector3(0f, -0.365f, 0.08f), new Vector3(0f, -0.35f, 0.042f),
             };
             var pts = CreatureMeshMath.Resample(path, 40);
-            float bh = CreatureMeshMath.Clamp(s.bodyHeight, 0.3f, 0.7f) / 0.5f;
+            bool pygmy = (s.variant ?? "") == "pygmy";
+            float bh = CreatureMeshMath.Clamp(s.bodyHeight, 0.3f, 0.7f) / 0.5f * (pygmy ? 1.3f : 1f);
             var front = new CreatureMeshCurve(0f, 0.045f, 0.12f, 0.05f, 0.25f, 0.068f, 0.36f, 0.078f, 0.45f, 0.06f, 0.55f, 0.042f, 0.7f, 0.03f, 0.85f, 0.02f, 1f, 0.008f);
             var backC = new CreatureMeshCurve(0f, 0.045f, 0.12f, 0.042f, 0.25f, 0.05f, 0.36f, 0.052f, 0.45f, 0.045f, 0.55f, 0.036f, 0.7f, 0.028f, 0.85f, 0.018f, 1f, 0.007f);
             var body = new CreatureMeshSweep
@@ -38,6 +39,7 @@ namespace Sealebrities
                 HalfW = t => Math.Min(front[t], backC[t]) * 0.82f * bh,
                 Square = t => 2.7f,
                 Spacing = 0, CapStart = true, CapEnd = true, CapBulgeStart = 0.3f,
+                U1 = pygmy ? CreatureMeshPaint.PalBodyU : 1f,
             };
             var chain = ctx.SpineAlong(body, new[] { 0f, 0.15f, 0.32f, 0.48f, 0.63f, 0.78f, 0.9f }, -1);
             int head = ctx.Spine[0];
@@ -90,6 +92,21 @@ namespace Sealebrities
                     Vector3 q = p + new Vector3(side * body.HalfW(t) * 0.55f, 0f, 0f) - n * 0.003f;
                     CreatureMeshParts.Cone(b, CreatureMeshSlot.Skin, q, q + n * 0.014f + new Vector3(side * 0.004f, 0f, 0f), 0.006f, 3,
                         new Vector2(t, 0.5f), new Vector2(t, 0.5f), chain.Weigh(q));
+                }
+            }
+
+            if (pygmy)
+            {
+                // pygmy seahorse: round pink-red tubercles all over (it looks exactly like its sea fan)
+                for (int k = 0; k < 26; k++)
+                {
+                    float t = CreatureMeshMath.Lerp(0.02f, 0.86f, CreatureMeshNoise.Rand(k, 1, 3, 41));
+                    float th = CreatureMeshNoise.Rand(k, 2, 3, 41) * CreatureMeshMath.TwoPi;
+                    Vector3 p = body.Point(t, th);
+                    Vector3 nrm = body.Normal(t, th);
+                    float rk = 0.011f * bh * (0.7f + 0.6f * CreatureMeshNoise.Rand(k, 3, 3, 41));
+                    CreatureMeshParts.Ellipsoid(b, CreatureMeshSlot.Skin, p, nrm, Vector3.up, rk, rk, rk, 3, 5,
+                        CreatureMeshPaint.PalUv(k % 3 == 0 ? 1 : 0), CreatureMeshPaint.PalUv(k % 3 == 0 ? 1 : 0), chain.ByVertex);
                 }
             }
 

@@ -12,13 +12,31 @@ namespace Sealebrities
         static Mesh fishMesh;
         static readonly Dictionary<string, Material[]> kindMats = new Dictionary<string, Material[]>();
         static readonly Dictionary<int, Material> viewMats = new Dictionary<int, Material>();
+        static readonly Dictionary<int, Mesh> variantMeshes = new Dictionary<int, Mesh>();
+        static readonly Dictionary<Renderer, Material[]> bobberNormal = new Dictionary<Renderer, Material[]>();
+        static readonly Dictionary<Renderer, Material[]> bobberGlow = new Dictionary<Renderer, Material[]>();
 
         /// Render queue of first-person view models (same as the Player/Filming view models): opaque shader drawn
         /// after the opaque pass so SSAO never mottles the flat colours of the hands.
         public const int ViewModelQueue = 2600;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { fishMesh = null; kindMats.Clear(); viewMats.Clear(); }
+        static void ResetStatics()
+        {
+            fishMesh = null; kindMats.Clear(); viewMats.Clear(); variantMeshes.Clear(); bobberNormal.Clear(); bobberGlow.Clear();
+        }
+
+        /// Body mesh of a kind: the plain fish, or a variant with a beak/sword (garfish, swordfish, marlin) and a tall
+        /// dorsal (marlin sail, swordfish crescent). Cached per variant.
+        public static Mesh MeshFor(FishKind k)
+        {
+            if (k == null || (k.bill <= 0.001f && k.dorsal == 0)) return FishMesh;
+            int key = Mathf.RoundToInt(k.bill * 100f) * 10 + Mathf.Clamp(k.dorsal, 0, 9);
+            if (variantMeshes.TryGetValue(key, out var m) && m != null) return m;
+            m = BuildFishMesh(k.bill, k.dorsal);
+            variantMeshes[key] = m;
+            return m;
+        }
 
         // ------------------------------------------------------------------ fish
         /// Faceted fish body at 1 m length along +Z (head at +Z). Submeshes: 0 back + fins, 1 flanks, 2 belly, 3 eyes
@@ -32,7 +50,9 @@ namespace Sealebrities
             }
         }
 
-        static Mesh BuildFishMesh()
+        static Mesh BuildFishMesh() => BuildFishMesh(0f, 0);
+
+        static Mesh BuildFishMesh(float bill, int dorsal)
         {
             var set = new FishSet();
             float[] z = { -0.5f, -0.34f, -0.1f, 0.16f, 0.36f, 0.5f };
@@ -57,9 +77,38 @@ namespace Sealebrities
                     b.QuadOut(P[r, c], P[r + 1, c], P[r + 1, c1], P[r, c1], new Vector3(mid.x, mid.y, 0f));
                 }
             // tail, dorsal and anal fins (two-sided by geometry)
-            Fin(set.back, new Vector3(0f, 0f, -0.46f), new Vector3(0f, 0.2f, -0.72f), new Vector3(0f, -0.2f, -0.72f));
-            Fin(set.back, new Vector3(0f, 0.15f, -0.18f), new Vector3(0f, 0.28f, -0.04f), new Vector3(0f, 0.16f, 0.12f));
+            if (dorsal > 0)
+            {
+                // big-game tail: a deep crescent
+                Fin(set.back, new Vector3(0f, 0f, -0.46f), new Vector3(0f, 0.27f, -0.66f), new Vector3(0f, 0.05f, -0.55f));
+                Fin(set.back, new Vector3(0f, 0f, -0.46f), new Vector3(0f, -0.05f, -0.55f), new Vector3(0f, -0.27f, -0.66f));
+            }
+            else Fin(set.back, new Vector3(0f, 0f, -0.46f), new Vector3(0f, 0.2f, -0.72f), new Vector3(0f, -0.2f, -0.72f));
+            if (dorsal == 1)
+            {
+                // marlin sail: tall at the front, sloping back along the body
+                Fin(set.back, new Vector3(0f, 0.15f, 0.26f), new Vector3(0f, 0.42f, 0.2f), new Vector3(0f, 0.16f, -0.12f));
+                Fin(set.back, new Vector3(0f, 0.16f, -0.12f), new Vector3(0f, 0.42f, 0.2f), new Vector3(0f, 0.19f, -0.34f));
+            }
+            else if (dorsal == 2)
+            {
+                // swordfish: one tall crescent dorsal right behind the head
+                Fin(set.back, new Vector3(0f, 0.16f, 0.18f), new Vector3(0f, 0.38f, 0.06f), new Vector3(0f, 0.16f, 0.02f));
+            }
+            else Fin(set.back, new Vector3(0f, 0.15f, -0.18f), new Vector3(0f, 0.28f, -0.04f), new Vector3(0f, 0.16f, 0.12f));
             Fin(set.back, new Vector3(0f, -0.15f, -0.22f), new Vector3(0f, -0.23f, -0.14f), new Vector3(0f, -0.15f, -0.02f));
+            if (bill > 0.001f)
+            {
+                // beak / sword: a slim four-sided spike from the snout (flattened for the swordfish)
+                float flat = dorsal == 2 ? 2.2f : 1f;
+                Vector3 b0 = new Vector3(0f, 0.012f, 0.46f), tip = new Vector3(0f, 0.004f, 0.5f + bill);
+                float r = 0.028f;
+                Vector3 up = new Vector3(0f, r / flat, 0f), side = new Vector3(r * flat * 0.6f, 0f, 0f);
+                set.back.TriOut(b0 + up, b0 + side, tip, new Vector3(1f, 1f, 0f));
+                set.back.TriOut(b0 + side, b0 - up, tip, new Vector3(1f, -1f, 0f));
+                set.back.TriOut(b0 - up, b0 - side, tip, new Vector3(-1f, -1f, 0f));
+                set.back.TriOut(b0 - side, b0 + up, tip, new Vector3(-1f, 1f, 0f));
+            }
             // eyes: dark diamonds on both sides of the head
             for (int side = -1; side <= 1; side += 2)
             {
@@ -108,10 +157,13 @@ namespace Sealebrities
         }
 
         public static GameObject BuildFish(Transform parent, Material[] mats, float length, float heightMul, float widthMul, bool shadows)
+            => BuildFish(parent, FishMesh, mats, length, heightMul, widthMul, shadows);
+
+        public static GameObject BuildFish(Transform parent, Mesh mesh, Material[] mats, float length, float heightMul, float widthMul, bool shadows)
         {
             var go = new GameObject("Fish");
             go.transform.SetParent(parent, false);
-            go.AddComponent<MeshFilter>().sharedMesh = FishMesh;
+            go.AddComponent<MeshFilter>().sharedMesh = mesh != null ? mesh : FishMesh;
             var mr = go.AddComponent<MeshRenderer>();
             mr.sharedMaterials = mats;
             mr.shadowCastingMode = shadows ? ShadowCastingMode.On : ShadowCastingMode.Off;
@@ -141,8 +193,10 @@ namespace Sealebrities
                 BuildBoot(root.transform, shadows);
                 return root;
             }
-            length = kind != null ? Mathf.Clamp(kind.LengthFor(kg), 0.12f, 1.4f) : 0.3f;
-            var fish = BuildFish(root.transform, KindMats(kind), length, kind != null ? kind.heightMul : 1f, kind != null ? kind.widthMul : 1f, shadows);
+            // big-game fish stay impressive but never fill the whole screen when they dangle from the tip
+            float maxLen = kind != null && kind.rarity >= Rarity.Epic ? 1.9f : 1.4f;
+            length = kind != null ? Mathf.Clamp(kind.LengthFor(kg), 0.12f, maxLen) : 0.3f;
+            var fish = BuildFish(root.transform, MeshFor(kind), KindMats(kind), length, kind != null ? kind.heightMul : 1f, kind != null ? kind.widthMul : 1f, shadows);
             // mesh: head at +Z (z = +0.5). Hang head-up: +Z → +Y, mouth at the origin.
             fish.transform.localRotation = Quaternion.Euler(-90f, 0f, 0f);
             fish.transform.localPosition = new Vector3(0f, -length * 0.5f, 0f);
@@ -171,6 +225,23 @@ namespace Sealebrities
             s[BoatMats.BobberWhite].Cylinder(Vector3.zero, new Vector3(0f, -0.055f, 0f), 0.04f, 0.006f, 6, false, true);
             s[BoatMats.BobberRed].Cylinder(new Vector3(0f, 0.045f, 0f), new Vector3(0f, 0.11f, 0f), 0.005f, 0.004f, 4);
             return s.Build("Bobber", parent, false).transform;
+        }
+
+        /// D.3 research rod: the bobber glows #F2C94C while a rare (or better) fish bites.
+        public static void SetBobberGlow(Transform bobber, bool on)
+        {
+            if (bobber == null) return;
+            var r = bobber.GetComponent<Renderer>();
+            if (r == null) return;
+            if (!bobberNormal.TryGetValue(r, out var normal))
+            {
+                normal = r.sharedMaterials;
+                var glow = new Material[normal.Length];
+                for (int i = 0; i < normal.Length; i++) glow[i] = normal[i] == BoatMats.BobberRed ? BoatMats.BobberGlow : normal[i];
+                bobberNormal[r] = normal;
+                bobberGlow[r] = glow;
+            }
+            r.sharedMaterials = on ? bobberGlow[r] : normal;   // called on state changes only
         }
 
         /// Spinning rod along +Z with the butt at the origin (world prop for the rack); the tip section hangs on tipPivot.
@@ -268,6 +339,11 @@ namespace Sealebrities
                     grip = LowPoly.Hex("#1E1B2B"); blank = LowPoly.Hex("#EDE6DA"); band = LowPoly.Hex("#EE7F2D");
                     reel = LowPoly.Hex("#F2C94C"); node = LowPoly.Hex("#EE7F2D");
                     break;
+                case 3:
+                    // Dr. Fin's research rod: teal blank with sun-yellow bands
+                    grip = LowPoly.Hex("#2E3140"); blank = LowPoly.Hex("#3FA9B5"); band = LowPoly.Hex("#F2C94C");
+                    reel = LowPoly.Hex("#EDE6DA"); node = LowPoly.Hex("#F2C94C");
+                    break;
                 default:
                     grip = LowPoly.Hex("#2E2A40"); blank = LowPoly.Hex("#2E2A40"); band = LowPoly.Hex("#3D7BC4");
                     reel = LowPoly.Hex("#8E949C"); node = LowPoly.Hex("#3D7BC4");
@@ -290,44 +366,71 @@ namespace Sealebrities
             RodColors(tier, out Color grip, out Color blank, out Color band, out Color reelC, out Color node);
             Material mGrip = ViewMat(grip), mBlank = ViewMat(blank), mBand = ViewMat(band), mReel = ViewMat(reelC), mNode = ViewMat(node);
             Material mDark = ViewMat(LowPoly.Hex("#1E1B2B")), mLine = ViewMat(LowPoly.Hex("#E8E2D0")), mGuide = ViewMat(LowPoly.Hex("#8E949C"));
-            float th = tier == 2 ? 1.15f : 1f;   // the deep-sea rod is a bit chunkier
+            float th = tier >= 2 ? 1.15f : 1f;   // the deep-sea and research rods are a bit chunkier
             const float seat = RodViewModel.ReelZ;
             const float baseEnd = RodViewModel.BaseLength;
 
-            // ---- base: butt, rear grip, reel seat, fore grip (main hand), band, lower blank, guides, reel
+            // ---- base: rounded butt cap, rear grip, reel seat, fore grip (main hand), band, lower blank, guides, reel
+            // (L.13: soft, smooth held items – 16-sided grips, rounded ends, a real bail arm on the reel; ≤ 2,500 tris)
+            const int G = 16;
             var b = new SmoothMeshSet();
-            b.Tube(mDark, new Vector3(0f, 0f, 0f), new Vector3(0f, 0f, 0.015f), 0.0062f * th, 0.0076f * th, 10, true, false);
-            b.Tube(mGrip, new Vector3(0f, 0f, 0.015f), new Vector3(0f, 0f, seat - 0.045f), 0.0076f * th, 0.0072f * th, 10, false, false);
-            b.Tube(mReel, new Vector3(0f, 0f, seat - 0.045f), new Vector3(0f, 0f, seat + 0.04f), 0.0062f * th, 0.0062f * th, 10, true, true);
-            b.Tube(mGrip, new Vector3(0f, 0f, seat + 0.04f), new Vector3(0f, 0f, 0.33f), 0.007f * th, 0.0064f * th, 10, true, true);
-            b.Tube(mBand, new Vector3(0f, 0f, 0.33f), new Vector3(0f, 0f, 0.36f), 0.0058f * th, 0.0056f * th, 10, true, true);
-            b.Tube(mBlank, new Vector3(0f, 0f, 0.36f), new Vector3(0f, 0f, baseEnd), 0.005f * th, 0.0033f * th, 8, false, false);
+            b.Ellipsoid(mDark, new Vector3(0f, 0f, 0.008f), new Vector3(0.0078f * th, 0.0078f * th, 0.012f), Quaternion.identity, G, 6);
+            b.Tube(mDark, new Vector3(0f, 0f, 0.008f), new Vector3(0f, 0f, 0.018f), 0.0078f * th, 0.0079f * th, G, false, false);
+            b.Tube(mGrip, new Vector3(0f, 0f, 0.018f), new Vector3(0f, 0f, seat - 0.045f), 0.0079f * th, 0.0073f * th, G, false, false);
+            b.Tube(mDark, new Vector3(0f, 0f, seat - 0.047f), new Vector3(0f, 0f, seat - 0.041f), 0.0076f * th, 0.0076f * th, G, true, true);
+            b.Tube(mReel, new Vector3(0f, 0f, seat - 0.041f), new Vector3(0f, 0f, seat + 0.036f), 0.0063f * th, 0.0063f * th, G, false, false);
+            b.Tube(mDark, new Vector3(0f, 0f, seat + 0.036f), new Vector3(0f, 0f, seat + 0.042f), 0.0074f * th, 0.0074f * th, G, true, true);
+            b.Tube(mGrip, new Vector3(0f, 0f, seat + 0.042f), new Vector3(0f, 0f, 0.325f), 0.0072f * th, 0.0064f * th, G, false, false);
+            b.Ellipsoid(mGrip, new Vector3(0f, 0f, 0.325f), new Vector3(0.0064f * th, 0.0064f * th, 0.006f), Quaternion.identity, G, 4);
+            b.Tube(mBand, new Vector3(0f, 0f, 0.33f), new Vector3(0f, 0f, 0.36f), 0.0058f * th, 0.0055f * th, G, true, true);
+            b.Tube(mBlank, new Vector3(0f, 0f, 0.36f), new Vector3(0f, 0f, baseEnd), 0.005f * th, 0.0033f * th, 12, false, false);
             if (tier == 0)
             {
                 // bamboo nodes
                 for (float z = 0.56f; z < baseEnd - 0.05f; z += 0.22f)
                 {
                     float r = Mathf.Lerp(0.005f, 0.0033f, (z - 0.36f) / (baseEnd - 0.36f)) * 1.25f;
-                    b.Tube(mNode, new Vector3(0f, 0f, z - 0.008f), new Vector3(0f, 0f, z + 0.008f), r, r, 8, true, true);
+                    b.Ellipsoid(mNode, new Vector3(0f, 0f, z), new Vector3(r, r, 0.009f), Quaternion.identity, 12, 4);
                 }
             }
-            float[] guides = { 0.6f, 0.95f };
+            else
+            {
+                // thin decorative wraps above the fore grip
+                b.Tube(mBand, new Vector3(0f, 0f, 0.4f), new Vector3(0f, 0f, 0.408f), 0.0054f * th, 0.0054f * th, 12, true, true);
+                b.Tube(mBand, new Vector3(0f, 0f, 0.415f), new Vector3(0f, 0f, 0.419f), 0.0053f * th, 0.0053f * th, 12, true, true);
+            }
+            float[] guides = { 0.55f, 0.85f, 1.18f };
             for (int i = 0; i < guides.Length; i++)
             {
                 float z = guides[i];
-                float gr = 0.0075f - i * 0.0015f;
-                b.Tube(mGuide, new Vector3(0f, -0.003f, z), new Vector3(0f, -0.012f - gr, z + 0.004f), 0.0012f, 0.0012f, 4, false, false);
-                b.Ellipsoid(mGuide, new Vector3(0f, -0.012f - gr, z + 0.004f), new Vector3(gr, gr, 0.0016f), Quaternion.identity, 8, 3);
+                float gr = 0.0085f - i * 0.0018f;
+                b.Tube(mGuide, new Vector3(0f, -0.003f, z), new Vector3(0f, -0.011f - gr, z + 0.004f), 0.0011f, 0.0011f, 6, false, false);
+                b.Ellipsoid(mGuide, new Vector3(0f, -0.011f - gr, z + 0.004f), new Vector3(gr, gr, 0.0015f), Quaternion.identity, 12, 4);
             }
             // spinning reel under the seat, crank on the right (+X)
-            float rs = tier == 2 ? 1.2f : 1f;
-            b.Tube(mReel, new Vector3(0f, -0.005f, seat), new Vector3(0f, -0.04f * rs, seat + 0.004f), 0.0035f, 0.0035f, 6, false, false);
+            float rs = tier >= 2 ? 1.2f : 1f;
+            b.Tube(mReel, new Vector3(0f, -0.005f, seat), new Vector3(0f, -0.04f * rs, seat + 0.004f), 0.0035f, 0.0032f, 10, false, false);
             Vector3 bodyC = new Vector3(0f, -0.055f * rs, seat);
-            b.Tube(mReel, bodyC + new Vector3(0f, 0f, -0.026f * rs), bodyC + new Vector3(0f, 0f, 0.018f * rs), 0.016f * rs, 0.019f * rs, 10, true, false);
-            b.Tube(mLine, bodyC + new Vector3(0f, 0f, 0.018f * rs), bodyC + new Vector3(0f, 0f, 0.038f * rs), 0.021f * rs, 0.021f * rs, 10, true, true);
-            b.Ellipsoid(mReel, bodyC + new Vector3(0f, 0f, 0.042f * rs), new Vector3(0.012f, 0.012f, 0.006f) * rs, Quaternion.identity, 8, 4);
+            b.Ellipsoid(mReel, bodyC + new Vector3(0f, 0f, -0.026f * rs), new Vector3(0.016f, 0.016f, 0.01f) * rs, Quaternion.identity, 20, 6);
+            b.Tube(mReel, bodyC + new Vector3(0f, 0f, -0.026f * rs), bodyC + new Vector3(0f, 0f, 0.012f * rs), 0.016f * rs, 0.019f * rs, 20, false, false);
+            b.Tube(mDark, bodyC + new Vector3(0f, 0f, 0.012f * rs), bodyC + new Vector3(0f, 0f, 0.018f * rs), 0.0205f * rs, 0.0205f * rs, 20, true, true);
+            b.Tube(mLine, bodyC + new Vector3(0f, 0f, 0.018f * rs), bodyC + new Vector3(0f, 0f, 0.036f * rs), 0.0185f * rs, 0.0185f * rs, 20, false, false);
+            b.Tube(mReel, bodyC + new Vector3(0f, 0f, 0.036f * rs), bodyC + new Vector3(0f, 0f, 0.039f * rs), 0.021f * rs, 0.02f * rs, 20, true, false);
+            b.Ellipsoid(mReel, bodyC + new Vector3(0f, 0f, 0.041f * rs), new Vector3(0.012f, 0.012f, 0.0055f) * rs, Quaternion.identity, 16, 5);
+            // bail arm: a wire half-loop around the far side of the spool
+            {
+                float br = 0.0235f * rs, bz = bodyC.z + 0.03f * rs;
+                Vector3 prev = Vector3.zero;
+                for (int k = 0; k <= 10; k++)
+                {
+                    float a = Mathf.Lerp(190f, 350f, k / 10f) * Mathf.Deg2Rad;
+                    Vector3 pt = new Vector3(Mathf.Cos(a) * br, bodyC.y + Mathf.Sin(a) * br, bz);
+                    if (k > 0) b.Tube(mGuide, prev, pt, 0.0011f, 0.0011f, 6, false, false);
+                    prev = pt;
+                }
+            }
             vm.crankPivotLocal = bodyC + new Vector3(0.034f * rs, 0f, 0f);
-            b.Tube(mReel, bodyC + new Vector3(0.016f * rs, 0f, 0f), vm.crankPivotLocal, 0.004f, 0.004f, 6, false, true);
+            b.Tube(mReel, bodyC + new Vector3(0.016f * rs, 0f, 0f), vm.crankPivotLocal, 0.0042f, 0.0038f, 10, false, true);
             b.Build("RodBase", vm.rig);
 
             // ---- crank (spins around local X while reeling); the knob ends near the support-hand grip point
@@ -336,8 +439,10 @@ namespace Sealebrities
             vm.crank.localPosition = vm.crankPivotLocal;
             var c = new SmoothMeshSet();
             Vector3 armEnd = new Vector3(0f, -0.04f, 0.008f);
-            c.Tube(mReel, Vector3.zero, armEnd, 0.003f, 0.0025f, 6, true, true);
-            c.Tube(mDark, armEnd, armEnd + new Vector3(0.022f, -0.003f, 0.002f), 0.0055f, 0.005f, 8, true, true);
+            c.Tube(mReel, Vector3.zero, armEnd, 0.0032f, 0.0025f, 10, true, false);
+            c.Ellipsoid(mReel, armEnd, new Vector3(0.0034f, 0.0034f, 0.0034f), Quaternion.identity, 10, 4);
+            c.Tube(mDark, armEnd, armEnd + new Vector3(0.02f, -0.003f, 0.002f), 0.0055f, 0.005f, 14, false, false);
+            c.Ellipsoid(mDark, armEnd + new Vector3(0.02f, -0.003f, 0.002f), new Vector3(0.005f, 0.005f, 0.005f), Quaternion.identity, 14, 5);
             c.Build("CrankArm", vm.crank);
 
             // ---- tip section (bends around local X)
@@ -345,10 +450,10 @@ namespace Sealebrities
             vm.tipPivot.SetParent(vm.rig, false);
             vm.tipPivot.localPosition = new Vector3(0f, 0f, baseEnd);
             var t = new SmoothMeshSet();
-            t.Tube(mBlank, Vector3.zero, new Vector3(0f, 0f, RodViewModel.TipLength), 0.0033f * th, 0.0014f * th, 6, false, false);
-            t.Ellipsoid(mBand, new Vector3(0f, 0f, RodViewModel.TipLength), new Vector3(0.0026f, 0.0026f, 0.0035f), Quaternion.identity, 6, 3);
-            t.Tube(mGuide, new Vector3(0f, -0.002f, 0.35f), new Vector3(0f, -0.009f, 0.353f), 0.001f, 0.001f, 4, false, false);
-            t.Ellipsoid(mGuide, new Vector3(0f, -0.0115f, 0.354f), new Vector3(0.0035f, 0.0035f, 0.0012f), Quaternion.identity, 6, 3);
+            t.Tube(mBlank, Vector3.zero, new Vector3(0f, 0f, RodViewModel.TipLength), 0.0033f * th, 0.0014f * th, 10, false, false);
+            t.Ellipsoid(mBand, new Vector3(0f, 0f, RodViewModel.TipLength), new Vector3(0.0026f, 0.0026f, 0.0035f), Quaternion.identity, 10, 4);
+            t.Tube(mGuide, new Vector3(0f, -0.002f, 0.35f), new Vector3(0f, -0.009f, 0.353f), 0.001f, 0.001f, 6, false, false);
+            t.Ellipsoid(mGuide, new Vector3(0f, -0.0115f, 0.354f), new Vector3(0.0035f, 0.0035f, 0.0012f), Quaternion.identity, 10, 4);
             t.Build("RodTip", vm.tipPivot);
             vm.tip = new GameObject("Tip").transform;
             vm.tip.SetParent(vm.tipPivot, false);

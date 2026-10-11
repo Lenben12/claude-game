@@ -21,11 +21,21 @@ namespace Sealebrities
         int builtHat = -1, builtFace = -1;
         bool active;
 
+        bool lookDirty, subscribed;
+
+        void OnLookSaved() { lookDirty = true; }
+
         public void Begin(Transform cameraT, Camera cameraC)
         {
             cam = cameraT;
             camera = cameraC;
             active = true;
+            if (!subscribed)
+            {
+                // 1c: every saved look (eyes, brows, pattern, mask, fins, snorkel too) rebuilds the own diver at once
+                CharacterScreen.LookSaved += OnLookSaved;
+                subscribed = true;
+            }
             EnsureCrew();
             ComputeShot(out basePos, out baseRot);
             time = 0f;
@@ -36,6 +46,11 @@ namespace Sealebrities
         public void End()
         {
             active = false;
+            if (subscribed)
+            {
+                CharacterScreen.LookSaved -= OnLookSaved;
+                subscribed = false;
+            }
             if (crewRoot != null) Object.Destroy(crewRoot);
             crewRoot = null;
             for (int i = 0; i < CrewCount; i++) crew[i] = null;
@@ -61,8 +76,11 @@ namespace Sealebrities
             {
                 lookCheck = 0.5f;
                 var d = Settings.Data;
-                if (d.hat != builtHat || d.face != builtFace || (d.suitColor - builtSuit).maxColorComponent > 0.01f || (builtSuit - d.suitColor).maxColorComponent > 0.01f)
+                if (lookDirty || d.hat != builtHat || d.face != builtFace || (d.suitColor - builtSuit).maxColorComponent > 0.01f || (builtSuit - d.suitColor).maxColorComponent > 0.01f)
+                {
+                    lookDirty = false;
                     RebuildPlayerDiver();
+                }
             }
         }
 
@@ -139,17 +157,32 @@ namespace Sealebrities
                 }
                 case 0:
                 {
-                    var l = DiverStyle.ForPlayer(2, 4, 1);
+                    // Q44: the last co-op friends sit next to you (looks only, never names)
+                    var l = CrewLook(0, out bool have) ;
+                    if (!have) l = DiverStyle.ForPlayer(2, 4, 1);
                     l.sitting = true;
                     return l;
                 }
                 default:
                 {
-                    var l = DiverStyle.ForPlayer(1, 1, 5 + 4);
+                    var l = CrewLook(1, out bool have);
+                    if (!have) l = DiverStyle.ForPlayer(1, 1, 5 + 4);
                     l.sitting = true;
                     return l;
                 }
             }
+        }
+
+        static DiverLook CrewLook(int i, out bool have)
+        {
+            have = false;
+            var d = Settings.Data;
+            var list = d != null ? d.lastCrew : null;
+            if (list == null || i >= list.Count) return default;
+            var l = list[i];
+            if (l.suit.a <= 0f && l.suit.r + l.suit.g + l.suit.b <= 0.001f) return default;
+            have = true;
+            return l;
         }
 
         void BuildMember(int i)

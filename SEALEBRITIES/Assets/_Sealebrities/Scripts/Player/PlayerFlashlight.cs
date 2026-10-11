@@ -87,7 +87,8 @@ namespace Sealebrities
                 on = held && hasLamp;
                 flicker = on && tier == 1 ? 0.2f : 0f;
             }
-            if (!UIState.BlocksGameplay && !pc.IsFainting && !pc.IsSeated && GameInput.FlashlightPressed) Toggle(held);
+            // Q32: while aiming with the night-vision module, F toggles night vision (FilmHandCamera) – not the lamp
+            if (!UIState.BlocksGameplay && !pc.IsFainting && !pc.IsSeated && GameInput.FlashlightPressed && !FilmHandCamera.ConsumesLampKey) Toggle(held);
             Apply();
 
             if (lit && flicker > 0f)
@@ -119,7 +120,7 @@ namespace Sealebrities
         {
             if (!hasLamp)
             {
-                GameEvents.RaiseToast(Loc.Tr("Noch keine Lampe", "No lamp yet"));
+                GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Noch keine Lampe", "No lamp yet"), Loc.Tr("Chopper Shop", "Chopper Shop"));
                 return;
             }
             if (!held)
@@ -135,7 +136,7 @@ namespace Sealebrities
                         flicker = tier == 1 ? 0.2f : 0f;
                     }
                 }
-                else GameEvents.RaiseToast(Loc.Tr("Lampe auf die Hotbar legen (", "Put the lamp on the hotbar (") + GameInput.BindingLabel(GameAction.Inventory) + ")");   // one-off toast
+                else GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Lampe auf die Hotbar", "Lamp on the hotbar"), GameInput.BindingLabel(GameAction.Inventory));
                 return;
             }
             on = !on;
@@ -146,7 +147,8 @@ namespace Sealebrities
         {
             if (lamp == null) return;
             bool phoneUp = hands != null && hands.PhoneUp;
-            lit = on && hasLamp && pc != null && pc.InGameplay && Hands.IsHeld(HoldItem.Flashlight) && !phoneUp && !pc.IsSeated;
+            lit = on && hasLamp && pc != null && pc.InGameplay && Hands.IsHeld(HoldItem.Flashlight) && !phoneUp && !pc.IsSeated
+                  && !PlayerHands.LampStolen;
             if (lamp.enabled != lit) lamp.enabled = lit;
             if (lit && flicker <= 0f) lamp.intensity = baseIntensity;
         }

@@ -54,13 +54,32 @@ namespace Sealebrities
             AddPoi(WorldLayout.Helipad, UIGlyphs.Heli, Color.white);
             AddPoi(WorldLayout.Lighthouse, UIGlyphs.Star, UIPalette.Coral);
             AddPoi(WorldLayout.WaterfallPool, UIGlyphs.Wave, Color.white);
-            AddPoi(WorldLayout.CaveEntrance, UIGlyphs.Question, Color.white);
             AddPoi(WorldLayout.TidePools, UIGlyphs.Shell, UIPalette.Sand);
             AddPoi(WorldLayout.RadioTowerRuins, UIGlyphs.Broadcast, Color.white);
+            // L.8 the village of Altriff (map label)
+            AddPoi(WorldLayout.Village, UIGlyphs.Hut, UIPalette.Rgb(0xEE7F2D));
+            AddLabel(WorldLayout.Village, Loc.Tr("Altriff", "Oldreef"), 0f, 18f);
+            if (StoryFlags.Has(StoryKeys.ToniArrived)) AddPoi(WorldLayout.DriftwoodBeach, UIGlyphs.Envelope, UIPalette.Rgb(0x4F7FAE));
+
+            // K.8 Toni's map: the Fog Isle and the buoy lane appear once the flag is set (no spoiler before)
+            bool fogMap = StoryFlags.Has(StoryKeys.FogMap);
+            if (fogMap) map.Add(new UIFogLane());
+
+            // L.7 quest markers: the tracked place task and NPCs with „!“ / „?“
+            var target = QuestTracker.Target;
+            if (target.HasValue) AddMarker(target.Value, "!", UIPalette.Sun);
+            for (int i = 0; i < NpcRegistry.Active.Count; i++)
+            {
+                var npc = NpcRegistry.Active[i];
+                if (npc == null || npc.Root == null || npc.Marker == 0) continue;
+                if (npc is Object no && no == null) continue;
+                AddMarker(npc.Root.position, npc.Marker == 2 ? "?" : "!", npc.Marker == 2 ? UIPalette.Leaf : UIPalette.Sun);
+            }
 
             // site labels
             foreach (var site in DiveSites.All)
             {
+                if (site.IsStorySite && !fogMap) continue;
                 bool unlocked = Progression.IsSiteUnlocked(site);
                 var pos = ToMap01(site.center);
                 var lbl = UIKit.Row();
@@ -126,6 +145,7 @@ namespace Sealebrities
                 float bestD = 90f;
                 foreach (var s in DiveSites.All)
                 {
+                    if (s.IsStorySite && !StoryFlags.Has(s.unlockFlag)) continue;
                     float d = Vector2.Distance(new Vector2(s.center.x, s.center.z), new Vector2(world.x, world.z));
                     if (d < Mathf.Max(bestD, s.radius) && (best == null || d < bestD)) { best = s; bestD = d; }
                 }
@@ -151,6 +171,33 @@ namespace Sealebrities
                 body.Add(clear);
             }
 
+            // the secret island item (K.8) once Toni's map is ours
+            if (fogMap)
+            {
+                var fog = DiveSites.Get(Zones.FogIsle);
+                var card = PhoneKit.Card(16f);
+                card.style.backgroundColor = UIPalette.Rgb(0xF6ECD6);
+                card.style.marginTop = 12f;
+                var r = UIKit.Row();
+                r.Add(UIWidgets.IconTile(UIGlyphs.Cloud, UIPalette.Rgb(0xF28CBE), 60f));
+                var c = UIKit.Col();
+                c.style.marginLeft = 12f;
+                c.style.flexGrow = 1;
+                c.style.flexShrink = 1;
+                c.Add(UIKit.Text(Loc.Tr("Tonis Karte", "Tony's Map"), PhoneKit.Tiny, UIPalette.Rgb(0x8E6C50), true));
+                c.Add(PhoneKit.T(fog != null ? fog.Name : Loc.Tr("Nebelinsel", "Fog Isle"), PhoneKit.Body, UIPalette.Ink, true));
+                c.Add(PhoneKit.T(Loc.Tr("Folge den gelben Bojen", "Follow the yellow buoys"), PhoneKit.Tiny, UIPalette.InkSoft));
+                r.Add(c);
+                var flagBtn = UIWidgets.RoundIconButton(UIGlyphs.Flag, () =>
+                {
+                    UIWaypoint.Set(WorldLayout.FogLaneStart, Loc.Tr("Bojen", "Buoys"), UIPalette.Rgb(0xF2C94C));
+                    Phone.Refresh(true);
+                }, 52f, UIPalette.CoralInk);
+                r.Add(flagBtn);
+                card.Add(r);
+                body.Add(card);
+            }
+
             // site list
             body.Add(PhoneKit.Section(Loc.Tr("Tauchplätze", "Dive sites"), UIGlyphs.Pin));
             float safe = gm.Gear.maxDepth;
@@ -162,7 +209,40 @@ namespace Sealebrities
             Vector3 playerPos = WorldLayout.PlayerSpawn;
             var pl = Refs.Player;
             if (pl != null && !(pl is Object po && po == null) && pl.Root != null) playerPos = pl.Root.position;
-            foreach (var site in DiveSites.All) body.Add(SiteRow(site, safe, playerPos));
+            foreach (var site in DiveSites.All)
+                if (!site.IsStorySite || fogMap) body.Add(SiteRow(site, safe, playerPos));
+        }
+
+        void AddLabel(Vector3 world, string text, float dx, float dy)
+        {
+            var pos = ToMap01(world);
+            var l = UIKit.Text(text, 15f, Color.white, true);
+            UIKit.Outline(l, 1.4f, 0.3f);
+            l.pickingMode = PickingMode.Ignore;
+            l.style.position = Position.Absolute;
+            l.style.left = Length.Percent(pos.x * 100f);
+            l.style.top = Length.Percent(pos.y * 100f);
+            l.style.marginLeft = dx - 24f;
+            l.style.marginTop = dy - 8f;
+            map.Add(l);
+        }
+
+        void AddMarker(Vector3 world, string text, Color c)
+        {
+            var pos = ToMap01(world);
+            var e = UIKit.Box();
+            e.pickingMode = PickingMode.Ignore;
+            e.style.position = Position.Absolute;
+            e.style.left = Length.Percent(Mathf.Clamp01(pos.x) * 100f);
+            e.style.top = Length.Percent(Mathf.Clamp01(pos.y) * 100f);
+            UIKit.Size(e, 26f, 26f);
+            e.style.marginLeft = -13f; e.style.marginTop = -30f;
+            UIKit.Radius(e, 13f);
+            e.style.backgroundColor = c;
+            UIKit.Border(e, 2f, Color.white);
+            UIKit.Center(e);
+            e.Add(UIKit.Text(text, 18f, UIPalette.Ink, true));
+            map.Add(e);
         }
 
         static string ShortName(DiveSite s)
@@ -347,6 +427,7 @@ namespace Sealebrities
                 if (pass == 1) p.SetDashPattern(8f, 6f);
                 foreach (var site in DiveSites.All)
                 {
+                    if (site.IsStorySite && !StoryFlags.Has(site.unlockFlag)) continue;   // the Fog Isle stays hidden until the map
                     bool unlocked = GameManager.I != null && Progression.IsSiteUnlocked(site);
                     if (unlocked != (pass == 0)) continue;
                     var c = new Vector2(r.x + (site.center.x + half) / (2f * half) * r.width, r.y + (1f - (site.center.z + half) / (2f * half)) * r.height);
@@ -358,6 +439,47 @@ namespace Sealebrities
                     p.BeginPath(); p.Arc(c, rad, Angle.Degrees(0f), Angle.Degrees(360f)); p.ClosePath(); p.Stroke();
                 }
             }
+            p.SetDashPattern(System.ReadOnlySpan<float>.Empty);
+        }
+    }
+
+    /// K.8: the yellow buoy lane through the fog to the Fog Isle (dashed line + buoy dots) on the sea chart.
+    public class UIFogLane : VisualElement
+    {
+        public UIFogLane()
+        {
+            pickingMode = PickingMode.Ignore;
+            style.position = Position.Absolute;
+            style.left = 0; style.top = 0; style.right = 0; style.bottom = 0;
+            generateVisualContent += Draw;
+        }
+
+        void Draw(MeshGenerationContext ctx)
+        {
+            var r = contentRect;
+            if (r.width < 4f) return;
+            var p = ctx.painter2D;
+            float half = UIMapTexture.WorldHalf;
+            Vector2 M(Vector3 w) => new Vector2(r.x + (w.x + half) / (2f * half) * r.width, r.y + (1f - (w.z + half) / (2f * half)) * r.height);
+            Vector2 a = M(WorldLayout.FogLaneStart), b = M(WorldLayout.FogLaneEnd), isle = M(WorldLayout.FogIsland);
+            var buoy = UIPalette.Rgb(0xF2C94C);
+            p.strokeColor = buoy;
+            p.lineWidth = 3f;
+            p.SetDashPattern(6f, 5f);
+            p.BeginPath(); p.MoveTo(a); p.LineTo(b); p.LineTo(isle); p.Stroke();
+            p.SetDashPattern(System.ReadOnlySpan<float>.Empty);
+            for (int i = 0; i < 6; i++)
+            {
+                var c = Vector2.Lerp(a, b, i / 5f);
+                p.fillColor = buoy;
+                p.BeginPath(); p.Arc(c, 4f, Angle.Degrees(0f), Angle.Degrees(360f)); p.ClosePath(); p.Fill();
+            }
+            // soft fog ring around the island
+            float fr = WorldLayout.FogBankRadius / (2f * half) * r.width;
+            p.strokeColor = new Color(1f, 1f, 1f, 0.45f);
+            p.lineWidth = 2f;
+            p.SetDashPattern(3f, 5f);
+            p.BeginPath(); p.Arc(isle, fr, Angle.Degrees(0f), Angle.Degrees(360f)); p.ClosePath(); p.Stroke();
             p.SetDashPattern(System.ReadOnlySpan<float>.Empty);
         }
     }

@@ -5,7 +5,7 @@ namespace Sealebrities
 {
     /// Vector icons drawn with Painter2D. Every function draws into rect r (y down) with color c.
     /// Item* functions are multi-colored (hotbar / inventory) and use c.a as an overall opacity.
-    public static class UIGlyphs
+    public static partial class UIGlyphs
     {
         static Vector2 P(Rect r, float x, float y) => new Vector2(r.x + r.width * x, r.y + r.height * y);
         static float S(Rect r) => Mathf.Min(r.width, r.height);
@@ -973,6 +973,11 @@ namespace Sealebrities
                 case GearSlot.Camera: return Camera;
                 case GearSlot.Boat: return BoatSide;
                 case GearSlot.Submarine: return Sub;
+                case GearSlot.Compressor: return Compressor;
+                case GearSlot.Radio: return Radio;
+                case GearSlot.CameraMod: return Lens;
+                case GearSlot.BoatWinch: return Winch;
+                case GearSlot.Part: return Gear;
                 default: return Rod;
             }
         }

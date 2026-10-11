@@ -46,7 +46,7 @@ namespace Sealebrities
                     float x = c.x + pc.x + o.x, z = c.z + pc.y + o.y;
                     float g = G(x, z);
                     float depth = -g;
-                    if (depth < 9.4f || spacing.Blocked(x, z)) continue;
+                    if (depth < 9.4f || spacing.Blocked(x, z) || PropUnder.InKelpTunnel(x, z)) continue;
                     float h = Mathf.Min(PropUtil.Range(rng, 8f, 20f), depth - 1.3f);
                     if (h < 8f) continue;
                     stalks.Add(new Vector4(x, z, g, h));

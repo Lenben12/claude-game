@@ -186,9 +186,11 @@ namespace Sealebrities
             hasLast = true;
 
             float dCam = Vector3.Distance(p, camPos);
-            // seen from above the water the sea hides them: cull beyond 35 m, deeper than 5 m beyond the scan range
+            // seen from above the water the sea hides them: cull beyond 35 m, deeper than 5 m beyond the scan range.
+            // Island animals and birds (in the air, L.11) keep the full view distance like on the host.
             bool above = !FXVisibility.Underwater;
-            float lim = above ? Mathf.Min(cullDistance, 35f) : cullDistance;
+            bool creatureInAir = p.y > Waves.HeightAt(p.x, p.z) + 0.2f || species.land;
+            float lim = above && !creatureInAir ? Mathf.Min(cullDistance, 35f) : cullDistance;
             bool shouldCull = culled ? dCam > lim - 5f : dCam > lim + 5f;
             if (above && p.y < Waves.HeightAt(p.x, p.z) - 5f && dCam > FilmShotEvaluator.MaxScanRange) shouldCull = true;
             if (shouldCull != culled) SetCulled(shouldCull, dCam);

@@ -77,11 +77,21 @@ namespace Sealebrities
             }
         }
 
+        bool findsTab;
+
         public override void Build(VisualElement body)
         {
             var s = UIKit.State;
             if (s == null) return;
             live.Clear();
+
+            // K.3 tabs: Fische | Funde
+            var finds = Finds.Inventory;
+            var tabs = new UISegmented(new[] { Loc.Tr("Fische", "Fish"), Loc.Tr("Funde", "Finds") + (finds.Count > 0 ? " · " + finds.Count : "") },
+                findsTab ? 1 : 0, i => { findsTab = i == 1; Phone.Refresh(false); }, UIPalette.SunInk, PhoneKit.Small);
+            tabs.style.marginBottom = 12f;
+            body.Add(tabs);
+            if (findsTab) { BuildFinds(body); return; }
 
             // totals
             var stats = UIKit.Row();
@@ -134,6 +144,56 @@ namespace Sealebrities
             {
                 body.Add(PhoneKit.Section(Loc.Tr("Verkauft", "Sold") + " · " + s.fishSold, UIGlyphs.Check));
                 for (int i = 0; i < sold.Count; i++) body.Add(SoldRow(sold[i]));
+            }
+        }
+
+        /// Underwater finds and salvage (K.3): sell one / sell all.
+        void BuildFinds(VisualElement body)
+        {
+            var list = Finds.Inventory;
+            if (list.Count == 0)
+            {
+                body.Add(PhoneKit.Empty(UIGlyphs.Chest, Loc.Tr("Noch keine Funde – such im Sand nach Glitzern!", "No finds yet – look for glints in the sand!")));
+                return;
+            }
+            var all = PhoneKit.IconButton(UIGlyphs.Coin, Loc.Tr("Alle verkaufen", "Sell all") + " · " + Loc.Money(Finds.InventoryValue), () =>
+            {
+                if (Finds.SellAll() > 0) UIAudio.Pop();
+                Phone.Refresh(true);
+            }, UIBtnKind.Primary, PhoneKit.Body);
+            all.style.marginBottom = 12f;
+            body.Add(all);
+            for (int i = list.Count - 1; i >= 0; i--)
+            {
+                var it = list[i];
+                if (it == null) continue;
+                var def = FindsDatabase.Kind(it.kindId);
+                var row = UIKit.Row();
+                row.style.backgroundColor = Color.white;
+                UIKit.Radius(row, 20f);
+                UIKit.Pad(row, 10f, 12f, 10f, 14f);
+                row.style.marginBottom = 8f;
+                bool heavy = def != null && def.heavy;
+                row.Add(UIWidgets.IconTile(heavy ? UIGlyphs.Winch : UIGlyphs.Chest, def != null && def.rare ? UIPalette.Violet : UIPalette.Sun, 56f));
+                var col = UIKit.Col();
+                col.style.marginLeft = 12f;
+                col.style.flexGrow = 1;
+                col.style.flexShrink = 1;
+                col.Add(PhoneKit.T(def != null ? def.Name : it.kindId, PhoneKit.Body, UIPalette.Ink, true));
+                if (def != null && def.rare) col.Add(UIKit.Text(Loc.Tr("Selten!", "Rare!"), PhoneKit.Tiny, UIPalette.Violet, true));
+                row.Add(col);
+                var price = UIKit.Text(Loc.Money(it.value), PhoneKit.Body, UIPalette.LeafInk, true);
+                price.style.marginRight = 10f;
+                row.Add(price);
+                string id = it.id;
+                var b = PhoneKit.IconButton(UIGlyphs.Coin, "", () =>
+                {
+                    if (Finds.Sell(id) > 0) UIAudio.Pop();
+                    Phone.Refresh(true);
+                }, UIBtnKind.Primary, PhoneKit.Body);
+                UIKit.Pad(b, 12f, 16f, 12f, 16f);
+                row.Add(b);
+                body.Add(row);
             }
         }
 

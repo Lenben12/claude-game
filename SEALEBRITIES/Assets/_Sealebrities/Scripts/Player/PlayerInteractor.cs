@@ -32,6 +32,15 @@ namespace Sealebrities
                 return;
             }
 
+            // F.1 co-op rescue wins over everything else under water: "E – Abschleppen" / "E – Loslassen"
+            if (pc.TryGetTowPrompt(out string towPrompt))
+            {
+                InteractionPrompt.Text = towPrompt;
+                written = towPrompt;
+                if (GameInput.InteractPressed) pc.ToggleTow();
+                return;
+            }
+
             // components can be added/removed at runtime: forget the collider lookup every couple of seconds
             cacheAge += Time.unscaledDeltaTime;
             if (cacheAge > 2f)
@@ -59,10 +68,13 @@ namespace Sealebrities
                 }
                 if (string.IsNullOrEmpty(prompt)) prompt = null;
             }
+            string landLadder = null;
             if (prompt == null && !can)
             {
                 if (pc.CanLadderHint) prompt = ClimbPrompt(true);
                 else if (pc.CanVaultHint) prompt = ClimbPrompt(false);
+                else if ((landLadder = pc.LadderLandPrompt) != null) prompt = landLadder;   // L.13 generic ladders on land
+                else prompt = pc.CrouchPrompt;                                            // L.6 low opening ahead
             }
 
             InteractionPrompt.Text = prompt;
@@ -77,6 +89,7 @@ namespace Sealebrities
                 }
                 else if (pc.CanLadderHint) pc.TryLadder();
                 else if (pc.CanVaultHint) pc.TryVault();
+                else if (landLadder != null) pc.TryClimbLadder();
             }
         }
 

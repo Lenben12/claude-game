@@ -2,9 +2,10 @@ using UnityEngine;
 
 namespace Sealebrities
 {
-    /// Entry point of the Boat module: the boat "Rostlaube" (Refs.Boat), the helicopter delivery service, the fishing
-    /// rod (hotbar item HoldItem.FishingRod) with the rod rack on the dock, boarding from the dock and the dock ladder.
-    /// Called once by GameBootstrap after the world and the player exist.
+    /// Entry point of the Boat module: the boat "Rostlaube" (Refs.Boat), the helicopter delivery service (with Wanda
+    /// and her mishaps, L.12), the fishing rod (hotbar item HoldItem.FishingRod, reel minigame D.1, open sea D.2) with
+    /// the rod rack on the dock, boarding from the dock / any jetty and the dock ladder, salvage delivery and the boat
+    /// winch (K.3), the Fog Isle course (K.8). Called once by GameBootstrap after the world and the player exist.
     public static class BoatModule
     {
         public static void Install(Transform root)
@@ -27,6 +28,11 @@ namespace Sealebrities
             Guard("FishingSpot", () => FishingSpot.Create(moduleRoot));
             Guard("BoatDockBoarding", () => BoatDockBoarding.Create(moduleRoot, boat));
             Guard("DockLadder", () => DockLadder.Create(moduleRoot));
+            Guard("BoatHome", BoatHome.Install);   // "Zur Hütte" brings the boat back to the dock (host handles guests)
+            // round 2
+            Guard("SalvageDelivery", () => SalvageDelivery.Create(moduleRoot));   // K.3 heavy finds delivered on deck / dock
+            Guard("BoatWinch", () => BoatWinchRunner.Create(moduleRoot));         // K.3 "Bootswinde"
+            Guard("FogRoute", () => FogRouteTracker.Create(moduleRoot));          // K.8 course to the Fog Isle
         }
 
         /// One failing part must not take the rest of the module down (the boot logs and continues).
@@ -53,7 +59,12 @@ namespace Sealebrities
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics() { BoatBody = null; }
 
-        public static float Below(Vector3 from, float maxDist, out bool water)
+        public static float Below(Vector3 from, float maxDist, out bool water) => Probe(from, maxDist, false, out water);
+
+        /// Like Below, but the boat's deck counts as a surface too (a delivery crate landing on the boat, L.12).
+        public static float BelowIncludingBoat(Vector3 from, float maxDist, out bool water) => Probe(from, maxDist, true, out water);
+
+        static float Probe(Vector3 from, float maxDist, bool includeBoat, out bool water)
         {
             float solid = WorldInfo.GroundHeight(from);
             int n = Physics.RaycastNonAlloc(from, Vector3.down, Hits, maxDist, ~0, QueryTriggerInteraction.Ignore);
@@ -65,7 +76,8 @@ namespace Sealebrities
                 if (col == null) continue;
                 if (col is CharacterController) continue;
                 var body = col.attachedRigidbody;
-                if (body != null && (!body.isKinematic || body == BoatBody)) continue;
+                if (body != null && body == BoatBody) { if (!includeBoat) continue; }
+                else if (body != null && !body.isKinematic) continue;
                 if (player != null && col.transform.IsChildOf(player)) continue;
                 if (col.GetComponentInParent<HeliCrate>() != null) continue;
                 float y = Hits[i].point.y;

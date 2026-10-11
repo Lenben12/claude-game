@@ -20,7 +20,7 @@ namespace Sealebrities
             bake.Skin = CreatureMeshPaint.Skin(ctx);
             bake.Fins = CreatureMeshPaint.Fins(ctx);
             if (s.plan == BodyPlan.Turtle) bake.Shell = CreatureMeshPaint.Shell(ctx);
-            bake.Flat = CreatureMeshFlat.From(ctx.B, ctx.FacetUv);
+            bake.Flat = CreatureMeshFlat.From(ctx.B, ctx.FacetUv, ctx.Smooth, ctx.Crease);
             return bake;
         }
     }

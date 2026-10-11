@@ -448,5 +448,134 @@ Antworten des Spielers auf `docs/Fragen_100_Nacht1.md`:
 | 99 | Kopfwippen/Wackeln | Abschaltbar per Schalter |
 | 100 | Test-Abkürzungen | **Sofort entfernen** (Strg+Umschalt+F12 / F5–F10) |
 
+## 18. Feedback nach dem Spielen von Testversion 3 (11.10.2026)
+- **Insel kleiner:** ca. 70–75 % der jetzigen Größe, kürzere Wege, alle Orte bleiben erhalten.
+- **Koop mit einem Freund an einem anderen PC**, ohne das Spiel auf Steam zu veröffentlichen:
+  - Steam-Test mit der Test-ID 480, Einladen über die Freundesliste.
+  - Als Ausweichweg IP oder VPN.
+- **Charakter-Bildschirm übersichtlicher:** Man sieht seinen Taucher live in 3D, während man Farben, Hut, Gesicht usw. ändert.
+- **Bug:** Taschenlampe über dem Steg, der Steg ist durch die Lampe sichtbar. Gegenstände in der Hand dürfen nie in die Welt eintauchen.
+- **Bug:** Beim Ändern der Lautstärke steht manchmal eine Milliardenzahl. Alle Regler werden begrenzt und sauber formatiert.
+- **„Zur Hütte“ teleportieren** bringt auch das Boot zurück an den Steg.
+
+**Zweite Feedback-Nachricht (11.10.2026):**
+- **Geld kommt viel zu langsam:** Der Einstieg soll spürbar schneller Geld bringen.
+- **Filmen neu (ersetzt die strengen Scan-Regeln aus Frage 29):**
+  - Unter Wasser kannst du einfach die ganze Zeit filmen, ohne auf einen Fisch zu fokussieren.
+  - Alle Tiere im Bild werden automatisch erkannt. Größe und Art bestimmen, wie viel das Video bringt.
+  - **Für das Tagebuch (Sealog)** zoomst du auf ein Tier und machst ein kurzes **Foto**.
+- **Unter Wasser soll es mehr zu tun geben.** Im Moment ist dort zu wenig los.
+- **Selfie-Ansicht:** Mit der Taste **H** kannst du dich selbst anschauen.
+- **Mehr Story-NPCs:**
+  - Sie erklären, warum du auf der Insel bist und was du dort alles tun musst.
+  - Vor dem eigentlichen Spielstart redest du mit einem NPC, der dir die Aufgaben gibt.
+- **Entspannte Hintergrundmusik.**
+- **Sponsoren (ersetzt Frage 92 „bis zu 3“):**
+  - Sponsoren geben Aufgaben. Du kannst **maximal 2 Deals gleichzeitig** annehmen.
+  - Die Deals dürfen sich **nicht überschneiden**: Hat ein Deal mit Haien zu tun, kannst du keinen zweiten Hai-Deal annehmen, auch wenn er mehr zahlt. Dafür musst du den ersten zuerst kündigen.
+- **Gestrandeter NPC (später im Spiel, nicht von Anfang an):**
+  - Er wird irgendwann an einem Strand angeschwemmt. Du musst ihm helfen.
+  - Zur Belohnung gibt er dir eine **Karte zu einer geheimen Insel**. Dort gibt es seltene Fischarten, die es sonst nirgends gibt.
+
+**Dritte Nachricht, nach dem Koop-Test mit einem Freund (11.10.2026):**
+- **Fische komplett Open World:**
+  - Tiere können überall im Meer zufällig erscheinen. **Die Tiefe bestimmt, welche Arten** man trifft.
+  - An jedem Riff spawnen nur dessen Arten, freigeschaltet je nach Spielfortschritt. Die Tiefe filtert trotzdem mit.
+  - Überall Fische.
+- **Sealog:** zeigt, wie oft man ein Tier gefunden hat und in welcher Tiefe es lebt.
+- **Korallenriffe** überall viel schöner gestalten.
+- **FinTube:**
+  - Den Videotitel selbst eintippen, dazu Vorschläge.
+  - Das Vorschaubild zeigt **mehrere Tiere** als Collage.
+- **Insel noch kleiner** (ca. 60–65 % der Breite von Testversion 3, ersetzt den 0,75-Plan) und **viel detaillierter**.
+- **Geheimnisse viel besser verstecken.** Bisher findet man sie einfach beim Herumlaufen.
+- **Mehr Nebenaufgaben** und NPCs, die sie vergeben.
+- **Animationen:** coolere Lauf-Animationen und eine echte **Leiter-Kletter-Animation**.
+- **Schlafen im Koop (ersetzt „einer schläft = alle schlafen“):**
+  - Alle Spieler müssen am Bett sein, Anzeige **„1/2 · 2/2“** wie in Minecraft.
+- **Aufgaben** immer **oben in der Mitte** anzeigen, klein und aufgeräumt (ersetzt „nur kurz“).
+- **Tiere auf der Insel:** Vögel, Krabben, Echsen, evtl. Ziegen, Schweine oder Affen.
+- **Nachrichten:** viel übersichtlicher, Symbol und eine kurze Zeile.
+- **Dorf einer seit Generationen ansässigen Inselgemeinschaft:**
+  - Der Spieler sprach von einer „alten Indianerbande“.
+  - Umsetzung **respektvoll** als erfundene Inselkultur mit eigenen Bräuchen, Pfahlhäusern, Booten und Handwerk.
+  - Ohne Klischees wie Federschmuck, Kriegsbemalung oder nachgeäffte Sprache.
+  - Die Bewohner vergeben Nebenaufgaben und geben Story-Hinweise.
+- **Chopper-Shop schöner gestalten.**
+- **Pannen:** Der Heli wirft das Paket mal an der falschen Stelle ab, dann muss man es auf der Insel suchen.
+- **Figuren viel schöner und weicher**, nicht so klotzig. Auch Hände, Kamera und alle Gegenstände schöner.
+- **Danach** wieder neue Fragen stellen.
+
+## 19. Feedback zur Vorschau von Testversion 4 (11.10.2026, für Testversion 5)
+Der Spieler hat die Vorschau mit einem Freund im Koop getestet. Umsetzung als Nachtschicht nach Testversion 4, mit **einzelnen Agenten nacheinander** (kein Workflow). Ziel: fertige Testversion 5 bis zum nächsten Morgen (10 Uhr oder später) und danach **40 Fragen**.
+
+**Bugs und Korrekturen**
+- **Schlafen:**
+  - Die Figur liegt wirklich in der Hängematte oder im Bett, nicht schwebend daneben oder auf dem Boden (Screenshots `images/4.png`, `images/5.png`).
+  - Schlafen geht im Bett oder in der Hängematte.
+- **Kollisionen:** Durch feste Objekte darf man nirgends laufen.
+- **Leiter:** Die Kletteranimation ist noch verbuggt. Am Steg klettert man selbst hoch.
+- **Fehlerhafte Objekte:** schwebende Surfbretter, falsche bzw. verbuggte Schilder. Die Badeinsel weiter ins Meer setzen.
+- **Neuer Tauchplatz:** wird nicht angekündigt, bevor die Anforderungen erfüllt sind. Die Anforderungen stehen oben in der Mitte.
+- **Nebenaufgaben** sind teilweise stark verbuggt.
+- **Kamera:**
+  - Beim Betreten des Wassers startet **keine** automatische Aufnahme. Aufnahme nur selbst per Linksklick.
+  - Den Viereck-Rahmen beim Zielen (Rechtsklick, Sealog) erst zeigen, wenn man nah genug am Tier ist. Keine Tiere von zu weit weg.
+  - Das Fragezeichen bei unentdeckten Arten ist gut und bleibt.
+- **Boot:**
+  - Nur der Fahrer kann den Anker legen.
+  - Ein zweiter Sitzplatz, z. B. eine Sitzbank vorne.
+  - Während der Fahrt hat man Zugriff auf die Karte und die Markierungen.
+
+**Meer und Tiere**
+- **Viel mehr Fische und Inhalte im Meer:** Es soll nie leer sein, überall Tiere. Manche Gebiete erreicht man erst ab einer bestimmten Stufe.
+- **Mehr Ideen**, was man im Meer machen kann, dazu ein paar **Memes**.
+- **Tiere reagieren:** Sie fliehen, wenn man sich nähert, im Meer und auf der Insel.
+- **Jede Insel sieht individuell aus**, z. B. eine Vulkaninsel nur mit Urzeit-Tieren.
+- **Waffen gegen Haie und Monster:** Speere und andere Unterwasser-Waffen (kommt bei den Live-Zuschauern gut an).
+  - Bessere Speere kann man kaufen.
+  - Mit einem Schleifgerät und Steinen kann man sie selbst schärfen. Die Technik lernt man im Einsiedler-Lager.
+
+**Überleben**
+- **Hunger und Durst als echte Bedürfnisse:**
+  - Meerwasser zu Hause filtern.
+  - Essen am Lagerfeuer oder auf dem Grill braten.
+
+**Insel und Welt**
+- Die Karte insgesamt umgestalten: schöner, „realistischer“, übersichtlich, aber mit Geheimnissen zum Suchen.
+- Realistischere Wolken.
+- Das Haus innen schöner, und man kann es individueller einrichten.
+- **Die Dorf-Häuser entfernen.**
+- **Stattdessen ein verstecktes Lager im Dschungel auf der anderen Inselseite**, das man am Anfang gar nicht kennt:
+  - ein paar Zelte, Einsiedler, die sich dort vor langer Zeit niedergelassen haben
+  - Der Spieler nannte es „Indianerdorf“.
+  - Umsetzung als Lager von Gestrandeten bzw. Einsiedlern **ohne Bezug zu einer realen Volksgruppe**, keine Klischees.
+  - Stimmungen: friedlich oder aggressiv. Nur in guter Stimmung kann man mit ihnen reden.
+  - Verständigung per **Zeichensprache**, weil sie die eigene Sprache nicht sprechen.
+  - Sie können angreifen. Man wehrt sich mit einem **Stock** (Slapstick, nicht tödlich).
+  - Man kann nicht jeden ansprechen. Kein komischer Arm-Gruß.
+- **Kartenstücke** überall auf der Insel, teils vergraben. Erst mit allen Teilen öffnet sich die Karte zu einem Geheimnis.
+
+**Figuren und Gegenstände**
+- Figuren schöner und **„realistischer“**: weder klotzig noch zu kugelig. Unsere eigene Figur auch.
+- Mehr Optionen beim Anpassen.
+- Hände und alle Gegenstände in der Hand sehen besser aus.
+
+**Bedienung und Oberfläche**
+- **Inventar als Rucksack:**
+  - Aufgesammeltes landet wirklich im Rucksack, den man öffnen kann.
+  - Die Leiste wird **ein großer Balken statt 3 + 3**.
+  - Im Rucksack wählt man, was in Erst- und was in Zweithand ist.
+- **Karte im Handy:** zoomen und verschieben.
+- **Chopper-Shop:** schöner, jedes Item mit eigenem Bild.
+- **FinTube-Studio und Handy:** mehr Funktionen.
+- **Wetter-App:** zusätzlich Temperaturen.
+- **Galerie:** Bilder nur im Spiel speichern, mit Export auf den PC.
+- **Ladebildschirm** viel besser gestalten.
+- **Kameramodus** übersichtlicher.
+- **NPCs:** mehr Möglichkeiten zur Interaktion.
+- **Story:** muss mehr Sinn ergeben.
+- **Fischmarkt:** bleibt so.
+
 ## 12. Offene Punkte
 Werden in den nächsten Frage-Runden geklärt.

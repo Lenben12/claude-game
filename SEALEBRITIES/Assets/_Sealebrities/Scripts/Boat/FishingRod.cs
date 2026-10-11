@@ -7,11 +7,16 @@ namespace Sealebrities
     /// view model while it is in an active hotbar slot; the Player module's hands hold it (they look for the camera
     /// descendant named "FishingRod", see FishingVisuals.BuildViewRod). The rod stays under the camera the whole time
     /// it is held (lowered while the phone is up / climbing) so the hands never lose it.
+    ///
     /// Controls (GameAction.Use, LMB by default): hold to charge → release to cast (0.35 s wind-up over the shoulder,
-    /// 0.25 s whip), the bobber flies 4–17 m depending on the charge. After FishMarket.BiteDelay the bobber is pulled
-    /// under (splash + plop): click within the strike window to hook, the fish is reeled in, dangles on the line and
-    /// goes into the shared cooler box (FishMarket.RollCatch → FishMarket.AddCatch; it is NOT sold – the phone's market
-    /// app sells it). Clicking while waiting reels the line back in. Works on the dock, beach, rocks and the boat.
+    /// 0.25 s whip); the bobber flies castMin..castMax of the equipped rod (D.3: bamboo 4–17 m … research rod 6–28 m).
+    /// Where it lands decides the table (D.2): in ≥ 12 m of water and ≥ 60 m from every shore the OPEN-SEA table
+    /// (bigger fish, 20–45 s bites – carbon rod or better), otherwise the SHORE table (12–30 s). Bites ÷ fishSpeed.
+    /// The bobber is pulled under: click within the strike window to hook → the REEL MINIGAME (D.1, see ReelFight):
+    /// hold Use to reel, release to let the line breathe, counter a run with the opposite direction (A/D or by
+    /// dragging the view against it). Landed fish dangle from the tip and go into the shared cooler box
+    /// (FishMarket.AddCatch – NOT sold, the phone's market app sells them). Clicking while waiting reels the line in.
+    /// Works on the dock, beaches, rocks and the boat. The fight state is published in FishingReel for the UI gauge.
     [DefaultExecutionOrder(80)]
     public class FishingRodTool : MonoBehaviour
     {
@@ -23,17 +28,18 @@ namespace Sealebrities
         public static float Charge01 { get; private set; } = -1f;
         /// True while the rod view model exists under the player camera (the rod is in the player's hands).
         public static bool ViewModelVisible { get; private set; }
+        /// The current cast fishes on the open-sea table (D.2) – for the HUD / quests.
+        public static bool OnOpenSea { get; private set; }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { State = RodState.Hidden; Charge01 = -1f; ViewModelVisible = false; }
+        static void ResetStatics() { State = RodState.Hidden; Charge01 = -1f; ViewModelVisible = false; OnOpenSea = false; }
 
         // ------------------------------------------------------------------ tuning
         const float WindUpTime = 0.35f, WhipTime = 0.25f, ChargeTime = 1.1f, SettleTime = 0.35f;
-        const float MinCast = 4f, MaxCast = 17f;
         const float ReleaseAt = 0.6f;            // fraction of the whip when the bobber leaves the tip
         const float HangLength = 0.36f;          // bobber dangling below the tip
         const float FishHang = 0.55f;            // line length between tip and a landed fish
-        const float LandedTime = 1.35f, RetrieveTime = 0.55f;
+        const float LandedTime = 1.35f, RetrieveTime = 0.55f, EscapeTime = 1.4f;
         const float EquipTime = 0.25f, StowTime = 0.2f;
         const float WindUpPitch = -58f, WhipPitch = 34f, FishingPitch = 21f;
 
@@ -45,8 +51,9 @@ namespace Sealebrities
         LineRenderer line;
         readonly Vector3[] linePts = new Vector3[16];
         ParticleSystem splash;
-        GameObject catchGo;
+        GameObject catchGo, escapeGo;
         float catchLength;
+        AudioSource dragSrc;
 
         // ------------------------------------------------------------------ state
         RodState st = RodState.Hidden;
@@ -55,20 +62,40 @@ namespace Sealebrities
         Vector3 castFrom, castTarget;
         float biteTimer, nibbleTimer, nibble, strikeTimer;
         float equip01, pitch, yawOff, tipBend, crankDeg, reelSoundTimer, splashTimer, idleTime, phoneBlend;
-        Vector3 bobPos, bobPrev, retrieveFrom, fishFrom;
-        bool bobValid;
+        Vector3 bobPos, bobPrev, retrieveFrom;
+        bool bobValid, retrieveNoBobber;
         float blockedUntil;
         FishItem hooked;
-        bool hookedCommitted;
-        float reelTime;
+        bool hookedCommitted, hookedFromBoat;
         string promptWritten;
         int lastTier = -2, cachedTier;
         bool tierDirty = true;
 
+        // round 2: rod stats, tables, the fight
+        GearStats gear;
+        bool seaTable, rarePing;
+        int weakRodToastDay = -1, openSeaHintDay = -1;
+        readonly ReelFight fight = new ReelFight();
+        bool lifting;
+        float liftT, liftDur;
+        Vector3 liftFrom, fightFrom, fishPos;
+        float lateral, pullBack, lookYawSpeed;
+        float escapeT;
+        Vector3 escapeDir;
+        bool leapSplashed;
+        int hintShownFor = -1;
+
         readonly KeyPrompt promptCast = new KeyPrompt(GameAction.Use, "Auswerfen (halten)", "Cast (hold)");
         readonly KeyPrompt promptReel = new KeyPrompt(GameAction.Use, "Einholen", "Reel in");
         readonly KeyPrompt promptStrike = new KeyPrompt(GameAction.Use, "Anschlagen!", "Strike!");
+        readonly KeyPrompt promptHold = new KeyPrompt(GameAction.Use, "Halten – Einholen", "Hold – reel in");
         static readonly string[] BarDe = BuildBars("Wurf "), BarEn = BuildBars("Cast ");
+
+        // fallback tension bar (shown in the interaction prompt when no UI gauge is installed)
+        const int BarSlots = 20;
+        string[] reelBars;
+        Language reelBarsLang;
+        string reelBarsKey;
 
         static string[] BuildBars(string prefix)
         {
@@ -106,6 +133,10 @@ namespace Sealebrities
 
             splash = BoatParticles.Splash(transform);
 
+            // the reel's drag buzzing while a fish takes line (2D-ish: it is the player's own rod)
+            dragSrc = BoatSynth.LoopSource(gameObject, BoatSynth.Drag, 1f, 20f, AudioRolloffMode.Linear);
+            dragSrc.spatialBlend = 0.2f;
+
             GameEvents.GameStarted += OnGameStarted;
             GameEvents.ReturnedToMenu += OnReturnedToMenu;
             GameEvents.GearChanged += OnGearChanged;
@@ -119,26 +150,31 @@ namespace Sealebrities
             ReleasePrompt();
             DestroyViewModel();
             if (catchGo != null) Destroy(catchGo);
+            if (escapeGo != null) Destroy(escapeGo);
             ViewModelVisible = false;
             State = RodState.Hidden;
             Charge01 = -1f;
+            FishingReel.Clear();
         }
 
         void OnGameStarted()
         {
             tierDirty = true;
+            weakRodToastDay = -1;
+            openSeaHintDay = -1;
             ResetAll(false);
         }
 
         void OnReturnedToMenu() => ResetAll(false);
 
-        /// The equipped rod may have changed: re-read its tier (the view model is rebuilt when it differs).
+        /// The equipped rod may have changed: re-read its stats (the view model is rebuilt when the tier differs).
         void OnGearChanged() => tierDirty = true;
 
         void DestroyViewModel()
         {
             if (vm != null && vm.root != null) Destroy(vm.root.gameObject);
             vm = null;
+            nearLine = null;   // a child of the view model
         }
 
         // ------------------------------------------------------------------ helpers
@@ -152,12 +188,21 @@ namespace Sealebrities
             }
         }
 
-        static int RodTier()
+        void RefreshGear()
         {
             var gm = GameManager.I;
-            if (gm == null || gm.State == null) return 0;
-            var rod = GearDatabase.Equipped(gm.State, GearSlot.Rod);
-            return rod != null ? Mathf.Clamp(rod.tier, 0, 2) : 0;
+            if (gm != null && gm.State != null)
+            {
+                gear = gm.Gear;
+                cachedTier = Mathf.Clamp(gear.rodTier, 0, 3);
+            }
+            else
+            {
+                gear = new GearStats { castMin = 4f, castMax = 17f, reelPower = 1f, lineStrength = 1f, fishSpeed = 1f };
+                cachedTier = 0;
+            }
+            if (gear.castMax <= gear.castMin) { gear.castMin = 4f; gear.castMax = 17f; }
+            tierDirty = false;
         }
 
         Vector3 TipPos
@@ -169,6 +214,12 @@ namespace Sealebrities
                 if (p != null && p.View != null) return p.View.transform.position + p.View.transform.forward * 1.2f + Vector3.up * 0.6f;
                 return transform.position;
             }
+        }
+
+        static bool LocalOnBoat()
+        {
+            var b = Refs.Boat;
+            return b != null && !(b is Object o && o == null) && b.PlayerAboard;
         }
 
         // ------------------------------------------------------------------ frame: logic
@@ -186,7 +237,7 @@ namespace Sealebrities
             bool raised = held && !p.IsFainting && !busy && !UIState.PhoneOpen;
             bool canFish = raised && !p.IsInWater && !p.IsUnderwater;
 
-            // stowed, jumped into the water, fainted …: drop the cast (a hooked fish is kept). The phone keeps it.
+            // stowed, jumped into the water, fainted …: drop the cast (a fish mid-fight gets away). The phone keeps it.
             bool session = st != RodState.Hidden && st != RodState.Ready && st != RodState.Charging;
             if (session && (!held || p.IsInWater || p.IsUnderwater || p.IsFainting || busy)) CancelSession();
 
@@ -196,7 +247,7 @@ namespace Sealebrities
             bool show = view != null && inGame && (held || equip01 > 0.001f);
             if (show)
             {
-                if (tierDirty) { cachedTier = RodTier(); tierDirty = false; }
+                if (tierDirty) RefreshGear();
                 int tier = cachedTier;
                 if (vm == null || vm.root == null || tier != lastTier)
                 {
@@ -215,13 +266,26 @@ namespace Sealebrities
                 if (st != RodState.Hidden) ResetAll(true);
             }
             ViewModelVisible = show;
+            UpdateEscape(dt);
 
-            if (st == RodState.Hidden) { Charge01 = -1f; State = st; return; }
+            if (st == RodState.Hidden)
+            {
+                Charge01 = -1f;
+                State = st;
+                if (FishingReel.Active) FishingReel.Clear();
+                StopDrag();
+                return;
+            }
 
             stT += dt;
             bool blocked = UIState.BlocksGameplay;
             if (blocked) blockedUntil = Time.unscaledTime + 0.2f;
             bool input = canFish && !blocked && Time.unscaledTime >= blockedUntil && equip01 >= 0.999f;
+
+            // camera yaw speed (°/s, smoothed) for the "pull against the run" counter-steer
+            float rawYaw = 0f;
+            if (p is PlayerController pcl && pcl != null && dt > 0f) rawYaw = pcl.LookDelta.x / dt;
+            lookYawSpeed = Mathf.Lerp(lookYawSpeed, rawYaw, 1f - Mathf.Exp(-12f * dt));
 
             switch (st)
             {
@@ -243,11 +307,11 @@ namespace Sealebrities
                     strikeTimer -= dt;
                     if (strikeTimer <= 0f)
                     {
-                        GameEvents.RaiseToast(Loc.Tr("Weg ist er …", "It got away …"));
+                        GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Verpasst – weg ist er", "Missed – it got away"));
                         StartRetrieve();
                     }
                     break;
-                case RodState.Reeling: UpdateReeling(dt); break;
+                case RodState.Reeling: UpdateReeling(dt, input, blocked); break;
                 case RodState.Landed:
                     if (stT >= LandedTime) FinishLanded();
                     break;
@@ -256,16 +320,21 @@ namespace Sealebrities
                     break;
             }
 
-            // the line snaps when the player walks / sails away from the bobber
+            // the line snaps when the player walks / sails away from the bobber or the fighting fish
             if ((st == RodState.Waiting || st == RodState.Bite) && (bobber.position - TipPos).sqrMagnitude > SnapDist() * SnapDist())
             {
-                GameEvents.RaiseToast(Loc.Tr("Schnur gerissen!", "The line snapped!"));
+                GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Schnur gerissen!", "Line snapped!"));
+                SetBobberGlow(false);
                 bobValid = false;
                 EnterState(RodState.Ready);
             }
+            else if (st == RodState.Reeling && !lifting && catchGo != null && (catchGo.transform.position - TipPos).sqrMagnitude > SnapDist() * SnapDist())
+                OnFightLost(true);
 
             State = st;
             Charge01 = st == RodState.Charging ? charge : -1f;
+            if (st != RodState.Reeling && FishingReel.Active) FishingReel.Clear();
+            if (st != RodState.Reeling) StopDrag();
 
             // pose the rod now (camera-local), so the Player module's hands (LateUpdate) grip this frame's pose
             if (st != RodState.Hidden && vm != null && vm.root != null && vm.root.gameObject.activeSelf && dt > 0f) PoseRig(dt);
@@ -283,14 +352,28 @@ namespace Sealebrities
                 if (catchGo != null) { Destroy(catchGo); catchGo = null; }
                 hooked = null;
                 hookedCommitted = false;
+                lifting = false;
+                rarePing = false;
+                retrieveNoBobber = false;
             }
         }
 
-        /// Ends the current cast at once (a hooked fish still goes into the cooler box).
+        /// Ends the current cast at once. A fish mid-fight gets away; a fish already lifted out goes into the box.
         void CancelSession()
         {
-            if (hooked != null && !hookedCommitted) CommitCatch(false);
+            if (st == RodState.Reeling && hooked != null && !hookedCommitted)
+            {
+                if (lifting) CommitCatch(false);
+                else
+                {
+                    GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Abgehauen!", "Got away!"));
+                    FishingReel.RaiseEscaped();
+                    ReleaseFishVisual();
+                }
+            }
+            else if (hooked != null && !hookedCommitted && st == RodState.Landed) CommitCatch(false);
             if (catchGo != null) { Destroy(catchGo); catchGo = null; }
+            SetBobberGlow(false);
             bobValid = false;
             EnterState(RodState.Ready);
         }
@@ -300,22 +383,29 @@ namespace Sealebrities
             if (catchGo != null) { Destroy(catchGo); catchGo = null; }
             hooked = null;
             hookedCommitted = false;
+            lifting = false;
             charge = 0f;
             bobValid = false;
             st = RodState.Hidden;
             stT = 0f;
             State = RodState.Hidden;
             Charge01 = -1f;
+            OnOpenSea = false;
             if (!keepVisualState) equip01 = 0f;
+            SetBobberGlow(false);
             if (bobber != null) bobber.gameObject.SetActive(false);
             if (line != null) line.enabled = false;
+            if (nearLine != null) nearLine.enabled = false;
             if (vm != null && vm.root != null && !keepVisualState) vm.root.gameObject.SetActive(false);
+            FishingReel.Clear();
+            StopDrag();
             ReleasePrompt();
         }
 
         // ------------------------------------------------------------------ casting
         void StartCharge()
         {
+            if (tierDirty) RefreshGear();
             EnterState(RodState.Charging);
             charge = 0f;
             BoatSynth.PlayAt(BoatSynth.Reel, TipPos, 0.12f, 2.1f, 8f);
@@ -351,16 +441,43 @@ namespace Sealebrities
                 BoatParticles.EmitAt(splash, w, 12);
                 BoatSynth.PlayAt(BoatSynth.Plop, w, 0.6f, 1f, 30f);
                 EnterState(RodState.Waiting);
-                biteTimer = FishMarket.BiteDelay(Rng);
+                DecideTable(w);
+                biteTimer = FishMarket.BiteDelay(Rng, seaTable);
                 nibbleTimer = Mathf.Lerp(1.5f, 3.5f, (float)Rng.NextDouble());
                 nibble = 0f;
             }
             else
             {
                 BoatSynth.PlayAt(BoatSynth.Thunk, castTarget, 0.25f, 1.6f, 20f);
-                GameEvents.RaiseToast(Loc.Tr("Da ist kein Wasser.", "That's not water."));
+                GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Da ist kein Wasser", "That's not water"));
                 StartRetrieve();
             }
+        }
+
+        /// D.2: open sea (≥ 12 m deep, ≥ 60 m from every shore) uses the sea table – if the rod allows it.
+        void DecideTable(Vector3 bobberPos)
+        {
+            bool open = FishMarket.IsOpenSea(bobberPos);
+            int day = GameManager.I != null ? GameManager.I.State.day : 0;
+            if (open && !FishMarket.RodAllowsOpenSea(gear))
+            {
+                seaTable = false;
+                if (weakRodToastDay != day)
+                {
+                    weakRodToastDay = day;
+                    GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Bambusrute zu schwach", "Bamboo rod too weak"), Loc.Tr("Hochsee", "Open sea"));
+                }
+            }
+            else
+            {
+                seaTable = open;
+                if (open && openSeaHintDay != day)
+                {
+                    openSeaHintDay = day;
+                    GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Hochsee – große Fische!", "Open sea – big fish!"));
+                }
+            }
+            OnOpenSea = seaTable;
         }
 
         void ChooseTarget()
@@ -372,7 +489,7 @@ namespace Sealebrities
             if (fwd.sqrMagnitude < 1e-4f) fwd = p != null && p.Root != null ? p.Root.forward : Vector3.forward;
             fwd.y = 0f;
             fwd.Normalize();
-            castDist = Mathf.Lerp(MinCast, MaxCast, castPower) * (1f + 0.08f * Mathf.Max(0, cachedTier));
+            castDist = Mathf.Lerp(gear.castMin, gear.castMax, castPower);
             targetWater = false;
             for (float d = castDist; d >= 2.5f; d -= 0.75f)
             {
@@ -402,7 +519,7 @@ namespace Sealebrities
             return true;
         }
 
-        // ------------------------------------------------------------------ waiting / bite / reel
+        // ------------------------------------------------------------------ waiting / bite
         void UpdateWaiting(float dt)
         {
             biteTimer -= dt;
@@ -419,87 +536,328 @@ namespace Sealebrities
             nibble = Mathf.MoveTowards(nibble, 0f, dt * 3.5f);
             if (biteTimer > 0f) return;
 
+            // the fish is decided at the bite, so the research rod can glow for a rare one (D.3)
+            hooked = FishMarket.RollCatch(Rng, seaTable);
+            hookedCommitted = false;
+            var kind = hooked != null ? hooked.Kind : null;
+            rarePing = gear.rodRarePing && kind != null && kind.rarity >= Rarity.Rare;
+
             EnterState(RodState.Bite);
             strikeTimer = FishMarket.StrikeWindow + 0.2f;
             Vector3 b = bobber.position;
             BoatParticles.EmitAt(splash, b, 16);
             BoatSynth.PlayAt(BoatSynth.Plop, b, 0.9f, 0.75f, 30f);
             BoatSynth.PlayAt(BoatSynth.Splash, b, 0.35f, 1.4f, 30f);
+            if (rarePing)
+            {
+                SetBobberGlow(true);
+                BoatSynth.PlayAt(BoatSynth.Sparkle, b, 0.7f, 1f, 40f);
+            }
         }
 
+        void SetBobberGlow(bool on)
+        {
+            if (bobber != null) FishingVisuals.SetBobberGlow(bobber, on);
+        }
+
+        // ------------------------------------------------------------------ the fight (D.1)
         void Hook()
         {
-            hooked = FishMarket.RollCatch(Rng);
+            if (hooked == null) hooked = FishMarket.RollCatch(Rng, seaTable);
             hookedCommitted = false;
+            hookedFromBoat = LocalOnBoat();
+            SetBobberGlow(false);
             var kind = hooked != null ? hooked.Kind : null;
             float kg = hooked != null ? hooked.weightKg : 0.5f;
             if (catchGo != null) Destroy(catchGo);
             catchGo = FishingVisuals.BuildCatch(transform, kind, kg, true, out catchLength);
-            fishFrom = bobber.position;
-            catchGo.transform.position = fishFrom;
-            reelTime = 1.15f + Mathf.Clamp(kg * 0.07f, 0f, 1.1f);
+            fightFrom = bobber.position;
+            fightFrom.y = Waves.HeightAt(fightFrom.x, fightFrom.z);
+            fishPos = fightFrom;
+            catchGo.transform.position = fishPos;
+            lateral = 0f;
+            pullBack = 0f;
+            lifting = false;
+            leapSplashed = false;
             reelSoundTimer = 0f;
             splashTimer = 0f;
-            BoatParticles.EmitAt(splash, fishFrom, 18);
-            BoatSynth.PlayAt(BoatSynth.Splash, fishFrom, 0.55f, 1.25f, 30f);
+
+            var gm = GameManager.I;
+            var diff = gm != null ? gm.Difficulty : DifficultySettings.For(Difficulty.OpenWater);
+            bool beginner = gm != null && gm.State.fishCaught < 5;
+            fight.Begin(kind, gear, diff, FishingReel.Assist || GameManager.AutomatedRun, Rng, beginner);
+            BuildReelBars();
+            // the first fights of a save: one short control hint (L.10 style)
+            if (gm != null && gm.State.fishCaught < 2 && hintShownFor != gm.State.fishCaught)
+            {
+                hintShownFor = gm.State.fishCaught;
+                GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Halten: einholen · Loslassen: nachgeben", "Hold: reel in · Release: give line"),
+                                       GameInput.BindingLabel(GameAction.Use));
+            }
+
+            BoatParticles.EmitAt(splash, fishPos, 18);
+            BoatSynth.PlayAt(BoatSynth.Splash, fishPos, 0.55f, 1.25f, 30f);
             EnterState(RodState.Reeling);
+            Publish();
         }
 
-        Vector3 HangPoint => TipPos + Vector3.down * FishHang;
-
-        void UpdateReeling(float dt)
+        void UpdateReeling(float dt, bool input, bool blocked)
         {
-            float s = Mathf.Clamp01(stT / reelTime);
+            if (lifting)
+            {
+                UpdateLift(dt);
+                return;
+            }
+            // a menu/phone over the game pauses the fight (the fish waits politely)
+            if (!blocked)
+            {
+                bool hold = input && GameInput.UseHeld;
+                float steer = input ? GameInput.Move.x : 0f;
+                var r = fight.Step(dt, hold, steer, input ? lookYawSpeed : 0f);
+                switch (r)
+                {
+                    case ReelFight.Result.Landed: StartLift(); break;
+                    case ReelFight.Result.Snapped: OnFightLost(true); return;
+                    case ReelFight.Result.Escaped: OnFightLost(false); return;
+                }
+            }
+            Publish();
+            if (!lifting) UpdateFightFish(dt);
+            UpdateFightAudio(dt);
+        }
+
+        void Publish()
+        {
+            FishingReel.Active = st == RodState.Reeling && !lifting;
+            FishingReel.Tension = fight.Tension;
+            FishingReel.GreenMin = fight.GreenMin;
+            FishingReel.GreenMax = fight.GreenMax;
+            FishingReel.Progress01 = fight.Progress;
+            FishingReel.RunDir = fight.RunDir;
+            FishingReel.Running = fight.Running;
+            FishingReel.Countering = fight.Countering;
+            FishingReel.Reeling = fight.Reeling;
+            FishingReel.Snap01 = fight.Snap01;
+            FishingReel.Slack01 = fight.Slack01;
+            FishingReel.Kind = fight.Kind;
+            FishingReel.Zone = fight.Zone;
+            FishingReel.LockStrafe = FishingReel.Active;
+        }
+
+        /// Where the fight ends before the lift: in the water just in front of the rod tip.
+        Vector3 NearPoint()
+        {
+            Vector3 tip = TipPos;
+            Vector3 away = new Vector3(fightFrom.x - tip.x, 0f, fightFrom.z - tip.z);
+            float d = away.magnitude;
+            away = d > 0.01f ? away / d : Vector3.forward;
+            Vector3 n = new Vector3(tip.x, 0f, tip.z) + away * Mathf.Min(0.6f, d);
+            n.y = Waves.HeightAt(n.x, n.z);
+            return n;
+        }
+
+        void UpdateFightFish(float dt)
+        {
+            if (catchGo == null) return;
+            Vector3 tip = TipPos;
+            Vector3 near = NearPoint();
+            Vector3 toFish = new Vector3(fightFrom.x - near.x, 0f, fightFrom.z - near.z);
+            float startDist = toFish.magnitude;
+            Vector3 away = startDist > 0.01f ? toFish / startDist : Vector3.forward;
+            Vector3 side = new Vector3(away.z, 0f, -away.x);   // the angler's right (looking toward the fish)
+            var kind = fight.Kind;
+            float strength = kind != null ? kind.runStrength : 0f;
+
+            // runs pull line out and sideways; reeling wins it back
+            if (fight.Running)
+            {
+                float k = fight.Countering ? 0.55f : 1f;
+                pullBack = Mathf.Min(pullBack + (0.5f + strength * 0.012f) * k * dt, 3.5f + startDist * 0.2f);
+                lateral += fight.RunDir * (0.9f + strength * 0.012f) * k * dt;
+            }
+            else
+            {
+                if (fight.Reeling) pullBack = Mathf.Max(0f, pullBack - 1.6f * dt);
+                lateral = Mathf.MoveTowards(lateral, 0f, 0.5f * dt);
+            }
+            float rem = 1f - fight.Progress;
+            float maxLat = 1.2f + 0.3f * startDist * rem;
+            lateral = Mathf.Clamp(lateral, -maxLat, maxLat);
+
+            float e = Smooth01(fight.Progress);
+            Vector3 basePos = Vector3.Lerp(fightFrom, near, e) + away * (pullBack * rem) + side * (lateral * Mathf.Max(0.25f, rem));
+            float water = Waves.HeightAt(basePos.x, basePos.z);
+            float y = water - 0.05f;
+
+            // big fish leap out of the water on some runs (How to Fish "tail-walk")
+            float leapLen = 0.95f;
+            bool leaping = fight.Leap && fight.RunAge >= 0f && fight.RunAge <= leapLen;
+            float pitchDeg = 0f;
+            if (leaping)
+            {
+                float s = fight.RunAge / leapLen;
+                float h = 0.7f + 0.35f * catchLength;
+                y = water + 4f * h * s * (1f - s);
+                pitchDeg = Mathf.Lerp(-55f, 55f, s);
+                if (!leapSplashed) { leapSplashed = true; BoatParticles.EmitAt(splash, basePos, 22); BoatSynth.PlayAt(BoatSynth.Splash, basePos, 0.5f, 1.15f, 40f); }
+            }
+            else if (leapSplashed && fight.RunAge > leapLen)
+            {
+                leapSplashed = false;
+                BoatParticles.EmitAt(splash, basePos, 26);
+                BoatSynth.PlayAt(BoatSynth.Splash, basePos, 0.7f, 0.95f, 45f);
+            }
+            else if (fight.RunAge < 0f) leapSplashed = false;
+
+            fishPos = new Vector3(basePos.x, y, basePos.z);
+            catchGo.transform.position = fishPos;
+
+            // head toward the angler, away and to the side while running; the tail beats faster under tension
+            Vector3 head = -away;
+            if (fight.Running) head = (away * 0.6f + side * fight.RunDir).normalized;
+            float beat = Mathf.Lerp(14f, 30f, fight.Tension / 100f);
+            Quaternion lie = Quaternion.LookRotation(Vector3.down, head) * Quaternion.Euler(0f, 0f, Mathf.Sin(idleTime * beat) * (fight.Running ? 38f : 26f));
+            // (catch root: +Y = head, −Z = back – see FishingVisuals.BuildCatch)
+            if (leaping) lie = Quaternion.AngleAxis(pitchDeg, Vector3.Cross(Vector3.up, head).normalized) * Quaternion.LookRotation(head, Vector3.up) * Quaternion.Euler(90f, 0f, 0f);
+            catchGo.transform.rotation = lie;
+
+            // splashes: more when it runs or the line is tight
+            splashTimer -= dt;
+            if (splashTimer <= 0f && !leaping)
+            {
+                splashTimer = Mathf.Lerp(0.4f, 0.1f, fight.Tension / 100f) * (fight.Running ? 0.6f : 1f);
+                BoatParticles.EmitAt(splash, fishPos, fight.Running ? 6 : 3);
+            }
+        }
+
+        void UpdateFightAudio(float dt)
+        {
+            // reel clicks while cranking, the drag buzzes when a run takes line at high tension
+            reelSoundTimer -= dt;
+            if (fight.Reeling && reelSoundTimer <= 0f)
+            {
+                reelSoundTimer = 0.45f;
+                BoatSynth.PlayAt(BoatSynth.Reel, TipPos, 0.32f, 1.05f + fight.Tension * 0.003f, 15f);
+            }
+            bool drag = fight.Running && fight.Tension > 70f;
+            float want = drag ? Mathf.Lerp(0.25f, 0.85f, (fight.Tension - 70f) / 30f) * Settings.SfxVolume : 0f;
+            if (dragSrc != null)
+            {
+                dragSrc.volume = Mathf.MoveTowards(dragSrc.volume, want, dt * 4f);
+                dragSrc.pitch = 0.85f + fight.Tension * 0.004f;
+                if (dragSrc.volume > 0.001f) { if (!dragSrc.isPlaying) dragSrc.Play(); }
+                else if (dragSrc.isPlaying) dragSrc.Stop();
+            }
+        }
+
+        void StopDrag()
+        {
+            if (dragSrc != null && dragSrc.isPlaying) { dragSrc.volume = 0f; dragSrc.Stop(); }
+        }
+
+        Vector3 HangPoint => TipPos + Vector3.down * (FishHang + Mathf.Max(0f, catchLength - 0.4f) * 0.35f);
+
+        void StartLift()
+        {
+            lifting = true;
+            liftT = 0f;
+            liftFrom = catchGo != null ? catchGo.transform.position : fishPos;
+            liftDur = 0.55f + Mathf.Clamp(catchLength * 0.2f, 0f, 0.35f);
+            FishingReel.Active = false;
+            FishingReel.LockStrafe = false;
+            StopDrag();
+            BoatParticles.EmitAt(splash, liftFrom, 20);
+            BoatSynth.PlayAt(BoatSynth.Splash, liftFrom, 0.6f, 1.2f, 30f);
+        }
+
+        void UpdateLift(float dt)
+        {
+            liftT += dt;
+            float a = Mathf.Clamp01(liftT / liftDur);
             if (catchGo != null)
             {
                 Vector3 to = HangPoint;
-                Vector3 p;
-                if (s < 0.45f)
-                {
-                    // fight along the surface toward the shore / boat
-                    float a = s / 0.45f;
-                    Vector3 mid = Vector3.Lerp(fishFrom, to, 0.55f);
-                    p = Vector3.Lerp(fishFrom, mid, a * a * (3f - 2f * a));
-                    p.x += Mathf.Sin(stT * 13f) * 0.18f * (1f - a);
-                    p.z += Mathf.Cos(stT * 11f) * 0.18f * (1f - a);
-                    p.y = Waves.HeightAt(p.x, p.z) - 0.03f;
-                    splashTimer -= dt;
-                    if (splashTimer <= 0f)
-                    {
-                        splashTimer = 0.14f;
-                        BoatParticles.EmitAt(splash, p, 4);
-                    }
-                    catchGo.transform.position = p;
-                    // lying in the water, head (catch-local +Y) toward the angler, back up, tail beating
-                    Vector3 dir = to - p;
-                    dir.y = 0f;
-                    if (dir.sqrMagnitude > 1e-3f)
-                        catchGo.transform.rotation = Quaternion.LookRotation(Vector3.down, dir.normalized) * Quaternion.Euler(0f, 0f, Mathf.Sin(stT * 24f) * 30f);
-                }
-                else
-                {
-                    // lifted out of the water in an arc
-                    float a = (s - 0.45f) / 0.55f;
-                    Vector3 mid = Vector3.Lerp(fishFrom, to, 0.55f);
-                    mid.y = Waves.HeightAt(mid.x, mid.z);
-                    Vector3 ctrl = (mid + to) * 0.5f + Vector3.up * 1.2f;
-                    float u = 1f - a;
-                    p = u * u * mid + 2f * u * a * ctrl + a * a * to;
-                    catchGo.transform.position = p;
-                    catchGo.transform.rotation = Quaternion.Euler(0f, Time.time * 40f, Mathf.Sin(stT * 26f) * 22f);
-                }
+                Vector3 ctrl = (liftFrom + to) * 0.5f + Vector3.up * 1.2f;
+                float u = 1f - a;
+                catchGo.transform.position = u * u * liftFrom + 2f * u * a * ctrl + a * a * to;
+                catchGo.transform.rotation = Quaternion.Euler(0f, idleTime * 40f, Mathf.Sin(stT * 26f) * 22f);
             }
             reelSoundTimer -= dt;
             if (reelSoundTimer <= 0f)
             {
-                reelSoundTimer = 0.55f;
-                BoatSynth.PlayAt(BoatSynth.Reel, TipPos, 0.4f, 1.1f, 15f);
+                reelSoundTimer = 0.3f;
+                BoatSynth.PlayAt(BoatSynth.Reel, TipPos, 0.4f, 1.25f, 15f);
             }
-            if (s >= 1f)
+            if (a >= 1f)
             {
+                lifting = false;
                 EnterState(RodState.Landed);
                 CommitCatch(true);
             }
+        }
+
+        /// The fight is over without a catch: snapped (tension too high too long) or escaped (line too slack).
+        void OnFightLost(bool snapped)
+        {
+            Vector3 at = catchGo != null ? catchGo.transform.position : fishPos;
+            if (snapped)
+            {
+                GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Schnur gerissen!", "Line snapped!"));
+                BoatSynth.PlayAt(BoatSynth.Snap, TipPos, 0.8f, 1f, 25f);
+                var rec = PlayerRecords.Local;
+                if (rec != null) { rec.snaps++; Achievements.OnLocalCounter(rec); }
+                FishingReel.RaiseSnapped();
+            }
+            else
+            {
+                GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Abgehauen!", "Got away!"));
+                BoatSynth.PlayAt(BoatSynth.Splash, at, 0.5f, 1.3f, 30f);
+                FishingReel.RaiseEscaped();
+            }
+            ReleaseFishVisual();
+            hooked = null;
+            hookedCommitted = false;
+            FishingReel.Clear();
+            StopDrag();
+            retrieveFrom = at;
+            retrieveNoBobber = snapped;   // the bobber is gone with the fish
+            BoatSynth.PlayAt(BoatSynth.Reel, TipPos, 0.35f, 1.3f, 15f);
+            EnterState(RodState.Retrieving);
+            retrieveNoBobber = snapped;
+            bobValid = false;
+        }
+
+        /// The hooked fish swims off (snapped line, escaped, rod put away mid-fight).
+        void ReleaseFishVisual()
+        {
+            if (catchGo == null) return;
+            if (escapeGo != null) Destroy(escapeGo);
+            escapeGo = catchGo;
+            catchGo = null;
+            escapeT = 0f;
+            Vector3 tip = TipPos;
+            Vector3 away = escapeGo.transform.position - tip;
+            away.y = 0f;
+            escapeDir = away.sqrMagnitude > 1e-3f ? away.normalized : Vector3.forward;
+            BoatParticles.EmitAt(splash, escapeGo.transform.position, 14);
+        }
+
+        void UpdateEscape(float dt)
+        {
+            if (escapeGo == null) return;
+            escapeT += dt;
+            float a = escapeT / EscapeTime;
+            if (a >= 1f)
+            {
+                Destroy(escapeGo);
+                escapeGo = null;
+                return;
+            }
+            Vector3 p = escapeGo.transform.position + escapeDir * (4f * dt);
+            p.y = Waves.HeightAt(p.x, p.z) - 0.05f - a * 0.9f;
+            escapeGo.transform.position = p;
+            escapeGo.transform.rotation = Quaternion.LookRotation(Vector3.down, escapeDir) * Quaternion.Euler(0f, 0f, Mathf.Sin(escapeT * 34f) * 35f);
+            if (a > 0.6f) escapeGo.transform.localScale = Vector3.one * Mathf.Max(0.01f, (1f - a) / 0.4f);
         }
 
         /// The fish goes into the shared cooler box (on co-op clients via the host). Not sold.
@@ -508,17 +866,32 @@ namespace Sealebrities
             if (hooked == null || hookedCommitted) return;
             hookedCommitted = true;
             var f = hooked;
-            FishMarket.AddCatch(f);   // raises GameEvents.FishCaught
+            f.fromBoat = hookedFromBoat;
+            f.openSea = seaTable;
+            FishMarket.AddCatch(f);   // raises GameEvents.FishCaught + FishMarket.Caught
+            var rec = PlayerRecords.Local;
+            if (rec != null) rec.fishCaught++;
             var kind = f.Kind;
-            string kg = f.weightKg.ToString("0.0#", Loc.Culture);
+            if (kind != null)
+            {
+                if (kind.junk) Achievements.Unlock("boot");
+                else if (kind.id == "tuna") Achievements.Unlock("tuna");
+                else if (kind.id == "marlin") Achievements.Unlock("captain_poke");
+            }
+            FishingReel.RaiseLanded(f);
+
+            string kg = f.weightKg.ToString("0.0#", Loc.Culture) + " kg";
             string name = f.Name;
-            if (kind != null && (kind.rarity == Rarity.Rare || kind.rarity == Rarity.Epic))
-                GameEvents.RaiseBanner(Loc.Tr($"{name}! {kg} kg", $"{name}! {kg} kg"), new Color(1f, 0.76f, 0.2f));
-            else
-                GameEvents.RaiseToast(Loc.Tr($"{name} · {kg} kg → Kühlbox", $"{name} · {kg} kg → cooler box"));
+            if (kind != null && kind.rarity >= Rarity.Rare && !kind.junk)
+            {
+                Color c = kind.rarity >= Rarity.Legendary ? new Color(1f, 0.82f, 0.25f) : kind.rarity == Rarity.Epic ? new Color(0.75f, 0.55f, 1f) : new Color(1f, 0.76f, 0.2f);
+                GameEvents.RaiseBanner(name + "! " + kg, c);
+                BoatSynth.PlayAt(BoatSynth.Sparkle, TipPos, 0.6f, 0.9f, 20f);
+            }
+            else GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr($"{name} → Kühlbox", $"{name} → cooler box"), kg);
             var gm = GameManager.I;
             if (announce && gm != null && gm.State.fishListedTotal == 0 && gm.State.fishCaught <= 3)
-                GameEvents.RaiseToast(Loc.Tr("Verkaufen: Handy → Fischmarkt", "Sell it: phone → Fish Market"));
+                GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Verkaufen: Handy → Fischmarkt", "Sell: phone → Fish Market"));
         }
 
         void FinishLanded()
@@ -533,6 +906,7 @@ namespace Sealebrities
         void StartRetrieve()
         {
             retrieveFrom = bobber.gameObject.activeSelf ? bobber.position : TipPos;
+            SetBobberGlow(false);
             BoatSynth.PlayAt(BoatSynth.Reel, TipPos, 0.35f, 1.3f, 15f);
             EnterState(RodState.Retrieving);
         }
@@ -545,6 +919,7 @@ namespace Sealebrities
             {
                 if (bobber != null && bobber.gameObject.activeSelf) bobber.gameObject.SetActive(false);
                 if (line != null && line.enabled) line.enabled = false;
+                if (nearLine != null && nearLine.enabled) nearLine.enabled = false;
                 ReleasePrompt();
                 return;
             }
@@ -605,16 +980,29 @@ namespace Sealebrities
                     break;
                 case RodState.Reeling:
                 {
-                    float s = Mathf.Clamp01(stT / Mathf.Max(0.1f, reelTime));
-                    targetPitch = Mathf.Lerp(8f, -10f, s) + Mathf.Sin(idleTime * 23f) * 2f * (1f - s);
-                    targetBend = Mathf.Lerp(28f, 9f, s) + Mathf.Sin(idleTime * 19f) * 3f * (1f - s);
-                    offset = new Vector3(0f, 0.01f, -0.02f);
-                    crankDeg += 950f * dt;
+                    if (lifting)
+                    {
+                        float s = Mathf.Clamp01(liftT / Mathf.Max(0.1f, liftDur));
+                        targetPitch = Mathf.Lerp(-4f, -14f, s);
+                        targetBend = Mathf.Lerp(26f, 10f, s);
+                        crankDeg += 1300f * dt;
+                        offset = new Vector3(0f, 0.015f, -0.03f);
+                        break;
+                    }
+                    // the rod tip bows with the tension, swings toward the run, shivers in the red
+                    float t01 = fight.Tension / 100f;
+                    float shake = fight.Zone == 3 ? Mathf.Sin(idleTime * 47f) * 2.5f : 0f;
+                    targetPitch = (fight.Reeling ? 2f : 9f) - t01 * 10f + Mathf.Sin(idleTime * 23f) * 1.5f * t01 + shake * 0.5f;
+                    targetBend = 6f + t01 * 34f + shake;
+                    targetYaw = fight.Running ? fight.RunDir * (fight.Countering ? -3f : 8f) * t01 : 0f;
+                    offset = new Vector3(0f, fight.Reeling ? 0.012f : 0f, -0.02f * t01);
+                    if (fight.Reeling) crankDeg += (700f + 500f * (1f - t01)) * dt;
+                    else if (fight.Running && fight.Tension > 85f) crankDeg -= 900f * dt;   // the drag gives line
                     break;
                 }
                 case RodState.Landed:
                     targetPitch = -6f;
-                    targetBend = 9f + Mathf.Sin(idleTime * 21f) * 2f;
+                    targetBend = 9f + Mathf.Max(0f, catchLength - 0.4f) * 8f + Mathf.Sin(idleTime * 21f) * 2f;
                     break;
                 case RodState.Retrieving:
                     targetPitch = 0f;
@@ -721,7 +1109,13 @@ namespace Sealebrities
                         end = catchGo.transform.position;
                     }
                     else end = HangPoint;
-                    sag = 0f;
+                    // the line is taut under tension and hangs loose when slack
+                    if (st == RodState.Reeling && !lifting)
+                    {
+                        float dist = Vector3.Distance(tip, end);
+                        sag = Mathf.Lerp(0.4f, 0f, fight.Tension / 35f) * Mathf.Min(1f, dist / 6f);
+                    }
+                    else sag = 0f;
                     break;
                 }
                 case RodState.Retrieving:
@@ -733,7 +1127,8 @@ namespace Sealebrities
                     bobPrev = bobPos;
                     bobValid = true;
                     end = bobPos + Vector3.up * 0.1f;
-                    sag = 0.05f;
+                    sag = retrieveNoBobber ? 0.35f * (1f - s) : 0.05f;
+                    showBobber = !retrieveNoBobber;
                     break;
                 }
                 default:
@@ -761,20 +1156,88 @@ namespace Sealebrities
 
             if (bobber.gameObject.activeSelf != showBobber) bobber.gameObject.SetActive(showBobber);
             if (showBobber) bobber.position = bobPos;
+            // co-op avatars (D.1): the real float position and reel tension instead of the net module's guess
+            NetLocalAvatar.PublishFishing((byte)st, bobPos, showBobber, FishingReel.Active ? FishingReel.Tension / 100f : 0f);
 
             if (!line.enabled) line.enabled = true;
             int n2 = linePts.Length;
             float distAll = Vector3.Distance(tip, end);
             float sagM = sag * Mathf.Min(1f, distAll / 5f);
+            // a line pinned in the red trembles
+            float jitter = st == RodState.Reeling && !lifting && fight.Zone == 3 ? 0.012f : 0f;
+            // 1d: the first 1.5 m from the tip is drawn on the view-model layer (child of the rod rig), the rest in the
+            // world – a dock plank right in front of the eye can never cut the line off at the tip
+            EnsureNearLine();
+            float sNear = nearLine != null && distAll > 0.01f ? Mathf.Clamp01(NearLineLength / distAll) : 0f;
             for (int i = 0; i < n2; i++)
             {
-                float s = i / (n2 - 1f);
-                linePts[i] = Vector3.Lerp(tip, end, s) + Vector3.down * (sagM * 4f * s * (1f - s) * (1f + 0.3f * (1f - s)));
+                float s = Mathf.Lerp(sNear, 1f, i / (n2 - 1f));
+                linePts[i] = LinePoint(tip, end, s, sagM, jitter, i);
             }
             line.SetPositions(linePts);
+            if (nearLine != null)
+            {
+                for (int i = 0; i < nearPts.Length; i++) nearPts[i] = LinePoint(tip, end, sNear * i / (nearPts.Length - 1f), sagM, jitter, i);
+                nearLine.SetPositions(nearPts);
+                if (!nearLine.enabled) nearLine.enabled = true;
+            }
+        }
+
+        Vector3 LinePoint(Vector3 tip, Vector3 end, float s, float sagM, float jitter, int i)
+        {
+            Vector3 pt = Vector3.Lerp(tip, end, s) + Vector3.down * (sagM * 4f * s * (1f - s) * (1f + 0.3f * (1f - s)));
+            if (jitter > 0f) pt += Vector3.up * (Mathf.Sin(idleTime * 70f + s * 27f) * jitter * 4f * s * (1f - s));
+            return pt;
+        }
+
+        const float NearLineLength = 1.5f;
+        LineRenderer nearLine;
+        readonly Vector3[] nearPts = new Vector3[5];
+
+        /// The near line lives under the rod rig (so the Player module moves it to the view-model layer) and is rebuilt
+        /// with the view model.
+        void EnsureNearLine()
+        {
+            if (nearLine != null || vm == null || vm.root == null) return;
+            var go = new GameObject("FishingLineNear");
+            go.transform.SetParent(vm.root, false);
+            nearLine = go.AddComponent<LineRenderer>();
+            nearLine.useWorldSpace = true;
+            nearLine.positionCount = nearPts.Length;
+            nearLine.widthMultiplier = 0.006f;
+            nearLine.numCapVertices = 0;
+            nearLine.sharedMaterial = BoatMats.Line;
+            nearLine.shadowCastingMode = ShadowCastingMode.Off;
+            nearLine.receiveShadows = false;
+            nearLine.enabled = false;
+            PlayerViewModelCamera.MarkDirty();
         }
 
         // ------------------------------------------------------------------ prompt
+        /// Text tension bar for the interaction prompt (fallback when the UI has no gauge): one glyph per 5 %,
+        /// '·' below green, '-' green, '=' yellow, '!' red, '|' = the needle. Built once per fight (no per-frame strings).
+        void BuildReelBars()
+        {
+            string key = GameInput.BindingLabel(GameAction.Use);
+            reelBarsLang = Loc.Current;
+            reelBarsKey = key;
+            if (reelBars == null) reelBars = new string[BarSlots + 1];
+            var chars = new char[BarSlots];
+            for (int i = 0; i < BarSlots; i++)
+            {
+                float t = (i + 0.5f) * (100f / BarSlots);
+                chars[i] = t < fight.GreenMin ? '·' : t <= fight.GreenMax ? '-' : t <= FishMarket.ReelYellowMax ? '=' : '!';
+            }
+            string suffix = "]  " + key + Loc.Tr(" halten – Einholen", " hold – reel in");
+            for (int m = 0; m <= BarSlots; m++)
+            {
+                var c = (char[])chars.Clone();
+                int idx = Mathf.Clamp(m, 0, BarSlots - 1);
+                c[idx] = '|';
+                reelBars[m] = "[" + new string(c) + suffix;
+            }
+        }
+
         /// Short control hint while no interactable is targeted (the interactor owns the prompt otherwise).
         void WritePrompt()
         {
@@ -790,6 +1253,16 @@ namespace Sealebrities
                 }
                 case RodState.Waiting: want = promptReel.Text; break;
                 case RodState.Bite: want = promptStrike.Text; break;
+                case RodState.Reeling:
+                    if (lifting) break;
+                    if (FishingReel.GaugeByUI) want = promptHold.Text;
+                    else
+                    {
+                        if (reelBars == null || reelBarsLang != Loc.Current || !ReferenceEquals(reelBarsKey, GameInput.BindingLabel(GameAction.Use))) BuildReelBars();
+                        int m = Mathf.Clamp(Mathf.FloorToInt(fight.Tension / (100f / BarSlots)), 0, BarSlots);
+                        want = reelBars[m];
+                    }
+                    break;
             }
             if (UIState.BlocksGameplay) want = null;
             string cur = InteractionPrompt.Text;

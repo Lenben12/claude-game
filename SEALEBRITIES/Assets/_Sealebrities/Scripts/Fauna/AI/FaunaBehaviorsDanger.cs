@@ -5,12 +5,12 @@ namespace Sealebrities
     static class FaunaDanger
     {
         /// 0 (snorkeler) .. 1 (abyss) normalized aggression.
-        public static float Aggr01 => Mathf.Clamp01((FaunaContext.Aggression - 0.3f) / 1.7f);
+        public static float Aggr01 => Mathf.Clamp01((FaunaContext.Aggression / Mathf.Max(0.01f, FaunaContext.PredatorAggressionMul) - 0.3f) / 1.7f);
 
         /// Bumps the focused diver: the local player directly, a remote co-op diver through the Net module.
         public static void Bump(float minAir, float maxAir)
         {
-            float air = Mathf.Lerp(minAir, maxAir, Aggr01);
+            float air = Mathf.Lerp(minAir, maxAir, Aggr01) * FaunaContext.BumpAirMul;   // F.4: more players, more danger
             if (FaunaContext.FocusLocal) GameEvents.RaisePlayerBumped(air);
             else FaunaContext.RemoteBump?.Invoke(FaunaContext.FocusNetId, air);
         }

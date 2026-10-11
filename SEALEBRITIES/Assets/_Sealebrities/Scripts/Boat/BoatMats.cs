@@ -22,7 +22,7 @@ namespace Sealebrities
             rubber, rope, glass, cushion, engine, engineGrey, drumBlue, drumOrange, lifeOrange, white, navRed, navGreen, navWhite,
             gauge, line, crate, crateDark, crateBand, strap, chuteRed, chuteWhite, heliYellow, heliRed, heliGlass, heliDark,
             rotorBlur, smoke, foam, spray, dust, splinter, bobberRed, bobberWhite, bucket, bucketWater, cork, rod, pilot, helmet,
-            cooler, coolerLid, tank, tackle, ink;
+            cooler, coolerLid, tank, tackle, ink, bobberGlow, beaconOrange;
         static Material[][] fish = new Material[3][];
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
@@ -32,7 +32,7 @@ namespace Sealebrities
             rubber = rope = glass = cushion = engine = engineGrey = drumBlue = drumOrange = lifeOrange = white = navRed = navGreen = navWhite = null;
             gauge = line = crate = crateDark = crateBand = strap = chuteRed = chuteWhite = heliYellow = heliRed = heliGlass = heliDark = null;
             rotorBlur = smoke = foam = spray = dust = splinter = bobberRed = bobberWhite = bucket = bucketWater = cork = rod = pilot = helmet = null;
-            cooler = coolerLid = tank = tackle = ink = null;
+            cooler = coolerLid = tank = tackle = ink = bobberGlow = beaconOrange = null;
             fish = new Material[3][];
         }
 
@@ -104,6 +104,12 @@ namespace Sealebrities
 
         // ------------------------------------------------------------------ fishing
         public static Material BobberRed => Flat(ref bobberRed, LowPoly.Hex("#E0503F"));
+        /// D.3 research rod: the bobber glows sun-yellow on a rare bite.
+        public static Material BobberGlow => Get(ref bobberGlow, () => MaterialLibrary.Emissive(LowPoly.Hex("#F2C94C"), LowPoly.Hex("#F2C94C"), 2.4f));
+        /// L.12 search beacon on a lost crate (blinks).
+        public static Material BeaconOrange => Get(ref beaconOrange, () => MaterialLibrary.Emissive(LowPoly.Hex("#EE7F2D"), new Color(1f, 0.45f, 0.1f), 3.5f));
+        /// Opaque palette colour (cached by MaterialLibrary – batches with the world).
+        public static Material Pal(string hex) => LowPoly.Mat(LowPoly.Hex(hex));
         public static Material BobberWhite => Flat(ref bobberWhite, LowPoly.White);
         public static Material Bucket => Flat(ref bucket, DrumBlueColor);
         public static Material BucketWater => Get(ref bucketWater, () => MaterialLibrary.Transparent(new Color(LowPoly.Water.r, LowPoly.Water.g, LowPoly.Water.b, 0.8f), 0.4f));

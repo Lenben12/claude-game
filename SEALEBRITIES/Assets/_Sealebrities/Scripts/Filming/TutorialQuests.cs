@@ -17,17 +17,21 @@ namespace Sealebrities
         public string title;        // short, ≤ ~6 words, may contain a key hint like "[Tab]"
         public string detail;       // one short line: how to do it
         public int progress, goal;  // counter (goal 0 = no counter)
+        public string unit;         // quest-line counter suffix (" $", " %") or null
         public QuestIcon icon;
     }
 
     /// Tutorial chain stored in the SHARED GameState.questIndex (0..8, 9 = finished):
-    ///   0 open the phone → 1 catch 5 fish with the rod → 2 list them in the Fischmarkt → 3 buy the first air tank →
-    ///   4 same-day helicopter: open the crate → 5 take the camera (hotbar) → 6 dive at the House Reef and film
-    ///   3 species while aiming → 7 back on land/boat: upload on FinTube → 8 sleep.
+    ///   0 open the phone → 1 catch 5 fish with the rod → 2 list them in the Fischmarkt → 3 buy the first air tank
+    ///   (100 $, K.1) → 4 same-day helicopter: open the crate → 5 take the camera (hotbar) → 6 dive at the House Reef
+    ///   and PHOTOGRAPH 3 species for the Sealog (K.2 – the camera records by itself, the Sealog needs a photo) →
+    ///   7 back on land/boat: upload on FinTube → 8 sleep (the bed works from 18:00, E.3).
     /// After the tutorial it publishes the next long-term goal (deeper tank, next dive site, 1,000,000 followers).
+    /// Horst (npc module) delivers each step as a spoken beat (A.3); this class keeps the short task text.
     ///
     /// Publishing: GameEvents.RaiseQuestChanged("<title>\n<detail>") on every change (first line = toast, both lines
-    /// = the "Aufgaben" app), plus the structured TutorialQuests.Current / Changed.
+    /// = the "Aufgaben" app), the structured TutorialQuests.Current / Changed, and the always-visible quest line
+    /// (L.10): QuestTracker entry of source Tutorial while the tutorial runs, source Other for the long-term goal.
     /// Co-op: progression is evaluated where Net.HasAuthority (host / offline) from shared state, so every player's
     /// fish, listings, purchases, Sealog entries and uploads count. The only local conditions (phone opened, camera
     /// taken) are reported by clients through GameManager.SetQuestIndex (the host only accepts forward moves).
@@ -42,7 +46,7 @@ namespace Sealebrities
 
         enum Step { Phone, CatchFish, ListFish, BuyTank, OpenCrate, TakeCamera, FilmSpecies, Upload, Sleep }
 
-        enum TutorialHint { Underwater, Recording, FirstClip, Count }
+        enum TutorialHint { Underwater, Recording, FirstClip, Photo, Count }
 
         /// The task shown right now (also outside the tutorial).
         public static QuestInfo Current { get; private set; }
@@ -173,12 +177,13 @@ namespace Sealebrities
 
         void OnRecordingChanged(bool rec)
         {
-            if (rec) QueueHint(TutorialHint.Recording, Loc.Tr("Tier groß und mittig halten", "Keep the animal big and centred"));
+            // K.2: under water the camera records by itself – every animal in frame counts
+            if (rec) QueueHint(TutorialHint.Recording, Loc.Tr("Kamera filmt – alles, was schwimmt", "Camera's rolling – everything counts"));
         }
 
         void OnClipRecorded(FootageClip clip)
         {
-            QueueHint(TutorialHint.FirstClip, Loc.Tr("Clip! Sicher erst an Land oder auf dem Boot.", "Clip! It's safe once you're on land or the boat."));
+            QueueHint(TutorialHint.FirstClip, Loc.Tr("Clip im Kasten – an Land sichern!", "Clip! Get it to land to keep it"));
             Poll(false);
         }
 
@@ -192,7 +197,8 @@ namespace Sealebrities
             if (hintCooldown > 0f) hintCooldown -= dt;
             if (hintCooldown <= 0f && pendingHints.Count > 0)
             {
-                GameEvents.RaiseToast(pendingHints.Dequeue());
+                // L.10: one short line per notification
+                GameEvents.RaiseNotify(NotifyKind.Info, pendingHints.Dequeue());
                 hintCooldown = HintSpacing;
             }
 
@@ -202,7 +208,11 @@ namespace Sealebrities
 
             var p = Refs.Player;
             if (p != null && !(p is UnityEngine.Object o && o == null) && p.IsUnderwater)
+            {
                 QueueHint(TutorialHint.Underwater, Loc.Tr("Luft im Blick behalten!", "Watch your air!"));
+                if (!hintShown[(int)TutorialHint.Photo] && GameManager.I.State.questIndex == (int)Step.FilmSpecies && Hands.IsHeld(HoldItem.Camera))
+                    QueueHint(TutorialHint.Photo, Loc.Tr("Sealog: ", "Sealog: ") + Key(GameAction.Aim) + Loc.Tr(" zoomen · ", " zoom · ") + Key(GameAction.Use) + Loc.Tr(" Foto", " photo"));
+            }
 
             Poll(false);
         }
@@ -243,6 +253,10 @@ namespace Sealebrities
 
             if (lastStepSeen >= 0 && lastStepSeen < Finished && step >= Finished)
                 GameEvents.RaiseBanner(Loc.Tr("Tutorial geschafft! Ziel: 1.000.000 Follower.", "Tutorial complete! Goal: 1,000,000 followers."), FinishColor);
+            // A.3 reward: Horst's lure hat (core's cosmetic rule "tutorial" unlocks hat 10 and shows the notification)
+            if (step >= Finished && Net.HasAuthority && !StoryFlags.Has(StoryKeys.TutorialDone)) StoryFlags.Set(StoryKeys.TutorialDone);
+            // a finished step: check mark + pop on the quest line (UI is local, so every machine does this)
+            if (lastStepSeen >= 0 && step > lastStepSeen && step <= Finished) QuestTracker.Complete("tutorial");
             if (step != lastStepSeen) forcePublish = true;
             lastStepSeen = step;
 
@@ -260,6 +274,7 @@ namespace Sealebrities
             info.step = step;
             info.stepCount = StepCount;
             Current = info;
+            FeedQuestLine(step, s, info);
 
             string text = string.IsNullOrEmpty(info.detail) ? info.title : info.title + "\n" + info.detail;
             if (!force && text == lastText) return;
@@ -268,15 +283,67 @@ namespace Sealebrities
             Changed?.Invoke(info);
         }
 
+        /// L.10 quest line: the tutorial step (source Tutorial, with its how-to as the second line) or, afterwards, the
+        /// long-term goal (source Goal – lowest priority: story, side quests, deals and chopper searches go first).
+        /// Only called when the task text changed (signature), never per frame.
+        static void FeedQuestLine(int step, GameState s, QuestInfo info)
+        {
+            string line = info.title;
+            string prog = null;
+            if (info.goal > 0)
+            {
+                string counter = Counter(info);
+                if (line != null && line.EndsWith(counter, StringComparison.Ordinal)) line = line.Substring(0, line.Length - counter.Length);
+                prog = info.goal >= 1000 ? Loc.Number(info.progress) + "/" + Loc.Number(info.goal) : info.progress + "/" + info.goal;
+                if (!string.IsNullOrEmpty(info.unit)) prog += info.unit;
+            }
+            if (step >= Finished)
+            {
+                QuestTracker.SetEntry(QuestSource.Tutorial, null, null, null, null);
+                Vector3? goalTarget = null;
+                if (info.icon == QuestIcon.Site)
+                {
+                    var visit = UnvisitedSite(s);
+                    if (VillageGoal(s)) goalTarget = WorldLayout.Village;
+                    else if (visit != null) goalTarget = new Vector3(visit.center.x, 0f, visit.center.z);
+                }
+                QuestTracker.SetEntry(QuestSource.Goal, "goal", line, prog, goalTarget, NotifyKind.Info, info.detail);
+                return;
+            }
+            QuestTracker.SetEntry(QuestSource.Goal, null, null, null, null);
+            Vector3? target = null;
+            switch ((Step)step)
+            {
+                case Step.CatchFish:
+                    target = WorldInfo.FishingSpot != Vector3.zero ? WorldInfo.FishingSpot : WorldLayout.FishingSpot;
+                    break;
+                case Step.OpenCrate:
+                    target = WorldInfo.HelipadPosition != Vector3.zero ? WorldInfo.HelipadPosition : WorldLayout.Helipad;
+                    break;
+                case Step.FilmSpecies:
+                {
+                    var reef = DiveSites.Get("house_reef");
+                    if (reef != null) target = new Vector3(reef.center.x, 0f, reef.center.z);
+                    break;
+                }
+                case Step.Sleep:
+                    target = WorldInfo.BedPosition != Vector3.zero ? WorldInfo.BedPosition : WorldLayout.Bed;
+                    break;
+            }
+            QuestTracker.SetEntry(QuestSource.Tutorial, "tutorial", line, prog, target, NotifyKind.Quest, info.detail);
+        }
+
         // ------------------------------------------------------------------ step conditions
         /// Conditions on SHARED state (every player's actions count). Also lets old/advanced saves skip steps.
         static bool IsDoneShared(int step, GameState s)
         {
             switch ((Step)step)
             {
-                case Step.Phone: return s.fishCaught > 0 || s.fishListedTotal > 0 || TankOwned(s) || TankOrdered(s) || DiscoveredCount(s) > 0;
-                case Step.CatchFish: return s.fishCaught >= FishGoal || TankOwned(s) || TankOrdered(s) || DiscoveredCount(s) > 0;
-                case Step.ListFish: return s.fishListedTotal >= ListGoal || s.money >= TankPrice || TankOwned(s) || TankOrdered(s) || DiscoveredCount(s) > 0;
+                // old/advanced saves: an air tank or a video means the fishing lesson is long done (a gull photo on the
+                // dock or one snorkel trip must NOT skip the fishing and market lesson)
+                case Step.Phone: return s.fishCaught > 0 || s.fishListedTotal > 0 || TankOwned(s) || TankOrdered(s) || s.videos.Count > 0;
+                case Step.CatchFish: return s.fishCaught >= FishGoal || TankOwned(s) || TankOrdered(s) || s.videos.Count > 0;
+                case Step.ListFish: return s.fishListedTotal >= ListGoal || s.money >= TankPrice || TankOwned(s) || TankOrdered(s) || s.videos.Count > 0;
                 case Step.BuyTank: return TankOwned(s) || TankOrdered(s);
                 case Step.OpenCrate: return TankOwned(s);
                 case Step.TakeCamera: return DiscoveredCount(s) > 0 || s.diveFootage.Count > 0 || s.bankedFootage.Count > 0 || s.pendingUploads.Count > 0 || s.videos.Count > 0;
@@ -334,7 +401,11 @@ namespace Sealebrities
                 {
                     q.icon = QuestIcon.Shop;
                     long price = TankPrice;
-                    q.title = Loc.Tr("Pressluftflasche kaufen", "Buy the air tank") + " (" + Loc.Money(price) + ")";
+                    // money counter on the quest line ("45/100 $") – the goal right after selling, not a silent price tag
+                    q.progress = (int)Math.Min(Math.Max(0L, s.money), price);
+                    q.goal = (int)price;
+                    q.unit = " $";
+                    q.title = Loc.Tr("Pressluftflasche kaufen", "Buy the air tank");
                     if (s.money < price)
                     {
                         string missing = Loc.Money(price - s.money);
@@ -368,13 +439,13 @@ namespace Sealebrities
                     break;
 
                 case Step.FilmSpecies:
+                    // K.2: the camera records by itself under water; the Sealog needs a PHOTO of each species
                     q.icon = QuestIcon.Dive;
                     q.progress = Mathf.Min(SpeciesGoal, DiscoveredCount(s));
                     q.goal = SpeciesGoal;
-                    q.title = Loc.Tr($"{SpeciesGoal} Tierarten filmen", $"Film {SpeciesGoal} species") + Counter(q);
-                    q.detail = Loc.Tr("Hausriff: ", "House Reef: ") + Key(GameAction.Down) + Loc.Tr(" abtauchen · ", " dive · ")
-                               + Key(GameAction.Aim) + Loc.Tr(" zielen · ", " aim · ")
-                               + Key(GameAction.Use) + Loc.Tr(" filmen", " record");
+                    q.title = Loc.Tr($"{SpeciesGoal} Arten fürs Sealog fotografieren", $"Photograph {SpeciesGoal} species for the Sealog") + Counter(q);
+                    q.detail = Key(GameAction.Down) + Loc.Tr(" runter · ", " down · ")
+                               + Key(GameAction.Aim) + "+" + Key(GameAction.Use) + Loc.Tr(" Foto", " photo");
                     if (EnvState.Night01 > 0.3f)
                         q.detail += " · " + SlotKey(HoldItem.Flashlight) + Loc.Tr(" Lampe", " lamp");
                     break;
@@ -385,7 +456,7 @@ namespace Sealebrities
                     if (s.bankedFootage.Count > 0)
                         q.detail = Loc.Tr("Handy ", "Phone ") + Key(GameAction.Phone) + " → FinTube";
                     else if (s.diveFootage.Count > 0)
-                        q.detail = Loc.Tr("Zurück an Land oder aufs Boot – dann sind die Clips sicher.", "Back to land or the boat – then your clips are safe.");
+                        q.detail = Loc.Tr("An Land/Boot: Clips sichern", "Land/boat: keep your clips");
                     else
                         q.detail = Loc.Tr("Erst ein paar Clips filmen.", "Film a few clips first.");
                     break;
@@ -393,13 +464,18 @@ namespace Sealebrities
                 case Step.Sleep:
                     q.icon = QuestIcon.Sleep;
                     q.title = Loc.Tr("In der Hütte schlafen", "Sleep in the hut");
-                    q.detail = Loc.Tr("Über Nacht kommen die Aufrufe.", "The views come in overnight.");
+                    // E.3: the bed works from 18:00 – until then grill or explore
+                    q.detail = GameManager.I != null && !GameManager.I.CanSleepNow
+                        ? Loc.Tr("Ab 18:00 – bis dahin grillen oder erkunden.", "From 6 pm – grill or explore until then.")
+                        : Loc.Tr("Über Nacht kommen die Aufrufe.", "The views come in overnight.");
                     break;
             }
             return q;
         }
 
-        /// Long-term goal after the tutorial: deeper tank for an unlocked site → next dive site → 1,000,000 followers.
+        /// Long-term goal after the tutorial: visit the village → first livestream → deeper tank for an unlocked site →
+        /// next dive site → 1,000,000 followers. A locked goal shows its REQUIREMENT as the quest-line counter
+        /// („Kelpwald: Hausriff-Seite 45/60 %“, „Wrack: Follower 1.200/2.500“) – „Neuer Tauchplatz“ only once it is met.
         static QuestInfo Goal(GameState s)
         {
             var q = new QuestInfo { tutorial = false };
@@ -411,17 +487,45 @@ namespace Sealebrities
                 return q;
             }
 
+            // most side quests live in the village (needVillage) – point there once after the tutorial
+            if (VillageGoal(s))
+            {
+                q.icon = QuestIcon.Site;
+                q.title = Loc.Tr("Dorf Altriff besuchen", "Visit Oldreef village");
+                q.detail = Loc.Tr("Im Süden – dort gibt es Aufgaben.", "In the south – people need help.");
+                return q;
+            }
+
+            // Q21: going live earns money – make the first stream a goal as soon as it is possible
+            if (s.followers >= Progression.LivestreamFollowers && (s.streams == null || s.streams.Count == 0))
+            {
+                q.icon = QuestIcon.Star;
+                q.title = Loc.Tr("Erster Livestream: Boot → KRILL.tv", "First livestream: boat → KRILL.tv");
+                q.detail = Loc.Tr("Zuschauer spenden echtes Geld.", "Viewers donate real money.");
+                return q;
+            }
+
             NeededTank(s, out var site, out var tank);
             if (tank != null)
             {
                 q.icon = QuestIcon.Gear;
-                q.title = Loc.Tr("Tiefere Flasche: ", "Deeper tank: ") + tank.Name;
                 if (Shop.IsOrdered(tank))
+                {
+                    q.title = Loc.Tr("Tiefere Flasche: ", "Deeper tank: ") + tank.Name;
                     q.detail = Loc.Tr("Unterwegs – Paket am Landeplatz öffnen.", "On its way – open the crate on the helipad.");
+                }
                 else if (s.followers < tank.followersNeeded)
-                    q.detail = Loc.Tr($"{site.Name} · ab {Loc.Number(tank.followersNeeded)} Followern", $"{site.Name} · from {Loc.Number(tank.followersNeeded)} followers");
+                {
+                    q.title = tank.Name + Loc.Tr(": Follower", ": followers");
+                    q.progress = (int)Math.Min(s.followers, tank.followersNeeded);
+                    q.goal = (int)Math.Min(tank.followersNeeded, int.MaxValue);
+                    q.detail = Loc.Tr($"Für {site.Name}", $"For {site.Name}");
+                }
                 else
+                {
+                    q.title = Loc.Tr("Tiefere Flasche: ", "Deeper tank: ") + tank.Name;
                     q.detail = Loc.Tr($"{site.Name} · Shop · {Loc.Money(tank.price)}", $"{site.Name} · Shop · {Loc.Money(tank.price)}");
+                }
                 return q;
             }
 
@@ -440,10 +544,26 @@ namespace Sealebrities
             if (next != null)
             {
                 q.icon = QuestIcon.Site;
-                q.title = Loc.Tr("Neuer Tauchplatz: ", "New dive site: ") + next.Name;
-                q.detail = Progression.SiteRequirementsMet(next, out string reason) || string.IsNullOrEmpty(reason)
-                    ? Loc.Tr("Gleich freigeschaltet!", "Unlocking now!")
-                    : reason;
+                if (Progression.SiteRequirementsMet(next, out string reason) || string.IsNullOrEmpty(reason))
+                {
+                    q.title = Loc.Tr("Neuer Tauchplatz: ", "New dive site: ") + next.Name;
+                    q.detail = Loc.Tr("Gleich freigeschaltet!", "Unlocking now!");
+                }
+                else if (next.prevSiteId != null && Journal.SiteCompletion(next.prevSiteId) < next.prevCompletionNeeded)
+                {
+                    q.title = next.Name + ": " + PageName(next.prevSiteId) + Loc.Tr("-Seite", " page");
+                    q.progress = Mathf.RoundToInt(Journal.SiteCompletion(next.prevSiteId) * 100f);
+                    q.goal = Mathf.RoundToInt(next.prevCompletionNeeded * 100f);
+                    q.unit = " %";
+                    q.detail = reason;
+                }
+                else
+                {
+                    q.title = next.Name + Loc.Tr(": Follower", ": followers");
+                    q.progress = (int)Math.Min(s.followers, next.followersNeeded);
+                    q.goal = (int)Math.Min(next.followersNeeded, int.MaxValue);
+                    q.detail = reason;
+                }
                 return q;
             }
 
@@ -453,6 +573,17 @@ namespace Sealebrities
             return q;
         }
 
+        /// After the tutorial, until somebody walked into the village (its side-quest givers).
+        static bool VillageGoal(GameState s) => StoryFlags.Has(StoryKeys.TutorialDone) && !StoryFlags.Has(StoryKeys.VillageVisited);
+
+        /// Short Sealog page name of a dive site („Hausriff“, „Wrack“) – falls back to the site name.
+        static string PageName(string siteId)
+        {
+            int i = SealogPages.IndexOf(siteId);
+            if (i >= 0) return SealogPages.All[i].Name;
+            var d = DiveSites.Get(siteId);
+            return d != null ? d.Name : siteId;
+        }
         /// The deepest unlocked site the best owned tank cannot reach, and the cheapest tank that can (null when fine).
         static void NeededTank(GameState s, out DiveSite site, out GearItem tank)
         {
@@ -497,7 +628,7 @@ namespace Sealebrities
         {
             var sites = DiveSites.All;
             for (int i = 0; i < sites.Count; i++)
-                if (!s.unlockedSites.Contains(sites[i].id)) return sites[i];
+                if (!sites[i].IsStorySite && !s.unlockedSites.Contains(sites[i].id)) return sites[i];   // the Fog Isle stays secret (K.8)
             return null;
         }
 
@@ -535,6 +666,8 @@ namespace Sealebrities
                 if (step >= Finished)
                 {
                     h = h * 31 + (s.finaleReached ? 1 : 0);
+                    h = h * 31 + (VillageGoal(s) ? 1 : 0) + (s.streams != null && s.streams.Count > 0 ? 2 : 0)
+                        + (s.followers >= Progression.LivestreamFollowers ? 4 : 0);
                     NeededTankSig(s, ref h);
                     var visit = UnvisitedSite(s);
                     h = h * 31 + (visit != null ? visit.id.GetHashCode() : 7);
@@ -544,6 +677,9 @@ namespace Sealebrities
                         h = h * 31 + next.id.GetHashCode();
                         bool prevOk = next.prevSiteId == null || Journal.SiteCompletion(next.prevSiteId) >= next.prevCompletionNeeded;
                         h = h * 31 + (prevOk ? 1 : 0) + (s.followers >= next.followersNeeded ? 2 : 0);
+                        // the requirement counter on the quest line: page percent and followers (in 10s, clamped)
+                        if (next.prevSiteId != null) h = h * 31 + Mathf.RoundToInt(Journal.SiteCompletion(next.prevSiteId) * 100f);
+                        h = h * 31 + (int)(Math.Min(s.followers, next.followersNeeded) / 10);
                     }
                     return h;
                 }
@@ -578,6 +714,9 @@ namespace Sealebrities
                     case Step.Upload:
                         h = h * 31 + (s.bankedFootage.Count > 0 ? 1 : 0) + (s.diveFootage.Count > 0 ? 2 : 0);
                         break;
+                    case Step.Sleep:
+                        h = h * 31 + (GameManager.I != null && GameManager.I.CanSleepNow ? 1 : 0);
+                        break;
                 }
                 return h;
             }
@@ -591,6 +730,7 @@ namespace Sealebrities
                 if (tank == null) { h = h * 31 + 1; return; }
                 h = h * 31 + tank.id.GetHashCode();
                 h = h * 31 + (Shop.IsOrdered(tank) ? 1 : 0) + (s.followers >= tank.followersNeeded ? 2 : 0);
+                h = h * 31 + (int)(Math.Min(s.followers, tank.followersNeeded) / 10);
             }
         }
 
@@ -602,7 +742,7 @@ namespace Sealebrities
             get
             {
                 var tank = GearDatabase.Get(TankId);
-                return tank != null ? tank.price : 130;
+                return tank != null ? tank.price : 100;   // K.1: the first tank costs 100 $
             }
         }
 
@@ -615,11 +755,18 @@ namespace Sealebrities
             return false;
         }
 
+        /// Discovered MARINE species (a gull or goat photo on land does not count as the reef dive lesson).
         static int DiscoveredCount(GameState s)
         {
             int n = 0;
             var j = s.journal;
-            for (int i = 0; i < j.Count; i++) if (j[i] != null && j[i].discovered) n++;
+            for (int i = 0; i < j.Count; i++)
+            {
+                if (j[i] == null || !j[i].discovered) continue;
+                var sp = SpeciesDatabase.Get(j[i].speciesId);
+                if (sp != null && sp.land) continue;
+                n++;
+            }
             return n;
         }
     }

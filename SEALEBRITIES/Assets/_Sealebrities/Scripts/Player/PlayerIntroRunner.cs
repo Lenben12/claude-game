@@ -115,11 +115,12 @@ namespace Sealebrities
                 case 1:
                 {
                     // swoop along the beach toward the dock and the boat
-                    Vector3 p0 = new Vector3(160f, 0f, -62f), p1 = new Vector3(184f, 0f, -26f), p2 = new Vector3(199f, 0f, -5f);
+                    // L.5: the island at 0.62 – the fly-in over the hut and the dock (design table, verified points)
+                    Vector3 p0 = new Vector3(99f, 0f, -38.4f), p1 = new Vector3(114f, 0f, -16f), p2 = new Vector3(123f, 0f, -3f);
                     a0 = new Vector3(p0.x, Above(p0, 6f), p0.z);
                     a1 = new Vector3(p1.x, Above(p1, 3.6f), p1.z);
                     a2 = new Vector3(p2.x, Above(p2, 2.6f), p2.z);
-                    look0 = new Vector3(150f, 3f, 12f);
+                    look0 = new Vector3(93f, 3f, 7.4f);
                     look1 = WorldLayout.BoatSpawn + Vector3.up * 1.5f;
                     fov0 = 64f; fov1 = 58f;
                     roll0 = 7f; roll1 = -3f;
@@ -129,7 +130,7 @@ namespace Sealebrities
                 {
                     // plunge into the house reef
                     var site = DiveSites.Get("house_reef");
-                    Vector3 r = site != null ? site.center : new Vector3(260f, 0f, 60f);
+                    Vector3 r = site != null ? site.center : new Vector3(188f, 0f, 38f);   // house reef at 0.62 (L.5)
                     Vector3 p0 = r + new Vector3(-30f, 0f, -22f), p1 = r + new Vector3(-17f, 0f, -11f), p2 = r + new Vector3(5f, 0f, 6f);
                     a0 = new Vector3(p0.x, Waves.SeaLevel + 4.2f, p0.z);
                     a1 = new Vector3(p1.x, Waves.SeaLevel - 3.5f, p1.z);
@@ -256,6 +257,13 @@ namespace Sealebrities
                 var sw = Make(i % 4 == 3 ? "parrotfish" : "blue_tang", i % 4 == 3 ? 38f : 24f, off, 1f, (float)rng.NextDouble() * 6f);
                 if (sw.t != null) swimmers.Add(sw);
             }
+            // Q43: the 40-fish mixed school (blue tang, clownfish, parrotfish) circling the camera under water
+            try
+            {
+                showcase = FaunaShowcase.IntroSchool(transform, camT);
+                if (showcase != null) showcase.followOffset = new Vector3(0f, -0.4f, 3.2f);
+            }
+            catch (Exception e) { Debug.LogWarning("Intro: showcase school failed: " + e.Message); showcase = null; }
             var turtle = Make("green_turtle", 110f, new Vector3(-2f, 1.8f, 3f), 0.5f, 0f);
             if (turtle.t != null) { turtle.wiggle = 0.3f; swimmers.Add(turtle); }
             var clown = Make("clownfish", 11f, new Vector3(1.2f, -0.6f, -1.5f), 0.2f, 1f);
@@ -319,8 +327,12 @@ namespace Sealebrities
             }
         }
 
+        FaunaShowcase showcase;
+
         void ClearSwimmers()
         {
+            if (showcase != null) showcase.Dispose();
+            showcase = null;
             for (int i = 0; i < spawned.Count; i++) if (spawned[i] != null) Destroy(spawned[i]);
             spawned.Clear();
             swimmers.Clear();

@@ -17,6 +17,8 @@ namespace Sealebrities
         public static NetCommand ScopeCmd { get; private set; }
         /// Client: sequence number of the last command sent.
         public static int LastSentSeq { get; private set; }
+        /// Host: raised after a client's command ran (fromId, command, args) – e.g. NetGameSync saves guest records.
+        public static event Action<int, NetCommand, string[]> Executed;
 
         static int nextSeq;
         static bool installed;
@@ -27,6 +29,7 @@ namespace Sealebrities
         {
             ScopeFrom = -1; ScopeCmd = NetCommand.Custom; LastSentSeq = 0; nextSeq = 0; installed = false;
             lastExecuted.Clear();
+            Executed = null;
         }
 
         internal static void Install()
@@ -117,7 +120,19 @@ namespace Sealebrities
                 ScopeCmd = prevCmd;
             }
             NetDiagnostics.CommandsExecuted++;
-            if (!ok) Debug.Log("[Net] command " + cmd + " from player " + from + " was not applied (" + (args.Length > 0 ? args[0] : "") + ")");
+            if (!ok) Debug.Log("[Net] command " + cmd + " from player " + from + " was not applied (" + (args.Length > 0 ? SafeArg(args[0]) : "") + ")");
+            else if (from != Net.LocalId)
+            {
+                try { Executed?.Invoke(from, cmd, args); }
+                catch (Exception e) { Debug.LogException(e); }
+            }
+        }
+
+        /// Command keys are short identifiers; JSON payloads (player records, clip batches) never go into the log.
+        static string SafeArg(string a)
+        {
+            if (string.IsNullOrEmpty(a)) return "";
+            return a.Length > 24 || a.IndexOf('{') >= 0 ? a.Substring(0, Mathf.Min(a.Length, 12)) + "…" : a;
         }
 
         // ------------------------------------------------------------------ acks inside the snapshot header

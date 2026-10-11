@@ -12,8 +12,11 @@ namespace Sealebrities
     [DefaultExecutionOrder(-50)]
     public class WorldDayNight : MonoBehaviour
     {
-        /// Main menu time of day: golden hour (sun ≈ 8°, art bible §1.14).
-        public const float MenuTime = 0.717f;
+        /// Main menu time of day: low golden-hour sun (≈ 6.6°, 17:23; Q41 "warmer menu" – the Testversion-3 menu at 8°
+        /// read cool). The warm menu look itself (peach horizon, warmer sun and grading) is MenuWarm below + FX.
+        public const float MenuTime = 0.724f;
+        /// Q41 menu look: horizon away from the sun turns golden peach (▣ #E7B98A), the sun a little more orange.
+        static readonly Color MenuSun = Hex("#FFB680");
         public const float Sunrise = 0.235f, Sunset = 0.805f;
         public const float MaxElevation = 58f;
         const float MaxNightDepth = 50f;
@@ -35,6 +38,7 @@ namespace Sealebrities
         Vector3 moonDir = Vector3.up, sunDirection = Vector3.up;
         bool moonMain, subscribed;
         float sunAzimuth;
+        float menuWarm = 1f;
 
         /// Time of day currently shown (0..1).
         public float TimeOfDay { get; private set; }
@@ -110,8 +114,10 @@ namespace Sealebrities
         static readonly Color WaterSky = Hex("#8EC2D8");
         static readonly Color WaterEquator = Hex("#6AA8C4");
         static readonly Color WaterGround = Hex("#46829A");
-        static readonly float[] UwAmbKeys = { 0f, 3f, 10f, 18f, 25f, 40f, 55f, 80f, 120f };
-        static readonly float[] UwAmbScale = { 1f, 1f, 0.85f, 0.70f, 0.55f, 0.35f, 0.18f, 0.06f, 0.02f };
+        // (round 2, Q10 residual light: the trench and the wreck read pitch black, even the hands – the scale never drops
+        // below ×0.10 at 80 m, ×0.07 at 120 m and ×0.05 at 160 m of the 0–3 m stop, so seabed and silhouettes stay readable)
+        static readonly float[] UwAmbKeys = { 0f, 3f, 10f, 18f, 25f, 40f, 55f, 80f, 120f, 160f };
+        static readonly float[] UwAmbScale = { 1f, 1f, 0.85f, 0.70f, 0.55f, 0.36f, 0.21f, 0.10f, 0.07f, 0.05f };
 
         public void Init(Light sun, Light moon, Material sky, WorldSkyDome dome, ReflectionProbe probe,
                          MeshRenderer stars, Material starMat, MeshRenderer moonDisc, Material moonMat, WorldClouds clouds)
@@ -212,7 +218,10 @@ namespace Sealebrities
         void Apply()
         {
             if (sun == null) return;
-            float t = GameManager.I != null && GameManager.I.InGame ? GameManager.I.State.timeOfDay : MenuTime;
+            bool inGame = GameManager.I != null && GameManager.I.InGame;
+            float t = inGame ? GameManager.I.State.timeOfDay : MenuTime;
+            // Q41: the menu gets an extra warm golden look (fades in/out over ~1.5 s when a game starts / ends)
+            menuWarm = Mathf.MoveTowards(menuWarm, inGame ? 0f : 1f, Mathf.Min(Time.unscaledDeltaTime, 0.1f) / 1.5f);
             t -= Mathf.Floor(t);
             TimeOfDay = t;
             SunPosition(t, out float elev, out float az);
@@ -254,6 +263,8 @@ namespace Sealebrities
 
             // ---- sun: strong, crisp shadows by day (the shadow colour comes from the cool ambient)
             Color sunCol = Eval(SunKeys, SunColors, elev);
+            float warm = menuWarm * (1f - SmoothStep(12f, 24f, elev)) * SmoothStep(-3f, 1f, elev);
+            if (warm > 0f) sunCol = Color.Lerp(sunCol, MenuSun, 0.45f * warm);
             sun.color = new Color(sunCol.r * att.r, sunCol.g * att.g, sunCol.b * att.b, 1f);
             // a little less sun under water keeps the shallow sand out of the ACES shoulder (warm sand, not milky)
             sun.intensity = Mathf.Max(0.002f, sunI * Mathf.Lerp(1f, 0.82f, uw));
@@ -274,6 +285,12 @@ namespace Sealebrities
 
             // ---- ambient (trilight): darker and bluer above water, bright teal in the shallows
             Color aSky = Eval(AmbKeys, AmbSky, elev), aEq = Eval(AmbKeys, AmbEquator, elev), aGr = Eval(AmbKeys, AmbGround, elev);
+            if (warm > 0f)
+            {
+                // warm bounce light from the golden horizon, the sky part stays blue-violet (violet shadows)
+                aEq = Color.Lerp(aEq, new Color(aEq.r * 1.12f, aEq.g * 0.98f, aEq.b * 0.86f, 1f), warm);
+                aGr = Color.Lerp(aGr, new Color(aGr.r * 1.1f, aGr.g * 0.96f, aGr.b * 0.9f, 1f), warm);
+            }
             if (uw > 0f)
             {
                 float day = Mathf.Lerp(0.07f, 1f, sun01) * Eval(UwAmbKeys, UwAmbScale, depth);
@@ -291,7 +308,9 @@ namespace Sealebrities
             // ---- sky dome colours, fog colour (= horizon away from the sun × 0.94, pre-compensated for the grade)
             float domeVis = FogVisibility(WorldSkyDome.Radius);
             Color fogLin = RenderSettings.fogColor.linear;
-            if (dome != null) dome.Update(sunDir, elev, az, domeVis, fogLin, false, uw < 0.5f);
+            // K.8: inside the Fog Isle's fog bank the sky disappears in the fog (a light haze once the map is known)
+            float haze = FXFogBank.Thick01 * (FXFogBank.Map ? 0.45f : 0.92f);
+            if (dome != null) dome.Update(sunDir, elev, az, domeVis, fogLin, false, uw < 0.5f, warm, haze);
 
             // ---- environment facts for FX / filming / fauna
             EnvState.SkyFogColor = dome != null ? dome.FogColor : new Color(0.52f, 0.70f, 0.86f);

@@ -18,17 +18,19 @@ namespace Sealebrities
     /// the client joins 127.0.0.1. Both sides then run the same scripted steps, synchronized through their own test
     /// messages on the co-op connection (NetBus type 200): avatars + nameplates, fishing + fish market, shop + helicopter
     /// crate, boat (driver, deck, seat), filming a host creature as a proxy, banking + upload, sleeping, collectibles,
-    /// voice (synthetic tone instead of the microphone), FPS + bandwidth, disconnect, drop-in rejoin and the host quitting.
+    /// voice (synthetic tone instead of the microphone), FPS + bandwidth, the round-2/3 co-op features (Round2 / Round3
+    /// files), disconnect, drop-in rejoin, the host reloading its save and the host quitting.
     /// Every step is timed, asserted and screenshotted; the results go to <folder>/mp_host_report.md + mp_host.json
-    /// (mp_client_… on the client), written after every step. Saving is disabled on both sides; the host backs up and
-    /// restores settings.json and the save.
-    public sealed class AutoPlaytestMP : MonoBehaviour
+    /// (mp_client_… on the client), written after every step. Neither window writes the save or settings.json (the
+    /// player's own game may be running at the same time); the host only reports when another program changed them.
+    public sealed partial class AutoPlaytestMP : MonoBehaviour
     {
         const byte MsgType = 200;          // NetBus range 160+ is free
         const float BootTimeout = 900f;
         const float JoinTimeout = 180f;
-        const float TimeBudget = 22f * 60f;
+        const float TimeBudget = 40f * 60f;
         const string HostIp = "127.0.0.1";
+        const string GuestVideoTitle = "Bens Schildkröte – Koop-Test";
 
         // ------------------------------------------------------------------ report data
         [Serializable]
@@ -138,6 +140,7 @@ namespace Sealebrities
             var args = Environment.GetCommandLineArgs();
             if (!ParseArgs(args, out bool host, out string dir, out int p)) return;
             GameManager.SavingDisabled = true;     // never touch the player's save (both windows)
+            Settings.WritesDisabled = true;        // nor the shared settings.json (achievements, look, menu crew of the test)
             GameManager.AutomatedRun = true;
             Application.runInBackground = true;    // both windows keep running while the other one has the focus
             var go = new GameObject("SB_AutoPlaytestMP");
@@ -187,6 +190,7 @@ namespace Sealebrities
             Net.PlayerJoined += OnPlayerJoined;
             Net.SessionEnded += OnSessionEnded;
             Gallery.Added += OnPhotoAdded;
+            SubscribeRound3();
         }
 
         void OnPhotoAdded(PhotoEntry e) { if (e != null && !string.IsNullOrEmpty(e.file)) testPhotos.Add(e.file); }
@@ -218,6 +222,7 @@ namespace Sealebrities
             Net.PlayerJoined -= OnPlayerJoined;
             Net.SessionEnded -= OnSessionEnded;
             Gallery.Added -= OnPhotoAdded;
+            UnsubscribeRound3();
             NetBus.Unregister(MsgType);
         }
 
@@ -425,14 +430,21 @@ namespace Sealebrities
             yield return RunStep(4, "04 Shop: client buys → host delivery → chopper + crate on both → client opens → owned on both", StepShop, 330f);
             yield return RunStep(5, "05 Boat: host drives, client on deck sees it move; seat refuses the client; client drives", StepBoat, 260f);
             yield return RunStep(6, "06 Filming: client films a host creature (proxy) at the house reef → host journal + popups", StepFilming, 200f);
-            yield return RunStep(7, "07 Upload: client banks footage + uploads → upload on host", StepUpload, 150f);
-            yield return RunStep(8, "08 Sleep: client sleeps → both wake up next morning, video resolved on both", StepSleep, 150f);
+            yield return RunStep(7, "07 Upload: client banks footage + uploads with its own title → upload on host (L.4)", StepUpload, 150f);
+            yield return RunStep(8, "08 Sleep vote (L.9): each lies in its own bed with E – HUD 'Schlafen 1/2' does not skip, getting up drops the vote, 2/2 → both wake next morning", StepSleep, 180f);
             yield return RunStep(9, "09 Collectibles: pickups sync both ways", StepCollectibles, 200f);
             yield return RunStep(10, "10 Voice: synthetic tone both ways (frames arrive and play)", StepVoice, 150f);
             yield return RunStep(11, "11 Performance + bandwidth", StepPerf, 120f);
-            yield return RunStep(12, "12 Client disconnects → avatar removed on host", StepDisconnect, 120f);
-            yield return RunStep(13, "13 Drop-in rejoin → client gets the current state", StepRejoin, 200f);
-            yield return RunStep(14, "14 Host quits → client back in the menu with a message", StepHostQuit, 120f, true);
+            yield return RunStep(12, "11b Co-op round 2: achievement for everyone (F.6), look sync (1c), rescue tow (F.1), 10 m voice under water (F.5)", StepCoopRound2, 220f);
+            yield return RunStep(13, "11c Open world for both: island animals, sea animals around the guest = the host's animals, new species as proxies", StepOpenWorld, 300f);
+            yield return RunStep(14, "11d Livestream in co-op: the guest goes live, viewers + chat on both, dare for the guest, end card on both", StepLivestream, 200f);
+            yield return RunStep(15, "11e NPC dialogue heard by both + side quest accepted by the guest, progress shared (L.7, L.10)", StepNpcQuest, 300f);
+            yield return RunStep(16, "11f Food: shared pantry, the eater's own buff, grill takes the shared fish (E.1, E.2)", StepFood, 160f);
+            yield return RunStep(17, "11g Chopper mishap: crate at the wrong place on both, the guest finds + opens it (L.12)", StepMishap, 330f);
+            yield return RunStep(18, "12 Client disconnects → avatar removed on host (guest record kept, F.3)", StepDisconnect, 120f);
+            yield return RunStep(19, "13 Drop-in rejoin → client gets the current state + its own hotbar back (F.3)", StepRejoin, 200f);
+            yield return RunStep(20, "13b Host saves, goes to the menu and continues → the guest rejoins with its own hotbar + stats (F.3)", StepHostReload, 300f);
+            yield return RunStep(21, "14 Host quits → client back in the menu with a message", StepHostQuit, 120f, true);
 
             Finish(report.failed == 0 ? 0 : 1);
         }
@@ -1114,10 +1126,24 @@ namespace Sealebrities
                 bool shot = false;
                 var done = new HashSet<string>();
                 var track = new StringBuilder();
+                var jumps = new StringBuilder();
+                int jumpCount = 0, airFrames = 0, frames = 0;
+                Vector3 lastLocal = local0;
                 float nextSample = 0f;
                 while (t < 8f)
                 {
                     t += Time.unscaledDeltaTime;
+                    frames++;
+                    Vector3 lpf = boat.transform.InverseTransformPoint(pc.Root.position);
+                    if (!pc.Grounded) airFrames++;
+                    if ((lpf - lastLocal).sqrMagnitude > 0.09f && jumpCount < 6)
+                    {
+                        jumpCount++;
+                        jumps.Append(F(t, "0.00")).Append("s ").Append(V(lastLocal)).Append("→").Append(V(lpf)).Append(" dt ")
+                             .Append(F(Time.unscaledDeltaTime, "0.000")).Append(pc.Grounded ? " grounded" : " AIR").Append(" boat v ")
+                             .Append(F(BoatTelemetry.Valid ? BoatTelemetry.Speed : -1f, "0.0")).Append("; ");
+                    }
+                    lastLocal = lpf;
                     if (t >= nextSample)
                     {
                         nextSample += 1f;
@@ -1147,6 +1173,7 @@ namespace Sealebrities
                 Check(compared > 0 && maxErr < 3f, "client boat pose follows the host (" + compared + " samples, max " + F(maxErr, "0.00") + " m apart incl. 100 ms interpolation + message delay)");
                 Check(boat.PlayerAboard && !pc.IsInWater && drift < 1.0f, "client carried by the deck (drift " + F(drift, "0.00") + " m, aboard " + boat.PlayerAboard + ")");
                 Info("boat-local feet while the host drives: start " + V(local0) + "; " + track);
+                Info("deck slips (> 0.3 m boat-local in one frame): " + (jumpCount > 0 ? jumps.ToString() : "none") + " – not grounded in " + airFrames + "/" + frames + " frames");
                 yield return Sync("S05d", 40f);
                 // the seat refuses the second player (same standing spot the host used to take the wheel)
                 Vector3 sl = boat.transform.InverseTransformPoint(seat.position);
@@ -1154,7 +1181,8 @@ namespace Sealebrities
                 yield return Wait(0.8f);
                 BoatDiag(boat, seat, "client next to the occupied seat", null);
                 float seatDist = FlatDist(pc.Root.position, seat.position);
-                Check(seatDist < 1.5f && boat.PlayerAboard, "placed 1 m behind the seat on the still moving deck, the client lands there (" + F(seatDist, "0.00") + " m from the seat)");
+                // the wheelhouse is narrow: the capsule settles at the first free spot behind the driver's chair (~1.8 m)
+                Check(seatDist < 2.1f && boat.PlayerAboard && !pc.IsInWater, "placed 1 m behind the seat on the still moving deck, the client stays in the wheelhouse (" + F(seatDist, "0.00") + " m from the seat)");
                 string prompt = helms.Length > 0 ? helms[0].GetPrompt() : null;
                 Check(!boat.CanEnterHelm() && boat.HelmOccupied, "seat refuses: CanEnterHelm " + boat.CanEnterHelm() + ", occupied " + boat.HelmOccupied + ", prompt '" + prompt + "'");
                 yield return AimAt(() => seat.position + boat.transform.up * 0.5f);
@@ -1346,6 +1374,9 @@ namespace Sealebrities
                 yield return WaitVal("uploaded", 40f);
                 yield return WaitUntil(() => S.pendingUploads.Count >= 1, 8f);
                 Check(S.pendingUploads.Count == 1 && S.bankedFootage.Count == 0, "client's FinTube upload is in the host state ('" + (S.pendingUploads.Count > 0 ? S.pendingUploads[0].title : "-") + "'), banked pool emptied");
+                var hu = S.pendingUploads.Count > 0 ? S.pendingUploads[0] : null;
+                Check(hu != null && hu.title == GuestVideoTitle && hu.thumbSpecies != null && hu.thumbSpecies.Length >= 1,
+                      "the guest's own title + collage species reached the host (" + (hu != null && hu.thumbSpecies != null ? string.Join(",", hu.thumbSpecies) : "-") + ")");
                 SendVal("upok", S.pendingUploads.Count.ToString(Inv));
                 yield return Sync("S07b", 40f);
             }
@@ -1368,8 +1399,9 @@ namespace Sealebrities
                 UIModule.DebugOpenPhone("fintube");
                 yield return Wait(1.2f);
                 yield return Shot("client_S07_fintube");
-                var up = Progression.CreateUpload(TitleStyle.Honest);
-                Check(up != null, "client uploaded '" + (up != null ? up.title : "-") + "'");
+                // L.4 in co-op: the guest types its own video title
+                var up = Progression.CreateUpload(TitleStyle.Honest, GuestVideoTitle, null, null, true, 0.5f);
+                Check(up != null && up.title == GuestVideoTitle, "client uploaded with its own title '" + (up != null ? up.title : "-") + "'");
                 SendVal("uploaded", up != null ? up.title : "");
                 UIModule.DebugOpenPhone("close");
                 yield return WaitVal("upok", 30f);
@@ -1388,10 +1420,66 @@ namespace Sealebrities
             int day0 = S.day;
             if (isHost)
             {
+                // E.3: beds from 18:00 – the clock is the host's
+                S.timeOfDay = 0.77f;
+                yield return Wait(1.5f);
+                yield return Sync("S08t", 40f);
+                // (1) only the client lies down: "Schlafen 1/2" on both, the night is NOT skipped
+                yield return WaitUntil(() => SleepVote.Lying == 1 && SleepVote.Total == 2, 20f);
+                Check(SleepVote.Lying == 1 && SleepVote.Total == 2, "client in bed → host shows 'Schlafen " + SleepVote.Lying + "/" + SleepVote.Total + "'");
+                yield return Wait(0.5f);
+                string hud1 = SleepCounterText();
+                Check(hud1 == Loc.Tr("Schlafen ", "Sleep ") + "1/2", "host HUD under the quest line: '" + hud1 + "'");
+                var pa = PeerAvatar();
+                Check(pa != null && pa.Motion == MotionState.Lie, "the host sees the client's diver lying (" + (pa != null ? pa.Motion.ToString() : "-") + ")");
+                if (pa != null) { yield return AimAt(pa.HeadPosition); yield return Shot("host_S08_client_lying_1of2"); }
+                yield return Wait(3f);
+                Check(S.day == day0, "1 of 2 in bed: the night is not skipped – both must lie in a bed (L.9)");
+                SendVal("host1of2", SleepVote.Lying + "/" + SleepVote.Total);
+                yield return WaitUntil(() => SleepVote.Lying == 0, 20f);
+                Check(SleepVote.Lying == 0, "client got up → the vote dropped to 0/2");
+                yield return Wait(0.5f);
+                Check(SleepCounterText() == "(hidden)", "the counter hides at 0/2 ('" + SleepCounterText() + "')");
+                yield return Sync("S08u", 40f);
+                // (2) the host lies down in ANOTHER sleep spot with E, then the client → 2/2 → the host skips the night once
                 int sl0 = sleepEvents;
-                yield return WaitUntil(() => S.day > day0, 40f);
-                Check(S.day == day0 + 1, "the client's sleep moved the HOST to day " + S.day + " (" + gm.ClockString + ")");
+                int clientSpot = Val("clientspot") != null ? int.Parse(Val("clientspot"), Inv) : -1;
+                var hb = OtherBed(clientSpot);
+                Check(hb != null, "a second sleep spot for the host (" + (hb != null ? (hb.kind == SleepSpotInfo.Hammock ? "hammock" : hb.kind == SleepSpotInfo.Bunk ? "sofa bunk" : "bed") + " #" + hb.spotIndex : "none") + ", client in #" + clientSpot + ")");
+                if (hb != null)
+                {
+                    var spot = hb.spotIndex >= 0 && hb.spotIndex < PropInfo.SleepSpots.Count ? PropInfo.SleepSpots[hb.spotIndex] : default;
+                    var hc = hb.GetComponentInChildren<Collider>();
+                    Vector3 aim = hc != null ? hc.bounds.center : hb.transform.position + Vector3.up * 0.4f;
+                    Vector3 feet = hb.spotIndex >= 0 && spot.stand != Vector3.zero ? spot.stand : SnapDown(aim + Vector3.right * 1.2f + Vector3.up);
+                    yield return Stand(feet, YawTo(feet, aim));
+                    yield return AimAt(aim);
+                    Info("prompt at the host's sleep spot: '" + InteractionPrompt.Text + "'");
+                    GameInput.SimTap(GameAction.Interact);
+                    yield return WaitUntil(() => SleepVote.LocalLying, 3f);
+                    if (!SleepVote.LocalLying && hb.CanInteract())
+                    {
+                        Info("E did not reach the sleep spot – using it directly");
+                        hb.Interact();
+                    }
+                }
+                if (!SleepVote.LocalLying) { Info("fallback: SleepVote.SetLying(true)"); SleepVote.SetLying(true); }
+                yield return Frames(3);
+                Check(SleepVote.LocalLying && pc.IsLyingDown, "host lies down with E (camera on the sleep spot, " + SleepVote.Lying + "/" + SleepVote.Total + ")");
+                SendVal("hostlying", SleepVote.Lying + "/" + SleepVote.Total);
+                string hud2 = null;
+                float tw2 = 0f, seen2 = -1f;
+                while (S.day == day0 && tw2 < 45f)
+                {
+                    if (SleepVote.Lying == 2 && seen2 < 0f) seen2 = tw2;
+                    if (seen2 >= 0f && hud2 == null && tw2 - seen2 > 0.3f) hud2 = SleepCounterText();
+                    tw2 += Time.unscaledDeltaTime;
+                    yield return null;
+                }
+                Check(hud2 == "2/2" + Loc.Tr(" – Gute Nacht!", " – Good night!"), "both in a bed → host HUD '" + (hud2 ?? "-") + "'");
+                Check(S.day == day0 + 1, "both in bed ('2/2 – Gute Nacht!') → host on day " + S.day + " (" + gm.ClockString + ")");
                 Check(sleepEvents > sl0, "host faded to sleep too");
+                Check(!SleepVote.LocalLying && SleepVote.Lying == 0, "the vote resets after the night");
                 yield return Wait(2.5f);
                 Check(S.videos.Count == 1 && S.pendingUploads.Count == 0, "the upload resolved overnight (" + S.videos.Count + " video" + (S.videos.Count > 0 ? ": " + S.videos[0].views + " views, +" + S.videos[0].followersGained + " followers" : "") + ")");
                 SendVal("hostday", S.day + "|" + S.videos.Count + "|" + S.followers);
@@ -1402,6 +1490,8 @@ namespace Sealebrities
             {
                 Vector3 spawn = PlayerController.ResolveSpawn(out float yaw);
                 yield return Stand(spawn, yaw);
+                yield return WaitUntil(() => gm.CanSleepNow, 15f);
+                yield return Sync("S08t", 40f);
                 PropBed bed = null;
                 float best = float.MaxValue;
                 foreach (var b in Object.FindObjectsByType<PropBed>(FindObjectsSortMode.None))
@@ -1410,21 +1500,65 @@ namespace Sealebrities
                     if (dd < best) { best = dd; bed = b; }
                 }
                 Check(bed != null, "bed found");
+                // (1) the client lies down alone → 1/2
                 if (bed != null)
                 {
                     var bc = bed.GetComponentInChildren<Collider>();
                     yield return AimAt(bc != null ? bc.bounds.center : bed.transform.position + Vector3.up * 0.4f);
                     Info("prompt at the bed: '" + InteractionPrompt.Text + "'");
                     GameInput.SimTap(GameAction.Interact);
-                    yield return WaitUntil(() => S.day > day0, 10f);
-                    if (S.day <= day0 && bed.CanInteract())
+                    yield return WaitUntil(() => SleepVote.LocalLying, 3f);
+                    if (!SleepVote.LocalLying && bed.CanInteract())
                     {
                         Info("E did not reach the bed – using it directly");
                         bed.Interact();
                     }
                 }
-                if (S.day <= day0) { Info("fallback: GameManager.SleepToMorning"); gm.SleepToMorning(); }
-                yield return WaitUntil(() => S.day > day0, 15f);
+                if (!SleepVote.LocalLying) { Info("fallback: SleepVote.SetLying(true)"); SleepVote.SetLying(true); }
+                yield return WaitUntil(() => SleepVote.Lying == 1 && SleepVote.Total == 2, 10f);
+                Check(SleepVote.LocalLying && SleepVote.Lying == 1 && SleepVote.Total == 2, "client lies down → 'Schlafen 1/2' on the client too");
+                Check(pc.IsLyingDown, "the camera lies down on the sleep spot");
+                SendVal("clientspot", PropInfo.LocalSleepSpot.ToString(Inv));
+                yield return Wait(0.5f);
+                string hudC = SleepCounterText();
+                Check(hudC == Loc.Tr("Schlafen ", "Sleep ") + "1/2", "client HUD under the quest line: '" + hudC + "'");
+                yield return Shot("client_S08_lying_1of2");
+                yield return WaitVal("host1of2", 25f);
+                // get up again (Space)
+                GameInput.SimTap(GameAction.Jump);
+                yield return WaitUntil(() => !SleepVote.LocalLying, 3f);
+                if (SleepVote.LocalLying) { Info("Space did not get up – SetLying(false)"); SleepVote.SetLying(false); }
+                yield return WaitUntil(() => SleepVote.Lying == 0, 10f);
+                Check(!SleepVote.LocalLying && !pc.IsLyingDown && SleepVote.Lying == 0, "Space gets up → 0/2");
+                yield return Sync("S08u", 40f);
+                // (2) the host lies down first, then the client
+                yield return WaitVal("hostlying", 25f);
+                yield return WaitUntil(() => SleepVote.Lying == 1, 10f);
+                Check(SleepVote.Lying == 1 && SleepVote.Total == 2, "host lies down → client sees 1/2");
+                var ha = PeerAvatar();
+                yield return WaitUntil(() => ha != null && ha.Motion == MotionState.Lie, 3f);
+                Check(ha != null && ha.Motion == MotionState.Lie, "the client sees the host's diver lying (" + (ha != null ? ha.Motion.ToString() : "-") + ")");
+                if (ha != null) { yield return AimAt(ha.HeadPosition); yield return Shot("client_S08_host_lying"); }
+                if (bed != null)
+                {
+                    var bc2 = bed.GetComponentInChildren<Collider>();
+                    yield return AimAt(bc2 != null ? bc2.bounds.center : bed.transform.position + Vector3.up * 0.4f);
+                    GameInput.SimTap(GameAction.Interact);
+                    yield return WaitUntil(() => SleepVote.LocalLying, 3f);
+                    if (!SleepVote.LocalLying && bed.CanInteract()) { Info("E did not reach the bed – using it directly"); bed.Interact(); }
+                }
+                if (!SleepVote.LocalLying) SleepVote.SetLying(true);
+                string hud2 = null;
+                float tw2 = 0f, seen2 = -1f;
+                while (S.day == day0 && tw2 < 30f)
+                {
+                    if (SleepVote.Lying == 2 && seen2 < 0f) seen2 = tw2;
+                    if (seen2 >= 0f && hud2 == null && tw2 - seen2 > 0.3f) hud2 = SleepCounterText();
+                    tw2 += Time.unscaledDeltaTime;
+                    yield return null;
+                }
+                Check(hud2 == "2/2" + Loc.Tr(" – Gute Nacht!", " – Good night!"), "client HUD at 2/2: '" + (hud2 ?? "-") + "'");
+                yield return WaitUntil(() => S.day > day0, 30f);
                 Check(S.day == day0 + 1 && Mathf.Abs(S.timeOfDay - GameManager.MorningTime) < 0.02f, "client woke up on day " + S.day + " at " + gm.ClockString);
                 yield return WaitVal("hostday", 20f);
                 yield return Wait(0.5f);
@@ -1683,6 +1817,17 @@ namespace Sealebrities
                 int left = peerId;
                 int l0 = leftEvents;
                 string pname = Net.Find(left) != null ? Net.Find(left).name : "";
+                string pkey = Net.Find(left) != null ? Net.Find(left).key : null;
+                yield return WaitVal("hotbar", 20f);
+                // F.3: the host keeps the guest's record (the client pushed its changed hotbar before leaving)
+                yield return WaitUntil(() =>
+                {
+                    var r = PlayerRecords.Find(pkey);
+                    return r != null && r.hotbarLeft != null && r.hotbarLeft.Length > 2 && r.hotbarLeft[2] == Hands.ItemName(HoldItem.Camera);
+                }, 10f);
+                var rec = PlayerRecords.Find(pkey);
+                Check(rec != null && rec.hotbarLeft != null && rec.hotbarLeft.Length > 2 && rec.hotbarLeft[2] == Hands.ItemName(HoldItem.Camera),
+                      "host stored the guest's record (camera in left slot 3)");
                 yield return WaitUntil(() => Net.Find(left) == null, 15f);
                 Check(Net.Find(left) == null && Net.Players.Count == 1, "client left the player list (" + Net.Players.Count + " players)");
                 yield return WaitUntil(() => !NetAvatarSync.TryGet(left, out _), 6f);
@@ -1691,14 +1836,20 @@ namespace Sealebrities
                 Check(!NetAvatarSync.TryGet(left, out _) && GameObject.Find("NetAvatar_" + left) == null, "the client's avatar was removed on the host");
                 Check(Divers.All.Count == 1, "Divers.All back to the host only (" + Divers.All.Count + ")");
                 Check(leftEvents > l0, "PlayerLeft raised");
-                Check(ToastSeen("von Bord", "left the crew"), "host got the '" + pname + " left the crew' toast");
+                Check(ToastSeen("von Bord", " left"), "host got the '" + pname + " · von Bord' notification");
                 Check(GameManager.I.InGame && NetSession.IsHostSide, "host keeps playing and hosting");
                 yield return Wait(0.6f);
                 yield return Shot("host_S12_after_leave");
             }
             else
             {
-                yield return Wait(1.0f);
+                // F.3: a personal hotbar layout the host must keep for this machine
+                Hands.Assign(Hand.Left, 2, HoldItem.Camera);
+                yield return Frames(2);
+                Check(Hands.SlotItem(Hand.Left, 2) == HoldItem.Camera, "client moved the camera to left slot 3");
+                PlayerRecords.SendLocal();
+                SendVal("hotbar", "left3=camera");
+                yield return Wait(2.5f);
                 Net.Leave?.Invoke();
                 yield return WaitUntil(() => UIState.MainMenuOpen && !GameManager.I.InGame && !Net.IsOnline, 15f);
                 Check(UIState.MainMenuOpen && !GameManager.I.InGame && !Net.IsOnline, "client left: back in the main menu, offline");
@@ -1748,6 +1899,8 @@ namespace Sealebrities
                 string theirs = Val("state13") ?? "";
                 Check(mine == theirs, "rejoined client has the current shared state: " + mine + (mine == theirs ? "" : " vs host " + theirs));
                 Check(Journal.IsDiscovered("green_turtle") && S.ownedItems.Contains("tank_t1"), "journal entry and bought tank are still there");
+                yield return WaitUntil(() => Hands.SlotItem(Hand.Left, 2) == HoldItem.Camera, 6f);
+                Check(Hands.SlotItem(Hand.Left, 2) == HoldItem.Camera, "F.3: the guest got its own hotbar back from the host's record (camera in left slot 3)");
                 yield return Wait(1.5f);
                 var a = PeerAvatar();
                 Check(a != null && a.Visible, "host avatar visible after rejoining");
@@ -1790,10 +1943,11 @@ namespace Sealebrities
             string id = c.Species != null ? c.Species.id : "";
             bool disc0 = Journal.IsDiscovered(id);
             Vector3 approach = Flat(c.Position - cam.transform.position);
+            // K.2: under water the camera records by itself; LMB while aiming = a Sealog photo (aiming never toggles REC)
+            if (!aim && hc.IsRecording != record) GameInput.SimTap(GameAction.Use);
             if (aim) GameInput.SimPress(GameAction.Aim);
-            if (hc.IsRecording != record) GameInput.SimTap(GameAction.Use);
             float t = 0f;
-            bool shot = false;
+            bool shot = false, photo = false;
             var seen = new HashSet<FilmHint>();
             while (t < seconds)
             {
@@ -1811,6 +1965,13 @@ namespace Sealebrities
                     shot = true;
                     yield return Shot(shotName);
                 }
+                if (aim && !photo && t > seconds * 0.5f)
+                {
+                    photo = true;
+                    GameInput.SimTap(GameAction.Use);   // the Sealog photo of the framed animal
+                    filmHints += (filmHints.Length > 0 ? "/" : "") + "PHOTO";
+                }
+                if (aim && photo && t > seconds * 0.8f && !Journal.IsDiscovered(id) && hc.RequestPhoto()) filmHints += "/PHOTO2";
                 yield return null;
                 t += Time.deltaTime;
             }
@@ -2030,21 +2191,15 @@ namespace Sealebrities
             if (!isHost) return;
             try
             {
+                // Both test windows never write either file (GameManager.SavingDisabled, Settings.WritesDisabled). A change
+                // therefore comes from ANOTHER program – usually the player's own game running at the same time – and is
+                // kept: restoring the old copy here would throw the player's new progress away.
                 string nowSettings = File.Exists(SettingsPath) ? File.ReadAllText(SettingsPath) : null;
-                if (nowSettings != settingsBackup)
-                {
-                    Note("settings.json changed during the test – restoring the player's file");
-                    if (settingsExisted) File.WriteAllText(SettingsPath, settingsBackup);
-                    else if (File.Exists(SettingsPath)) File.Delete(SettingsPath);
-                }
                 string nowSave = File.Exists(SavePath) ? File.ReadAllText(SavePath) : null;
-                if (nowSave != saveBackup)
-                {
-                    Note("WARNING: the save changed during the test – restoring the player's save");
-                    if (saveExisted) File.WriteAllText(SavePath, saveBackup);
-                    else if (File.Exists(SavePath)) File.Delete(SavePath);
-                }
-                else Note("the player's save and settings are untouched");
+                bool settingsChanged = nowSettings != settingsBackup, saveChanged = nowSave != saveBackup;
+                if (settingsChanged) Note("settings.json " + (settingsExisted ? "changed" : "was created") + " during the test – written by another program (the test never writes it); left as it is");
+                if (saveChanged) Note("the save " + (saveExisted ? "changed" : "was created") + " during the test – written by another program (the test never saves); left as it is");
+                if (!settingsChanged && !saveChanged) Note("the player's save and settings are untouched");
             }
             catch (Exception e) { Debug.LogWarning("AutoPlaytestMP: restore failed: " + e.Message); }
         }

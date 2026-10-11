@@ -610,8 +610,16 @@ namespace Sealebrities
         }
 
         // ------------------------------------------------------------------ formatting
-        /// "×1,6" with the current culture.
-        public static string Mult(float m) => "×" + m.ToString("0.##", Loc.Culture);
+        /// "×1,6" with the current culture (NaN / ∞ show the neutral ×1, never a raw float).
+        public static string Mult(float m)
+        {
+            if (float.IsNaN(m) || float.IsInfinity(m)) m = 1f;
+            return "×" + Mathf.Clamp(m, -999f, 999f).ToString("0.##", Loc.Culture);
+        }
+
+        /// "0 %" … "100 %" for a 0..1 value such as a volume slider: clamped, NaN → 0, whole percent; never a raw
+        /// float or an int overflow (RoundToInt(NaN) was the "-2147483648 %" after a misclick). Cached, allocation free.
+        public static string Percent01(float v01) => UIFormat.Percent(v01);
 
         public static string Clock(float seconds)
         {

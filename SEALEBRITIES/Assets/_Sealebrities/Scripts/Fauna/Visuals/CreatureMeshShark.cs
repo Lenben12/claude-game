@@ -14,7 +14,7 @@ namespace Sealebrities
         {
             var s = ctx.S;
             string v = s.variant ?? "";
-            bool hammer = v == "hammer", whale = v == "whale";
+            bool hammer = v == "hammer", whale = v == "whale", goblin = v == "goblin";
             float H = CreatureMeshMath.Clamp(s.bodyHeight, 0.06f, 0.4f);
             float W = CreatureMeshMath.Clamp(s.bodyWidth, 0.06f, 0.4f);
             float F = CreatureMeshMath.Clamp(s.finSize, 0.4f, 2f);
@@ -46,7 +46,17 @@ namespace Sealebrities
                 nose = 0.05f;
             }
 
-            var body = CreatureMeshAnatomy.Body(0.5f, Lb, t => top[t] * H, t => bot[t] * H, t => wid[t] * W * 0.5f, nose, BodyTs, 8);
+            // goblin shark: the body starts behind a long flat snout plate (built below)
+            float bz0 = goblin ? 0.3f : 0.5f;
+            if (goblin)
+            {
+                Lb = 0.62f;
+                top = new CreatureMeshCurve(0f, 0.16f, 0.05f, 0.28f, 0.14f, 0.38f, 0.26f, 0.46f, 0.4f, 0.5f, 0.55f, 0.46f, 0.7f, 0.36f, 0.85f, 0.24f, 1f, 0.15f);
+                bot = new CreatureMeshCurve(0f, -0.2f, 0.05f, -0.34f, 0.14f, -0.44f, 0.26f, -0.5f, 0.4f, -0.5f, 0.55f, -0.44f, 0.7f, -0.34f, 0.85f, -0.22f, 1f, -0.12f);
+                wid = new CreatureMeshCurve(0f, 0.55f, 0.08f, 0.75f, 0.2f, 0.9f, 0.4f, 1f, 0.6f, 0.85f, 0.8f, 0.5f, 1f, 0.25f);
+                nose = 0.02f;
+            }
+            var body = CreatureMeshAnatomy.Body(bz0, Lb, t => top[t] * H, t => bot[t] * H, t => wid[t] * W * 0.5f, nose, BodyTs, 8);
             if (whale)
             {
                 // boxy, flat head blending into a round body; low keels on the tail stock
@@ -75,7 +85,8 @@ namespace Sealebrities
                 CreatureMeshParts.EyePair(ctx, body, et, eth, er, 0.2f, 0.45f, CreatureMeshSkin.Fixed(head));
             }
 
-            if (whale)
+            if (goblin) GoblinHead(ctx, body, head);
+            else if (whale)
             {
                 // wide terminal mouth across the blunt head
                 Vector3 c = body.Center(0.012f);
@@ -173,6 +184,46 @@ namespace Sealebrities
             if (q <= apex) return 0.55f * CreatureMeshMath.Pow(q / apex, 1.3f);
             float f = (q - apex) / (1f - apex);
             return 0.55f * CreatureMeshMath.Pow(1f - f, 0.55f) + 0.12f * CreatureMeshMath.Sin(Pi * f);
+        }
+
+        /// Goblin shark head: a long flat snout plate in front of the eyes and a protrusible jaw with needle teeth on its
+        /// own bone (ctx.Jaw) – the gait animator shoots it forward when a diver comes close (G.1).
+        static void GoblinHead(CreatureMeshContext ctx, CreatureMeshSweep body, int head)
+        {
+            var b = ctx.B;
+            ctx.Gait = CreatureGait.Jaw;
+            Vector3 c0 = body.Center(0.02f);
+            float y = c0.y + body.HalfTop(0.06f) * 0.3f;
+            var snout = new CreatureMeshSweep
+            {
+                Ts = new[] { 0f, 0.08f, 0.3f, 0.6f, 0.85f, 1f }, Sides = 8,
+                Center = t => new Vector3(0f, y + 0.006f * t, 0.31f + 0.21f * t),
+                HalfW = t => Math.Max(1e-4f, CreatureMeshMath.Lerp(0.034f, 0.024f, t) * CreatureMeshMath.Nose(1f - t, 0.12f)),
+                HalfTop = t => Math.Max(1e-4f, CreatureMeshMath.Lerp(0.016f, 0.007f, t) * CreatureMeshMath.Nose(1f - t, 0.12f)),
+                HalfBot = t => Math.Max(1e-4f, CreatureMeshMath.Lerp(0.012f, 0.006f, t) * CreatureMeshMath.Nose(1f - t, 0.12f)),
+                Square = t => 2.6f,
+                CapStart = false, CapEnd = true,
+                Uv = (t, v) => new Vector2(0.02f, v),
+            };
+            snout.Build(b, CreatureMeshSlot.Skin, (p, a, t) => CreatureMeshSkin.One(head));
+            // protrusible jaw: pink gums with fang rows, hinged under the eyes
+            Vector3 hinge = new Vector3(0f, c0.y - body.HalfBot(0.05f) * 0.7f, 0.28f);
+            int jaw = ctx.Bone("Jaw", head, hinge);
+            ctx.Jaw = jaw;
+            var gumUv = new Vector2(0.06f, 0.15f);
+            CreatureMeshParts.Ellipsoid(b, CreatureMeshSlot.Skin, hinge + new Vector3(0f, 0.002f, 0.035f), Vector3.forward, Vector3.up, 0.034f, 0.012f, 0.05f, 4, 8,
+                gumUv, gumUv, CreatureMeshSkin.Fixed(jaw));
+            CreatureMeshParts.Ellipsoid(b, CreatureMeshSlot.Mouth, hinge + new Vector3(0f, 0.012f, 0.03f), Vector3.forward, Vector3.up, 0.028f, 0.008f, 0.042f, 3, 8,
+                Vector2.zero, Vector2.zero, CreatureMeshSkin.Fixed(jaw));
+            for (int side = -1; side <= 1; side += 2)
+                for (int k = 0; k < 5; k++)
+                {
+                    float f = k / 4f;
+                    Vector3 p = hinge + new Vector3(side * CreatureMeshMath.Lerp(0.026f, 0.008f, f), 0.01f, 0.01f + 0.06f * f);
+                    Vector3 dir = CreatureMeshMath.Norm(new Vector3(-side * 0.25f, 1f, 0.35f));
+                    CreatureMeshParts.Cone(b, CreatureMeshSlot.Teeth, p, p + dir * CreatureMeshMath.Lerp(0.016f, 0.01f, f), 0.0025f, 3,
+                        new Vector2(0.5f, 0.2f), new Vector2(0.5f, 0.9f), CreatureMeshSkin.One(jaw));
+                }
         }
 
         /// Hammer head: flat wing of 7 faceted segments with goggle eyes at the tips.

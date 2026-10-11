@@ -7,7 +7,8 @@ using UnityEngine;
 namespace Sealebrities
 {
     /// Color class of one terrain triangle; each class is one shared flat LowPoly material (one submesh per chunk).
-    public enum TerrainClass : byte { Sand, SandAlt, WetSand, Grass, GrassDark, Soil, Rock, RockDark, Seabed, SeabedAlt, DeepRock, GrassDry }
+    /// SandPink (round 2b, K.8): the pink coral sand of the secret Fog Isle (its beaches and lagoon floor).
+    public enum TerrainClass : byte { Sand, SandAlt, WetSand, Grass, GrassDark, Soil, Rock, RockDark, Seabed, SeabedAlt, DeepRock, GrassDry, SandPink }
 
     /// One 128 m terrain chunk: a slightly jittered grid whose border vertices sit exactly on the chunk edge.
     /// Edges shared with a coarser neighbour are stitched (their extra vertices lie on the coarse edge), so there are no cracks.
@@ -88,8 +89,9 @@ namespace Sealebrities
     }
 
     /// The whole low-poly terrain as data: 16 x 16 chunks of 128 m, ultra fine (1.6 m) where the island's points of interest
-    /// need crisp shapes (waterfall cliff, cave, ravine, tide pools), fine (3.2 m) around the island, the house reef, the
-    /// dive sites and the landmark islands, coarse (6.4 m) elsewhere. Built on worker threads from WorldHeightField;
+    /// need crisp shapes (waterfall cliff, cave, ravine, tide pools) and on the house reef's seabed detail zone, fine
+    /// (3.2 m) around the island, the house reef, every dive site and the landmark islands, coarse (6.4 m) elsewhere
+    /// (≈ 450k triangles in total). Built on worker threads from WorldHeightField;
     /// Height() is thread-safe and returns the height of the actual triangulated surface, so props and creatures sit
     /// exactly on the rendered ground.
     public sealed class WorldTerrainData
@@ -98,7 +100,7 @@ namespace Sealebrities
         public const int ChunksPerSide = 16;
         public const int UltraCells = 80, FineCells = 40, CoarseCells = 20;   // each must divide the next (crack-free stitching)
         /// Number of TerrainClass values (= max submeshes per chunk).
-        public const int Classes = 12;
+        public const int Classes = 13;
         public const float Origin = -WorldLayout.TerrainSize * 0.5f;
         const float Jitter = 0.17f;                          // < 0.2 cells keeps every triangle valid
 
@@ -113,6 +115,7 @@ namespace Sealebrities
         // ------------------------------------------------------------------ static layout cache (main thread first)
         static bool prepared;
         static float[] siteX, siteZ, siteR;
+        static float fogSiteX, fogSiteZ = 640f;
         static float[] pathX, pathZ;
         static float pathMinX, pathMaxX, pathMinZ, pathMaxZ;
         static int[][] pathGrid;                 // segment start indices per PathCell grid cell
@@ -126,63 +129,43 @@ namespace Sealebrities
         /// PrepareStatics (always once the world is built).
         public static IReadOnlyList<Vector2[]> PathPolylines => pathPolylines;
 
-        /// Fallback trails to the points of interest, used only when the props' trail network is unavailable.
+        /// Fallback trails to the points of interest, used only when the props' trail network is unavailable: the L.5
+        /// route set of the 0.62 island (Testversion-3 map literals wrapped in WorldLayout.Isl, the rest anchor-relative).
         public static Vector2[][] TrailControlPoints()
         {
-            var fall = WorldLayout.WaterfallTop;
-            var a = WorldFeatures.FallDir;
-            var beach = WorldFeatures.PoolBeach;
-            var cave = WorldLayout.CaveEntrance;
-            var cd = WorldFeatures.CaveDir;
-            var clearing = new Vector2(cave.x - cd.x * 7f, cave.z - cd.z * 7f);
-            var bn = WorldFeatures.BridgeNorth;
-            var bs = WorldFeatures.BridgeSouth;
-            var radio = WorldLayout.RadioTowerRuins;
+            var rv = WorldLayout.Ravine;
+            var rt = WorldLayout.RadioTowerRuins;
             var heli = WorldLayout.Helipad;
             var sb = WorldLayout.SecondBeach;
-            var tide = WorldLayout.TidePools;
-            var ts = WorldFeatures.TideSeaward;
+            var tp = WorldLayout.TidePools;
+            var wt = WorldLayout.WaterfallTop;
+            var cave = WorldLayout.CaveEntrance;
+            Vector2 rampTop = XZ(WorldFeatures.FallRampTop), rampBottom = XZ(WorldFeatures.FallRampBottom), poolBeach = XZ(WorldFeatures.PoolBeach);
+            Vector2 caveFront = XZ(cave) - XZ(WorldFeatures.CaveDir) * 6f;
             return new[]
             {
-                // jungle trail: main path → plunge pool beach → around the amphitheater up to the falls' plateau → cave
-                new[]
-                {
-                    new Vector2(72f, 70f), new Vector2(50f, 63f), new Vector2(24f, 58f), new Vector2(0f, 55f), new Vector2(-22f, 50f),
-                    new Vector2(-37f, 39f), new Vector2(beach.x, beach.z), new Vector2(-66f, 29f), new Vector2(-84f, 39f),
-                    new Vector2(-92f, 57f), new Vector2(fall.x - a.x * 9f - 9f, fall.z - a.z * 9f), new Vector2(-104f, 72f),
-                    new Vector2(-124f, 80f), new Vector2(-129f, 96f), new Vector2(clearing.x - 4f, clearing.y - 2f),
-                },
-                // lighthouse → cave along the north flank
-                new[]
-                {
-                    new Vector2(-14f, 142f), new Vector2(-40f, 141f), new Vector2(-66f, 134f), new Vector2(-90f, 125f),
-                    new Vector2(-106f, 120f), new Vector2(clearing.x + 2f, clearing.y + 1f),
-                },
-                // centre → rope bridge (north rim)
-                new[]
-                {
-                    new Vector2(94f, 50f), new Vector2(70f, 30f), new Vector2(44f, 12f), new Vector2(18f, -6f), new Vector2(0f, -19f),
-                    new Vector2(bn.x, bn.z + 3.5f),
-                },
+                // lighthouse/waterfall junction → down the cliff ramp → pool beach
+                new[] { WorldLayout.Isl(22f, 114f), new Vector2(wt.x + 22f, wt.z + 20f), new Vector2(wt.x + 9f, wt.z + 9f), rampTop, rampBottom, rampBottom + new Vector2(9f, -9f), poolBeach },
+                // foot of the ramp → Waterfall Grotto
+                new[] { rampBottom, XZ(WorldFeatures.FallFoot) + XZ(WorldFeatures.FallDir) * 9f, caveFront },
+                // pool beach → rope bridge (north rim)
+                new[] { poolBeach, WorldLayout.Isl(-44f, 22f), WorldLayout.Isl(-33f, 2f), new Vector2(rv.x - 3f, rv.z + 20f), new Vector2(rv.x, rv.z + 11f) },
                 // rope bridge (south rim) → radio tower ruins
-                new[]
-                {
-                    new Vector2(bs.x, bs.z - 3.5f), new Vector2(-38f, -63f), new Vector2(-62f, -80f), new Vector2(-88f, -95f),
-                    new Vector2(radio.x + 10f, radio.z + 5f),
-                },
-                // helipad → second beach
-                new[]
-                {
-                    new Vector2(heli.x - 8f, heli.z - 9f), new Vector2(58f, -100f), new Vector2(50f, -128f), new Vector2(sb.x + 2f, sb.z + 18f),
-                },
-                // helipad → tide pools
-                new[]
-                {
-                    new Vector2(heli.x + 10f, heli.z - 6f), new Vector2(104f, -82f), new Vector2(124f, -86f),
-                    new Vector2(tide.x - ts.x * 10f, tide.z - ts.z * 10f),
-                },
+                new[] { new Vector2(rv.x, rv.z - 11f), new Vector2(rv.x - 6f, rv.z - 20f), WorldLayout.Isl(-48f, -76f), WorldLayout.Isl(-78f, -96f), new Vector2(rt.x + 10f, rt.z + 3f) },
+                // radio tower → gully → hidden bay beach
+                new[] { new Vector2(rt.x - 6f, rt.z + 8f), XZ(WorldFeatures.BayGullyTop), XZ(WorldFeatures.BayGullyBottom), XZ(WorldFeatures.HiddenBayBeach) },
+                // ravine (south) → helipad
+                new[] { new Vector2(rv.x + 2f, rv.z - 16f), new Vector2(-1f, -45f), new Vector2(14f, -47f), new Vector2(heli.x - 9f, heli.z - 2f) },
+                // helipad → village Altriff
+                new[] { new Vector2(heli.x - 2f, heli.z - 10f), WorldLayout.Isl(60f, -100f), WorldLayout.Isl(52f, -130f), new Vector2(sb.x + 4f, sb.z + 22f), new Vector2(sb.x, sb.z + 10f) },
+                // village → tide pools along the south-east coast
+                new[] { new Vector2(sb.x + 12f, sb.z + 10f), WorldLayout.Isl(80f, -158f), WorldLayout.Isl(110f, -138f), WorldLayout.Isl(132f, -114f), new Vector2(tp.x - 6f, tp.z + 4f) },
+                // tide pools → hut
+                new[] { new Vector2(tp.x - 8f, tp.z + 9f), WorldLayout.Isl(134f, -62f), WorldLayout.Isl(124f, -36f), WorldLayout.Isl(113f, -10f) },
             };
         }
+
+        static Vector2 XZ(Vector3 p) => new Vector2(p.x, p.z);
 
         /// Caches dive site and path layout in plain arrays. Call on the main thread before building.
         public static void PrepareStatics()
@@ -192,7 +175,12 @@ namespace Sealebrities
             var sites = DiveSites.All;
             int n = sites != null ? sites.Count : 0;
             siteX = new float[n]; siteZ = new float[n]; siteR = new float[n];
-            for (int i = 0; i < n; i++) { siteX[i] = sites[i].center.x; siteZ[i] = sites[i].center.z; siteR[i] = sites[i].radius; }
+            fogSiteX = WorldLayout.FogIsland.x; fogSiteZ = WorldLayout.FogIsland.z - 60f;
+            for (int i = 0; i < n; i++)
+            {
+                siteX[i] = sites[i].center.x; siteZ[i] = sites[i].center.z; siteR[i] = sites[i].radius;
+                if (sites[i].id == "fog_isle") { fogSiteX = siteX[i]; fogSiteZ = siteZ[i]; }
+            }
             SetYard(0, WorldLayout.Hut, 7f, 13f);
             SetYard(1, WorldLayout.Helipad, 6f, 11f);
             SetYard(2, WorldLayout.Lighthouse, 5f, 9f);
@@ -215,16 +203,21 @@ namespace Sealebrities
             var lh = WorldLayout.Lighthouse;
             float tx = hut.x - lh.x, tz = hut.z - lh.z, tl = Mathf.Sqrt(tx * tx + tz * tz);
             float doorX = lh.x + tx / tl * 3.4f, doorZ = lh.z + tz / tl * 3.4f;
+            // (fallback only: the same L.5 routes the props draw – Testversion-3 literals scaled by WorldLayout.Isl)
             var main = new[]
             {
-                new Vector2(stepsX + 1.5f, hut.z + 1f), new Vector2(stepsX - 1f, hut.z + 9f), new Vector2(110f, 36f), new Vector2(94f, 50f),
-                new Vector2(72f, 70f), new Vector2(48f, 92f), new Vector2(22f, 114f), new Vector2(2f, 131f), new Vector2(-14f, 142f),
+                new Vector2(stepsX + 1.5f, hut.z + 1f), new Vector2(stepsX - 1f, hut.z + 9f), WorldLayout.Isl(110f, 36f), WorldLayout.Isl(94f, 50f),
+                WorldLayout.Isl(72f, 70f), WorldLayout.Isl(48f, 92f), WorldLayout.Isl(22f, 114f), WorldLayout.Isl(2f, 131f), WorldLayout.Isl(-14f, 142f),
                 new Vector2(doorX, doorZ),
             };
             var heli = WorldLayout.Helipad;
             var side = new[]
             {
-                new Vector2(hut.x + 6f, hut.z - 7f), new Vector2(112f, -8f), new Vector2(98f, -32f), new Vector2(heli.x + 9f, heli.z + 9f),
+                new Vector2(hut.x + 6f, hut.z - 7f), WorldLayout.Isl(112f, -8f), WorldLayout.Isl(98f, -32f), new Vector2(heli.x + 9f, heli.z + 9f),
+            };
+            var dock = new[]
+            {
+                new Vector2(stepsX + 2f, hut.z - 1.5f), WorldLayout.Isl(140f, 13.5f), WorldLayout.Isl(150f, 9.5f), new Vector2(WorldLayout.DockStart.x - 10f, WorldLayout.DockStart.z + 0.2f),
             };
             // The props module owns the trail network (PropPaths.Routes, pure functions of WorldLayout): paint exactly its
             // sampled dirt lines (same seeds and wobble) so the terrain dirt lies under the props' strips and stones.
@@ -259,7 +252,7 @@ namespace Sealebrities
             }
             else
             {
-                var all = new List<Vector2[]> { main, side };
+                var all = new List<Vector2[]> { dock, main, side };
                 all.AddRange(TrailControlPoints());
                 for (int p = 0; p < all.Count; p++)
                 {
@@ -395,11 +388,14 @@ namespace Sealebrities
             return false;
         }
 
-        /// Chunks holding a point of interest whose shape needs 1.6 m facets (cliff, cave passage, ravine, tide pools).
+        /// Chunks holding a point of interest whose shape needs 1.6 m facets (cliff, cave passage, ravine, tide pools) and
+        /// the house reef's seabed detail zone (L.3/Q11: reef crest, spur-and-groove channels, short sand ripples).
         static bool IsUltra(int cx, int cz)
         {
             float x0 = Origin + cx * ChunkSize, z0 = Origin + cz * ChunkSize;
             float x1 = x0 + ChunkSize, z1 = z0 + ChunkSize;
+            var rd = WorldFeatures.ReefDetailRect;
+            if (x0 > rd.x - 1f && x1 < rd.z + 1f && z0 > rd.y - 1f && z1 < rd.w + 1f) return true;
             if (RectCircle(x0, z0, x1, z1, WorldLayout.WaterfallTop.x, WorldLayout.WaterfallTop.z, 30f)) return true;
             if (RectCircle(x0, z0, x1, z1, WorldLayout.WaterfallPool.x, WorldLayout.WaterfallPool.z, 16f)) return true;
             var cave = WorldLayout.CaveEntrance + WorldFeatures.CaveDir * 6.5f;
@@ -541,7 +537,7 @@ namespace Sealebrities
                         float my = (c.Vy[p0] + c.Vy[p1] + c.Vy[p2]) / 3f;
                         float mz = (c.Vz[p0] + c.Vz[p1] + c.Vz[p2]) / 3f;
                         uint hash = Hash(c.Cx * n + i, c.Cz * n + j, seed + 11 + h);
-                        var k = (byte)Classify(mx, mz, my, upY, hash);
+                        var k = (byte)FogIsleTint(Classify(mx, mz, my, upY, hash), mx, mz, hash);
                         cls[t] = k;
                         count[k]++;
                         t++;
@@ -572,6 +568,22 @@ namespace Sealebrities
             c.RenderVerts = verts;
             c.RenderNormals = norms;
             c.ClassCount = count;
+        }
+
+        /// K.8 "distinct look" of the secret Fog Isle: its sand – beaches and the seamount lagoon floor – is pink coral sand
+        /// (dithered border ~70 m around the island and the site centre). Everything else keeps its class.
+        static TerrainClass FogIsleTint(TerrainClass k, float x, float z, uint hash)
+        {
+            if (k != TerrainClass.Sand && k != TerrainClass.SandAlt && k != TerrainClass.Seabed && k != TerrainClass.SeabedAlt) return k;
+            var isl = WorldLayout.FogIsland;
+            float dx = x - isl.x, dz = z - isl.z;
+            float d = MathF.Sqrt(dx * dx + dz * dz);
+            float sx = x - fogSiteX, sz = z - fogSiteZ;
+            float ds = MathF.Sqrt(sx * sx + sz * sz);
+            float near = MathF.Min(d, ds);
+            if (near > 80f) return k;
+            float r = ((hash >> 7) & 0x3FF) / 1023f;
+            return near < 62f + 16f * r ? TerrainClass.SandPink : k;
         }
 
         /// Flat color class of one triangle (centroid x/z, centroid height h, normal.y, per-triangle hash for dithering).

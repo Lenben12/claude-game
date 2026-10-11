@@ -35,7 +35,7 @@ namespace Sealebrities
                 {
                     if (GameManager.I == null) return;
                     GameManager.I.Save();
-                    GameEvents.RaiseToast(Loc.Tr("Gespeichert.", "Saved."));
+                    GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Gespeichert", "Saved"));
                 }, UIBtnKind.Secondary, PhoneKit.Body);
                 save.style.marginBottom = 10f;
                 body.Add(save);

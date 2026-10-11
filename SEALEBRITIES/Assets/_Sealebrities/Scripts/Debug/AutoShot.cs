@@ -14,7 +14,7 @@ namespace Sealebrities
     /// Sealog on the raised 3D phone, reef with the camera in hand, kelp, wreck, drop-off, trench with camera + lamp in
     /// both hands, night), writes autoshot_log.txt and quits. Scenery shots are taken with empty hands.
     /// Every shot is guarded: a failing shot is logged and the tour continues.
-    public sealed class AutoShot : MonoBehaviour
+    public sealed partial class AutoShot : MonoBehaviour
     {
         const float BootTimeout = 900f;
 
@@ -53,7 +53,11 @@ namespace Sealebrities
             return null;
         }
 
-        void Start() { StartCoroutine(Run()); }
+        void Start()
+        {
+            DiverLod.ForceLod0 = true;   // screenshots always show the full character models (L.13 LODs)
+            StartCoroutine(Run());
+        }
 
         // ------------------------------------------------------------------ the tour
         IEnumerator Run()
@@ -104,8 +108,151 @@ namespace Sealebrities
             yield return Guard(ShotMorning(), "15_morning_beach");
             yield return Guard(ShotJungle(), "16_jungle");
             yield return Guard(ShotHutMorning(), "17_hut_morning");
+            // checks of the Testversion 3 feedback fixes: held items vs. the dock (overlay camera), "Zur Hütte" brings
+            // the boat home, slider / percent labels never show NaN
+            yield return Guard(ShotLampDockLow(), "18_lamp_dock_low");
+            yield return Guard(CheckBoatHome(), "19_boat_home");
+            CheckSliderGuards();
+            // round 2 (Design_Runde2 J.6 + the third player message): r2_*.png
+            yield return Guard(ShotsRound2(), "round-2 shots");
 
             Finish(saved >= 12 ? 0 : 1);
+        }
+
+        // 18 – crouched at the dock with camera + lamp in hand, eye only ~0.35 m above the planks: the held items sit
+        // inside the planks. Before the view-model overlay camera they were cut by the dock; now they must be whole.
+        IEnumerator ShotLampDockLow()
+        {
+            SetTime(0.82f);
+            yield return EnsureOnLand();
+            Vector3 dock = WorldInfo.DockEndPosition != Vector3.zero ? WorldInfo.DockEndPosition : WorldLayout.DockEnd + Vector3.up * 1.3f;
+            Hands.StowAll();
+            yield return Stand(dock + new Vector3(-6f, 0.05f, 0f), 262f);
+            Hold(HoldItem.Camera);
+            if (lamp != null) lamp.SetOn(true);
+            else Note("WARNING: no flashlight component found");
+            yield return Wait(1f);
+            if (pc == null || cam == null) yield break;
+            pc.enabled = false;
+            Vector3 feet = pc.transform.position;
+            Vector3 fwd = Flat(cam.transform.forward);
+            Vector3 eye = feet + Vector3.up * 0.35f;
+            Pose(eye, eye + fwd * 4f + Vector3.down * 0.6f);
+            yield return Wait(1.5f);
+
+            // layer checks: the overlay exists, the main camera skips the view-model layer, every held mesh is on it
+            var overlay = PlayerViewModelCamera.Overlay;
+            bool mainSkips = (cam.cullingMask & PlayerViewModelCamera.ViewModelMask) == 0;
+            int meshes = 0, wrong = 0;
+            var rs = cam.GetComponentsInChildren<MeshRenderer>(false);
+            for (int i = 0; i < rs.Length; i++)
+            {
+                if (rs[i] == null || !rs[i].enabled) continue;
+                meshes++;
+                if (rs[i].gameObject.layer != PlayerViewModelCamera.ViewModelLayer) wrong++;
+            }
+            bool ok = overlay != null && overlay.isActiveAndEnabled && mainSkips && meshes > 0 && wrong == 0;
+            Note((ok ? "OK" : "FAIL") + ": view-model overlay " + (overlay != null ? "present" : "MISSING")
+                 + ", main camera skips layer " + PlayerViewModelCamera.ViewModelLayer + ": " + mainSkips
+                 + ", held meshes " + meshes + " (" + wrong + " not on the view-model layer)");
+            yield return Capture("18_lamp_dock_low");
+            yield return MeasureOverlayAB("dock_low_held");
+            if (lamp != null) lamp.SetOn(false);
+            Hands.StowAll();
+            pc.enabled = true;
+        }
+
+        // 19 – the boat drifts at the wreck, the player uses "Zur Hütte" (same calls as UIPauseMenu.OnReturnToHut):
+        // the boat must lie at its mooring at the dock afterwards
+        IEnumerator CheckBoatHome()
+        {
+            SetTime(0.5f);
+            var bc = Refs.Boat as BoatController;
+            if (bc == null) { Note("FAIL: boat-home check – no boat"); yield break; }
+            yield return EnsureOnLand();
+            var wreck = DiveSites.Get("wreck");
+            Vector3 away = wreck != null ? wreck.center : bc.MooringPosition + new Vector3(120f, 0f, -60f);
+            bc.PlaceAt(new Vector3(away.x, 0f, away.z), 30f);
+            yield return Wait(1f);
+            bool wasAway = !bc.AtMooring;
+
+            Vector3 spawn = PlayerController.ResolveSpawn(out float yaw);
+            pc.enabled = true;
+            pc.TeleportTo(spawn, yaw);
+            BoatHome.AfterLocalPlayerWentHome();
+            yield return Wait(2f);
+            Vector3 d = bc.transform.position - bc.MooringPosition;
+            d.y = 0f;
+            bool home = bc.AtMooring;
+            Note((wasAway && home ? "OK" : "FAIL") + ": \"Zur Hütte\" boat home – away before: " + wasAway
+                 + ", at mooring after: " + home + " (" + d.magnitude.ToString("0.0") + " m from the mooring)");
+
+            Vector3 end = WorldInfo.DockEndPosition != Vector3.zero ? WorldInfo.DockEndPosition : WorldLayout.DockEnd + Vector3.up * 1.3f;
+            Vector3 eye = Vector3.Lerp(end, bc.transform.position, 0.5f) + new Vector3(-14f, 7f, -10f);
+            FreeCamera(eye, bc.transform.position + Vector3.up * 1f);
+            yield return Wait(1.5f);
+            yield return Capture("19_boat_home");
+        }
+
+        /// Cost of the view-model overlay camera under the SAME conditions (other programs on this PC included): the
+        /// overlay is switched off (old single-camera rendering) and on again in alternating 2 s windows, 3 rounds.
+        IEnumerator MeasureOverlayAB(string label)
+        {
+            var ov = PlayerViewModelCamera.Overlay;
+            var vm = ov != null ? ov.GetComponent<PlayerViewModelCamera>() : null;
+            if (vm == null) { Note("fps A/B " + label + ": no overlay camera"); yield break; }
+            int vsync = QualitySettings.vSyncCount, cap = Application.targetFrameRate;
+            QualitySettings.vSyncCount = 0;          // uncapped for the measurement (restored below)
+            Application.targetFrameRate = -1;
+            float tOn = 0f, tOff = 0f;
+            int fOn = 0, fOff = 0;
+            for (int round = 0; round < 3; round++)
+            {
+                for (int pass = 0; pass < 2; pass++)
+                {
+                    bool on = pass == 0;
+                    vm.enabled = on;
+                    yield return Wait(0.5f);   // settle
+                    float t = 0f;
+                    int frames = 0;
+                    while (t < 2f)
+                    {
+                        yield return null;
+                        t += Time.unscaledDeltaTime;
+                        frames++;
+                    }
+                    if (on) { tOn += t; fOn += frames; }
+                    else { tOff += t; fOff += frames; }
+                }
+            }
+            vm.enabled = true;
+            QualitySettings.vSyncCount = vsync;
+            Application.targetFrameRate = cap;
+            float aOn = fOn / Mathf.Max(tOn, 0.001f), aOff = fOff / Mathf.Max(tOff, 0.001f);
+            Note("fps A/B " + label + ": overlay on avg " + aOn.ToString("0.0") + ", overlay off avg " + aOff.ToString("0.0")
+                 + " (" + ((aOn - aOff) / Mathf.Max(aOff, 0.001f) * 100f).ToString("+0;-0") + " %)");
+            yield return Frames(2);
+        }
+
+        /// Slider / label guards (misclick → "-2147483648 %"): NaN and ∞ never reach the setting or the label.
+        void CheckSliderGuards()
+        {
+            try
+            {
+                bool bad = false;
+                var s = new UISlider(0f, 1f, 0.5f, v => { if (float.IsNaN(v) || float.IsInfinity(v)) bad = true; }, Color.white);
+                s.SetValue(float.NaN, true);
+                s.SetValue(float.PositiveInfinity, true);
+                s.SetValue(float.NegativeInfinity, true);
+                bool sliderOk = !bad && !float.IsNaN(s.Value) && s.Value >= 0f && s.Value <= 1f;
+                bool labelOk = UIKit.Percent01(float.NaN) == "0 %" && UIKit.Percent01(7f) == "100 %" && UIKit.Percent01(0.456f) == "46 %";
+                Note((sliderOk && labelOk ? "OK" : "FAIL") + ": slider guards – slider value " + s.Value.ToString("0.###")
+                     + " after NaN/±inf, labels " + UIKit.Percent01(float.NaN) + " / " + UIKit.Percent01(7f));
+            }
+            catch (Exception e)
+            {
+                Note("FAIL: slider guard check threw " + e.Message);
+            }
         }
 
         // 17 – waking up in the hut at 06:30 (the interior read purple in the playtest)
@@ -131,6 +278,7 @@ namespace Sealebrities
             yield return Wait(6.5f);
             yield return MeasureFps("dock_island");
             yield return Capture("13_dock_island");
+            yield return MeasureOverlayAB("dock_island_empty_hands");
             Pose(eye, eye + new Vector3(1f, -0.12f, -0.35f) * 10f);
             yield return Wait(2f);
             yield return Capture("14_sea_horizon");
@@ -141,7 +289,7 @@ namespace Sealebrities
         {
             SetTime(0.292f);
             yield return EnsureOnLand();
-            Vector3 beach = FindBeach(new Vector3(150f, 0f, 60f));
+            Vector3 beach = FindBeach(WorldLayout.Isl3(150f, 0f, 60f));
             Vector3 eye = new Vector3(beach.x, Mathf.Max(beach.y, Waves.SeaLevel) + 1.7f, beach.z);
             FreeCamera(eye, new Vector3(WorldLayout.DockEnd.x, 1.5f, WorldLayout.DockEnd.z));
             yield return Wait(6.5f);
@@ -153,9 +301,9 @@ namespace Sealebrities
         {
             SetTime(0.5f);
             yield return EnsureOnLand();
-            Vector3 g = Ground(new Vector3(55f, 0f, 30f));
+            Vector3 g = Ground(WorldLayout.Isl3(55f, 0f, 30f));
             Vector3 eye = g + Vector3.up * 1.7f;
-            FreeCamera(eye, Ground(new Vector3(0f, 0f, 75f)) + Vector3.up * 3f);
+            FreeCamera(eye, Ground(WorldLayout.Isl3(0f, 0f, 75f)) + Vector3.up * 3f);
             yield return Wait(6.5f);
             yield return MeasureFps("jungle");
             yield return Capture("16_jungle");
@@ -232,7 +380,7 @@ namespace Sealebrities
         {
             SetTime(0.72f);
             yield return EnsureOnLand();
-            FreeCamera(new Vector3(285f, 125f, -255f), new Vector3(10f, 2f, 25f));
+            FreeCamera(WorldLayout.Isl3(285f, 125f, -255f), WorldLayout.Isl3(10f, 2f, 25f));
             yield return Wait(6.5f);   // sky ambient refreshes every 6 s
             yield return Capture("02_island_air");
         }
@@ -242,9 +390,9 @@ namespace Sealebrities
         {
             SetTime(0.5f);
             yield return EnsureOnLand();
-            Vector3 beach = FindBeach(new Vector3(160f, 0f, -55f));
+            Vector3 beach = FindBeach(WorldLayout.Isl3(160f, 0f, -55f));
             Vector3 eye = new Vector3(beach.x, Mathf.Max(beach.y, Waves.SeaLevel) + 1.7f, beach.z);
-            FreeCamera(eye, new Vector3(165f, 2.5f, 12f));
+            FreeCamera(eye, WorldLayout.Isl3(165f, 2.5f, 12f));
             yield return Wait(6.5f);
             yield return Capture("03_hut_dock_boat");
         }
@@ -439,7 +587,7 @@ namespace Sealebrities
         {
             SetTime(0.95f);
             yield return EnsureOnLand();
-            FreeCamera(new Vector3(240f, 16f, -45f), new Vector3(105f, 6f, 35f));
+            FreeCamera(WorldLayout.Isl3(240f, 16f, -45f), WorldLayout.Isl3(105f, 6f, 35f));
             yield return Wait(3f);
             yield return Capture("12_night");
         }

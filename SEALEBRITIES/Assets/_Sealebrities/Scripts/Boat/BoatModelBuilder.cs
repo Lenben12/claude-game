@@ -9,6 +9,18 @@ namespace Sealebrities
         public Quaternion wheelBaseRot, leverBaseRot;
         public Vector3 exitLocal, rescueLocal, ladderDeckLocal, propLocal, sternWakeLocal, anchorStowLocal, rollerLocal;
         public Vector3 bowSprayLeftLocal, bowSprayRightLocal;
+        // ---- round 2
+        /// Dashboard compass: north needle and the gold course marker (Fog Isle route, K.8).
+        public Transform compassNeedle, compassCourse;
+        /// E.4 boat compressor on the wheelhouse roof (hidden until the crew owns it) and its flywheel.
+        public Transform compressor, compressorWheel;
+        /// K.3 winch davit at the port stern (hidden until owned); pulley = cable exit point (boat local).
+        public Transform davit;
+        public Vector3 davitPulleyLocal, winchDropLocal;
+        /// L.12 boat mishap: where a delivery crate lands (foredeck, boat local).
+        public Vector3 foredeckCrateLocal;
+        /// Flag pole top (boat flag cosmetic / sponsor pennant).
+        public Transform flag;
     }
 
     /// Builds the "Rostlaube" in the low-poly toy style: a chunky faceted ~7.5 m teal fishing boat (rusty boot stripe,
@@ -50,9 +62,116 @@ namespace Sealebrities
             parts.sternWakeLocal = new Vector3(0f, 0f, -4.4f);
             parts.bowSprayLeftLocal = new Vector3(-0.55f, 0.15f, 2.6f);
             parts.bowSprayRightLocal = new Vector3(0.55f, 0.15f, 2.6f);
+            parts.foredeckCrateLocal = new Vector3(0f, Y0 + 0.02f, 1.45f);
 
+            BuildCompassNeedles(root, parts);
+            BuildCompressor(root, parts);
+            BuildDavit(root, parts);
+            BuildFlag(root, parts);
             BuildColliders(root, boat, parts);
             return parts;
+        }
+
+        // ------------------------------------------------------------------ round 2 fittings
+        /// Animated needles in the dashboard compass (glass dome at (0, 1.06, 1.0 + CZ)).
+        static void BuildCompassNeedles(Transform root, BoatParts parts)
+        {
+            Vector3 c = new Vector3(0f, 1.062f, 1.0f + CZ);
+            var ns = new BoatMeshSet();
+            ns[BoatMats.BobberRed].TriOut(new Vector3(0f, 0f, 0.042f), new Vector3(0.008f, 0f, 0f), new Vector3(-0.008f, 0f, 0f), Vector3.up);
+            ns[BoatMats.White].TriOut(new Vector3(0f, 0f, -0.036f), new Vector3(-0.008f, 0f, 0f), new Vector3(0.008f, 0f, 0f), Vector3.up);
+            ns[BoatMats.Engine].Cylinder(new Vector3(0f, -0.004f, 0f), new Vector3(0f, 0.004f, 0f), 0.006f, 0.006f, 6);
+            parts.compassNeedle = ns.Build("CompassNeedle", root, c, Quaternion.identity, false).transform;
+
+            var cs = new BoatMeshSet();
+            var gold = BoatMats.BobberGlow;
+            cs[gold].TriOut(new Vector3(0f, 0.004f, 0.05f), new Vector3(0.012f, 0.004f, 0.034f), new Vector3(-0.012f, 0.004f, 0.034f), Vector3.up);
+            parts.compassCourse = cs.Build("CompassCourse", root, c, Quaternion.identity, false).transform;
+            parts.compassCourse.gameObject.SetActive(false);
+        }
+
+        /// E.4 "Boot-Kompressor": a chunky red petrol compressor strapped to the aft roof, a hose down to the tank rack.
+        static void BuildCompressor(Transform root, BoatParts parts)
+        {
+            var go = new GameObject("BoatCompressor");
+            go.transform.SetParent(root, false);
+            go.transform.localPosition = new Vector3(-0.22f, CabY1 + 0.08f, -1.05f);
+            var s = new BoatMeshSet();
+            var red = BoatMats.Pal("#C94F3D");
+            var dark = BoatMats.Engine;
+            var steel = BoatMats.Steel;
+            // frame + base plate
+            s[dark].Box(new Vector3(0f, 0.02f, 0f), new Vector3(0.5f, 0.04f, 0.38f));
+            for (int sx = -1; sx <= 1; sx += 2)
+                for (int sz = -1; sz <= 1; sz += 2)
+                    s[steel].Cylinder(new Vector3(sx * 0.22f, 0.04f, sz * 0.16f), new Vector3(sx * 0.22f, 0.36f, sz * 0.16f), 0.014f, 0.014f, 5);
+            // red tank (lying) + motor block
+            s[red].Cylinder(new Vector3(-0.2f, 0.16f, 0f), new Vector3(0.2f, 0.16f, 0f), 0.11f, 0.11f, 10, true, true);
+            s[dark].Box(new Vector3(0.02f, 0.31f, 0f), new Vector3(0.2f, 0.12f, 0.16f));
+            s[BoatMats.Pal("#F2C94C")].Box(new Vector3(0.02f, 0.37f, 0.0f), new Vector3(0.21f, 0.015f, 0.17f));
+            s[steel].Cylinder(new Vector3(-0.12f, 0.31f, 0.02f), new Vector3(-0.12f, 0.42f, 0.02f), 0.025f, 0.025f, 6);
+            s[BoatMats.NavWhite].Disc(new Vector3(0.21f, 0.18f, 0f), Vector3.right, 0.035f, 8);
+            // straps over the roof
+            s[BoatMats.Strap].Box(new Vector3(-0.1f, 0.15f, 0f), new Vector3(0.04f, 0.27f, 0.4f));
+            // hose: down the back of the wheelhouse to the tank rack on the starboard bulwark
+            var hose = s[BoatMats.Rubber];
+            Vector3 h0 = new Vector3(0.2f, 0.12f, -0.18f);
+            Vector3 h1 = new Vector3(0.45f, -0.05f, -0.45f);
+            Vector3 h2 = new Vector3(0.62f, -0.9f, -0.5f);
+            Vector3 h3 = new Vector3(1.2f, -CabY1 - 0.08f + Y0 + 0.78f, -0.78f);
+            hose.Cylinder(h0, h1, 0.018f, 0.018f, 5);
+            hose.Cylinder(h1, h2, 0.018f, 0.018f, 5);
+            hose.Cylinder(h2, h3, 0.018f, 0.018f, 5);
+            BoatOwnedMesh.Own(s.Build("CompressorBody", go.transform, true));
+            // flywheel (spins while it refills a tank)
+            var fw = new BoatMeshSet();
+            fw[steel].Cylinder(new Vector3(0f, 0f, -0.02f), new Vector3(0f, 0f, 0.02f), 0.07f, 0.07f, 8);
+            fw[red].Box(new Vector3(0f, 0.05f, 0f), new Vector3(0.02f, 0.03f, 0.045f));
+            parts.compressorWheel = BoatOwnedMesh.Own(fw.Build("Flywheel", go.transform, new Vector3(0.02f, 0.31f, 0.11f), Quaternion.identity, false)).transform;
+            parts.compressor = go.transform;
+            go.SetActive(false);
+        }
+
+        /// K.3 "Bootswinde": a little crane arm at the port stern; the cable leaves at the pulley.
+        static void BuildDavit(Transform root, BoatParts parts)
+        {
+            var go = new GameObject("WinchDavit");
+            go.transform.SetParent(root, false);
+            Vector3 foot = new Vector3(-0.92f, Y0, -3.62f);
+            go.transform.localPosition = foot;
+            var s = new BoatMeshSet();
+            var yellow = BoatMats.Pal("#F2C94C");
+            var dark = BoatMats.Engine;
+            s[dark].Box(new Vector3(0f, 0.03f, 0f), new Vector3(0.22f, 0.06f, 0.22f));
+            s[yellow].Cylinder(new Vector3(0f, 0.06f, 0f), new Vector3(0f, 1.55f, 0f), 0.05f, 0.045f, 8);
+            s[yellow].Cylinder(new Vector3(0f, 1.5f, 0f), new Vector3(-0.7f, 1.75f, 0f), 0.04f, 0.035f, 8);
+            s[dark].Cylinder(new Vector3(-0.7f, 1.7f, -0.04f), new Vector3(-0.7f, 1.7f, 0.04f), 0.06f, 0.06f, 8);
+            // crank drum on the post
+            s[dark].Cylinder(new Vector3(0.06f, 0.75f, 0f), new Vector3(0.2f, 0.75f, 0f), 0.07f, 0.07f, 8);
+            s[BoatMats.Rope].Cylinder(new Vector3(0.08f, 0.75f, 0f), new Vector3(0.18f, 0.75f, 0f), 0.085f, 0.085f, 8);
+            s[BoatMats.LifeOrange].Cylinder(new Vector3(0.2f, 0.75f, 0f), new Vector3(0.2f, 0.62f, 0.08f), 0.015f, 0.015f, 5);
+            BoatOwnedMesh.Own(s.Build("Davit", go.transform, true));
+            parts.davit = go.transform;
+            parts.davitPulleyLocal = foot + new Vector3(-0.7f, 1.62f, 0f);
+            parts.winchDropLocal = new Vector3(-0.35f, Y0 + 0.02f, -3.55f);
+            go.SetActive(false);
+        }
+
+        /// A short flag pole on the aft roof edge: the boat flag cosmetic (L.7 rewards) and a sponsor pennant (K.7).
+        static void BuildFlag(Transform root, BoatParts parts)
+        {
+            var go = new GameObject("FlagPole");
+            go.transform.SetParent(root, false);
+            go.transform.localPosition = new Vector3(0.48f, CabY1 + 0.08f, -1.42f);
+            var s = new BoatMeshSet();
+            s[BoatMats.Steel].Cylinder(Vector3.zero, new Vector3(0f, 1.1f, 0f), 0.014f, 0.011f, 5);
+            s[BoatMats.LifeOrange].Sphere(new Vector3(0f, 1.12f, 0f), 0.025f, 5, 3);
+            BoatOwnedMesh.Own(s.Build("Pole", go.transform, false));
+            var flag = new GameObject("Flag").transform;
+            flag.SetParent(go.transform, false);
+            flag.localPosition = new Vector3(0f, 1.06f, 0f);
+            parts.flag = flag;
+            go.SetActive(false);
         }
 
         // ------------------------------------------------------------------ wheelhouse + helm
@@ -478,6 +597,11 @@ namespace Sealebrities
             var winch = Child(root, "AnchorWinch", Vector3.zero, Quaternion.identity);
             AddBox(winch, new Vector3(0f, Y0 + 0.26f, 2.45f), new Vector3(0.72f, 0.5f, 0.44f));
             winch.AddComponent<BoatAnchorInteractable>().boat = boat;
+
+            // round 2: the cooler box is a snack spot (E.1); the whole hull says "E – board" from a dock / jetty / beach
+            var cooler = cols.Find("Cooler");
+            if (cooler != null) cooler.gameObject.AddComponent<BoatCoolerInteractable>().boat = boat;
+            cols.gameObject.AddComponent<BoatBoardInteractable>().boat = boat;
         }
     }
 }

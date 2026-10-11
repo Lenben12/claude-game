@@ -43,6 +43,10 @@ namespace Sealebrities
         const float DayTint = 0f;
         // time-of-day deltas: golden hour warmer (orange, not magenta), night cooler but less saturated (navy, not royal blue)
         const float GoldenSaturation = 6f, GoldenTemperature = 14f, GoldenTint = -4f;
+        // Q41: the main menu's golden hour is warmer still (temperature +18 in total), a touch more saturated, with
+        // violet shadows (Testversion 3: "menu and evening read cool instead of golden")
+        const float MenuTemperature = 4f, MenuSaturation = 3f;
+        static readonly Vector4 SmhShadowsMenu = new Vector4(0.98f, 0.965f, 1.065f, 0f);
         const float NightSaturation = -20f, NightTemperature = -4f, NightExposure = 0.30f;
         const float NightShadowLift = 0.03f;   // moonlit nights stay readable navy, never black
         const float AboveVignette = 0.28f;
@@ -60,6 +64,9 @@ namespace Sealebrities
         static readonly Vector4 SmhHighlights = new Vector4(1.012f, 1.00f, 0.985f, 0f);
 
         bool fogInit;
+        float menu01 = 1f;
+        bool bankColorReady;
+        Color bankColor;
         FogMode fogMode = FogMode.ExponentialSquared;
         Color lastFogColor = new Color(-1f, -1f, -1f, -1f);
         float lastFogDensity = -1f;
@@ -184,11 +191,13 @@ namespace Sealebrities
             float t = f.time;
             float night = f.night01;
             float golden = f.golden01 * (1f - night);
+            menu01 = Mathf.MoveTowards(menu01, f.inGame ? 0f : 1f, Mathf.Min(Time.unscaledDeltaTime, 0.1f) / 1.5f);
+            float menuGold = menu01 * golden;
 
-            // above water: filmic day, warm golden hour, moonlit night
+            // above water: filmic day, warm golden hour (warmer in the menu), moonlit night
             float aExp = DayExposure + NightExposure * night;
-            float aSat = DaySaturation + GoldenSaturation * golden + NightSaturation * night;
-            float aTemp = DayTemperature + GoldenTemperature * golden + NightTemperature * night;
+            float aSat = DaySaturation + GoldenSaturation * golden + MenuSaturation * menuGold + NightSaturation * night;
+            float aTemp = DayTemperature + GoldenTemperature * golden + MenuTemperature * menuGold + NightTemperature * night;
             float aTint = DayTint + GoldenTint * golden;
 
             // under water by depth: vivid bright shallows, calmer and bluer in the deep (§2.2). The shallow exposure is
@@ -229,7 +238,7 @@ namespace Sealebrities
 
             // violet-tinted shadows above water, neutral under water; a small lift keeps moonlit nights readable
             float above = 1f - u;
-            Vector4 shadows = Vector4.Lerp(SmhNeutral, SmhShadows, above);
+            Vector4 shadows = Vector4.Lerp(SmhNeutral, Vector4.Lerp(SmhShadows, SmhShadowsMenu, menuGold), above);
             shadows.w = NightShadowLift * night * above;
             Vector4 highlights = Vector4.Lerp(SmhNeutral, SmhHighlights, above);
 
@@ -278,10 +287,20 @@ namespace Sealebrities
                 uw.b = Mathf.Max(uw.b, Mathf.Lerp(uw.b, floor.b, k));
             }
             Color sky = FXMath.GuardSkyFog(EnvState.SkyFogColor, f.sun01);
+            float skyDensity = FXMath.SkyFogDensity(f.night01);
+            // K.8: inside the fog bank around the Fog Isle the haze turns into thick pale fog (a light haze with the map)
+            float bank = FXFogBank.Thick01;
+            if (bank > 0.001f)
+            {
+                if (!bankColorReady) { bankColorReady = true; bankColor = SkyGrade.InverseGamma(FXFogBankRenderer.FogColorScreen); }
+                Color bc = bankColor * Mathf.Lerp(0.22f, 1f, f.sun01);
+                bc.a = 1f;
+                sky = Color.Lerp(sky, bc, bank);
+                skyDensity = Mathf.Lerp(skyDensity, FXFogBankRenderer.Density(FXFogBank.Map), bank);
+            }
             Color fogColor = Color.Lerp(sky, uw, f.under01);
             fogColor.a = 1f;
 
-            float skyDensity = FXMath.SkyFogDensity(f.night01);
             float uwK = FXMath.UnderwaterFogDensity(f.depth, f.night01);
             bool exp2 = f.under01 >= 0.5f;
             float density;

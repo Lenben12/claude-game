@@ -98,6 +98,8 @@ namespace Sealebrities
                     Vector3 outward = new Vector3(p00.x + p01.x, (p00.y + p01.y) * 0.5f - mid, 0f);
                     if (outward.sqrMagnitude < 0.01f) outward = Vector3.down;
                     bool upper = k == 0 || k == A.Count - 2;
+                    // H.1 entrance A: the port upper panel of strip 5 is replaced by a frame around the torn hole
+                    if (s == 5 && k == A.Count - 2) continue;
                     (upper ? up : lo).QuadAuto(p00, p10, p11, p01, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, outward);
                     colB.QuadAuto(p00, p10, p11, p01, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, outward);
                 }
@@ -125,6 +127,7 @@ namespace Sealebrities
             var deck = SB(PropMats.Deck);
             for (int s = 0; s < NS - 1; s++)
             {
+                if (s >= 5 && s <= 7) continue;   // midship deck with the open hatch: PropWreckInterior
                 for (int k = 0; k < 2; k++)
                 {
                     Vector3 a0 = DeckPoint(zs[s], k / 2f), a1 = DeckPoint(zs[s], (k + 1) / 2f);
@@ -197,11 +200,7 @@ namespace Sealebrities
             {
                 float hdk = DeckY(hz[i]);
                 Hatch(rust, colB, new Vector3(0f, hdk, hz[i]), 7f, 8f, i != 1);
-                if (i == 1)
-                {
-                    dark.Box(new Vector3(0f, hdk + 0.06f, hz[i]), new Vector3(6.6f, 0.02f, 7.6f));
-                    AddHole(S, shipRot, new Vector3(0f, hdk + 0.3f, hz[i]), Vector3.up);
-                }
+                if (i == 1) AddHole(S, shipRot, new Vector3(0f, hdk + 0.3f, hz[i]), Vector3.up);   // the open hatch (entrance B)
             }
 
             // deck clutter: bollards, vents, winch
@@ -262,6 +261,13 @@ namespace Sealebrities
                 AddHole(S, shipRot, hc + new Vector3(holeSide[i] * 0.4f, 0f, 0f), new Vector3(holeSide[i], 0f, 0f));
             }
 
+            // ---------------------------------------------------------------- H.1 interior (entrance A frame, deck, rooms)
+            PropWreckInterior.HullFrame(up, colB, zs[5], zs[6], rng);
+            try { PropWreckInterior.Build(batch, colB, S, shipRot, decor, cols, rng, zs[5], zs[8]); }
+            catch (System.Exception e) { Debug.LogError("Sealebrities props: wreck interior failed: " + e); }
+            PropInfo.SetSpot("wreck_axis", pos, yaw);
+            if (PropRun.Due()) yield return null;
+
             // a few air bubbles leaking from the bridge
             PropFX.Bubbles(decor, S.MultiplyPoint3x4(new Vector3(-2f, 14.9f, -26f)), 1.5f, 0.3f);
 
@@ -280,6 +286,35 @@ namespace Sealebrities
                 if (rng.NextDouble() < 0.18) type = PropCoralType.Anemone;
                 Vector3 wpnt = S.MultiplyPoint3x4(lp);
                 PropReef.Place(debris, rng, wpnt, shipRot * Vector3.up, type, 0.75f, -4f);
+            }
+            if (PropRun.Due()) yield return null;
+
+            // ---------------------------------------------------------------- L.3 growth on the hull plates
+            // encrusting pads and soft corals on both sides (the chine points of the hull loft, not the deck) – own seed so
+            // the deck growth and everything after keeps its layout; nothing below the seabed, the entrance hole stays free
+            var hrng = new System.Random(1986);
+            var hullSec = new List<Vector2>(7);
+            int hullGrowth = 0;
+            for (int i = 0; i < 140 && hullGrowth < 90; i++)
+            {
+                float z = PropUtil.Range(hrng, Stern + 3f, Stern + L - 4f);
+                Section(z, hullSec);
+                int side = hrng.NextDouble() < 0.5 ? 1 : -1;
+                // segment 0 (deck edge → waterline) or 1 (waterline → bilge) of this side
+                int seg = hrng.NextDouble() < 0.6 ? 0 : 1;
+                int a = side > 0 ? seg : hullSec.Count - 1 - seg, b = side > 0 ? seg + 1 : hullSec.Count - 2 - seg;
+                if (side < 0 && seg == 0 && z >= zs[5] - 0.5f && z <= zs[6] + 0.5f) continue;   // H.1 entrance A
+                float t = PropUtil.Range(hrng, 0.15f, 0.85f);
+                Vector2 q = Vector2.Lerp(hullSec[a], hullSec[b], t);
+                Vector2 e = hullSec[b] - hullSec[a];
+                Vector3 nLocal = new Vector3(e.y, -e.x, 0f).normalized;
+                if (Vector3.Dot(nLocal, new Vector3(side, 0f, 0f)) < 0f) nLocal = -nLocal;
+                Vector3 lp = new Vector3(q.x, q.y, z) + nLocal * 0.02f;
+                Vector3 wpnt = S.MultiplyPoint3x4(lp);
+                if (wpnt.y < G(wpnt.x, wpnt.z) + 0.3f) continue;   // the buried side of the rolled hull
+                Vector3 wn = shipRot * nLocal;
+                var kind = hrng.NextDouble() < 0.6 ? ReefColony.Encrust : ReefColony.SoftPuff;
+                if (PropReefs.Colony(debris, null, hrng, kind, hrng.Next(PropReefKit.Colors), wpnt, wn, PropUtil.Range(hrng, 0.35f, 0.75f), -4f)) hullGrowth++;
             }
             if (PropRun.Due()) yield return null;
 

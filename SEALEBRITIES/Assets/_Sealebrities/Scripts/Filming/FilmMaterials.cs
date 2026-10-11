@@ -9,7 +9,18 @@ namespace Sealebrities
     /// at runtime never allocates.
     public static class FilmMaterials
     {
-        public const int ScreenStandby = 0, ScreenLive = 1, ScreenWeak = 2, ScreenGood = 3, ScreenCaptured = 4;
+        /// Device screen states: standby (not filming), live (filming, no animal), weak (too dark for the Sealog),
+        /// good (animals detected), captured (Sealog photo ready / shutter), new (Sealog photo of a NEW species ready),
+        /// night (night-vision module on).
+        public const int ScreenStandby = 0, ScreenLive = 1, ScreenWeak = 2, ScreenGood = 3, ScreenCaptured = 4, ScreenNew = 5, ScreenNight = 6;
+
+        /// Gold palette of the golden camera (Q52, Sealog 100 %): #E8C65A body, deep and pale tones for darks / metals.
+        public static readonly Color Gold = new Color(0.910f, 0.776f, 0.353f);       // #E8C65A
+        public static readonly Color DeepGold = new Color(0.690f, 0.533f, 0.212f);   // #B08836
+        public static readonly Color PaleGold = new Color(0.957f, 0.871f, 0.580f);   // #F4DE94
+
+        /// While true (FilmRigBuilder builds a golden camera) Surface() returns gold instead of the palette colour.
+        public static bool GoldMode;
 
         static readonly Dictionary<string, Material> Cache = new Dictionary<string, Material>();
         static Texture2D screenTex;
@@ -22,6 +33,7 @@ namespace Sealebrities
             Cache.Clear();
             ViewModelCache.Clear();
             screenTex = null; screens = null; tapes = null; recDot = null; lampOff = null; lampOn = null;
+            GoldMode = false;
         }
 
         // ------------------------------------------------------------------ textures
@@ -82,7 +94,46 @@ namespace Sealebrities
         /// tone by FlatColor; smoothness and tiling are ignored, metallic only picks the light-grey "metal" tone.
         /// Identical colors share one material (a view-model copy of LowPoly.Mat), so all rigs batch together.
         public static Material Surface(Color c, float smoothness, float metallic = 0f, float tiling = 1f)
-            => ViewModel(LowPoly.Mat(FlatColor(c, metallic)));
+            => GoldMode ? GoldFor(c, metallic) : ViewModel(LowPoly.Mat(FlatColor(c, metallic)));
+
+        /// Gold tone for a camera part of the golden camera: metals → pale gold, rubber/dark plastic → deep gold, the
+        /// rest → gold; near-black parts (lens glass) stay dark. Soft sheen + a faint glow (view-model queue).
+        static Material GoldFor(Color c, float metallic)
+        {
+            Color.RGBToHSV(c, out _, out float s, out float v);
+            if (v < 0.05f) return ViewModel(LowPoly.Mat(FlatColor(c, metallic)));
+            Color g = metallic > 0.5f && s < 0.25f ? PaleGold : v < 0.3f ? DeepGold : Gold;
+            string key = $"vg{g.r:F3}{g.g:F3}{g.b:F3}";
+            if (Cache.TryGetValue(key, out var m) && m != null) return m;
+            m = new Material(MaterialLibrary.Lit) { name = "Film_GoldVM" };
+            m.SetColor("_BaseColor", g);
+            m.SetFloat("_Smoothness", 0.42f);
+            m.SetFloat("_Metallic", 0f);
+            m.SetColor("_EmissionColor", g * 0.12f);
+            m.EnableKeyword("_EMISSION");
+            m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
+            m.renderQueue = ViewModelQueue;
+            Cache[key] = m;
+            return m;
+        }
+
+        /// World material of the golden camera trophy on the hut shelf (Q52: #E8C65A, emissive 0.2) – normal opaque
+        /// queue, shadows like any prop.
+        public static Material TrophyGold(Color g, float emission)
+        {
+            string key = $"tg{g.r:F3}{g.g:F3}{g.b:F3}_{emission:F2}";
+            if (Cache.TryGetValue(key, out var m) && m != null) return m;
+            m = new Material(MaterialLibrary.Lit) { name = "Film_TrophyGold" };
+            m.SetColor("_BaseColor", g);
+            m.SetFloat("_Smoothness", 0.5f);
+            m.SetFloat("_Metallic", 0f);
+            m.SetColor("_EmissionColor", g * emission);
+            m.EnableKeyword("_EMISSION");
+            m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
+            m.enableInstancing = true;
+            Cache[key] = m;
+            return m;
+        }
 
         /// Flat matte material with EXACTLY this color (art-bible colors such as the glove #343849 or the cuff), on the
         /// view-model queue. No palette mapping.
@@ -149,7 +200,7 @@ namespace Sealebrities
             return m;
         }
 
-        /// Screen material per viewfinder state (standby, live, weak, good, captured).
+        /// Screen material per viewfinder state (standby, live, weak, good, captured, new, night).
         public static Material Screen(int state)
         {
             if (screens == null)
@@ -161,6 +212,8 @@ namespace Sealebrities
                     new Color(1.00f, 0.60f, 0.15f) * 0.95f,
                     new Color(0.25f, 1.00f, 0.50f) * 0.95f,
                     new Color(0.35f, 0.95f, 1.00f) * 1.40f,
+                    new Color(1.00f, 0.80f, 0.25f) * 1.45f,
+                    new Color(0.30f, 1.00f, 0.40f) * 1.25f,
                 };
                 screens = new Material[tint.Length];
                 for (int i = 0; i < tint.Length; i++)
@@ -199,7 +252,7 @@ namespace Sealebrities
         {
             if (lampOff == null)
             {
-                lampOff = Surface(new Color(0.78f, 0.8f, 0.82f), 0.85f);
+                lampOff = ViewModel(LowPoly.Mat(FlatColor(new Color(0.78f, 0.8f, 0.82f), 0f)));   // never gold (cached)
                 lampOn = MakeEmissive("Film_LampOn", new Color(0.95f, 0.96f, 1f), new Color(1f, 0.97f, 0.9f) * 3.2f, null);
             }
             return on ? lampOn : lampOff;

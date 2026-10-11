@@ -83,7 +83,9 @@ namespace Sealebrities
             Found?.Invoke(id, kind);
             string label = displayText ?? KindName(kind);
             int have = Count(kind), total = Total(kind);
-            GameEvents.RaiseToast(total > 0 ? $"{label} ({have}/{total})" : label);
+            // L.10: icon + one short line + chip ("Logbuch-Seite · 7/24")
+            GameEvents.RaiseNotify(NotifyKind.Collectible, label, total > 0 ? have + "/" + total : null);
+            if (Net.HasAuthority) Cosmetics.CheckRules();
             GameManager.I.Save();
             return true;
         }

@@ -15,16 +15,21 @@ namespace Sealebrities
         public long followersNeeded;
         public Color mapColor;
         public string descDe, descEn;
+        /// Round 2b (K.8): a site with a flag unlocks when that story flag is set (no Sealog/follower rule) – fog_isle.
+        public string unlockFlag;
 
         public string Name => Loc.Tr(nameDe, nameEn);
         public string Description => Loc.Tr(descDe, descEn);
+        /// True for sites that unlock through the story instead of the Sealog/follower progression.
+        public bool IsStorySite => !string.IsNullOrEmpty(unlockFlag);
     }
 
     public static class DiveSites
     {
         public static readonly List<DiveSite> All = new List<DiveSite>
         {
-            new DiveSite { id = "house_reef", nameDe = "Hausriff", nameEn = "House Reef", center = new Vector3(260f, 0f, 60f), radius = 120f,
+            // L.5: the house reef moves with the 0.62 island (dock end → centre 64 m, 2.0–11.2 m deep)
+            new DiveSite { id = "house_reef", nameDe = "Hausriff", nameEn = "House Reef", center = new Vector3(188f, 0f, 38f), radius = 105f,
                 minDepth = 3f, maxDepth = 12f, prevSiteId = null, prevCompletionNeeded = 0f, followersNeeded = 0,
                 mapColor = new Color(0.18f, 0.77f, 0.75f),
                 descDe = "Flaches, buntes Riff direkt vor dem Steg. Gerald wohnt hier.", descEn = "Shallow, colorful reef right off the dock. Gerald lives here." },
@@ -44,8 +49,18 @@ namespace Sealebrities
                 minDepth = 80f, maxDepth = 160f, prevSiteId = "blue_drop", prevCompletionNeeded = 0.6f, followersNeeded = 100000,
                 mapColor = new Color(0.25f, 0.1f, 0.35f),
                 descDe = "Kein Sonnenlicht mehr. Hier leben Dinge, die kaum jemand gefilmt hat.", descEn = "No more sunlight. Things live here that almost nobody has filmed." },
+            // K.8: Toni's secret island – unlocked only by his map (StoryKeys.FogMap), behind a fog bank (WorldLayout.FogBankRadius)
+            new DiveSite { id = "fog_isle", nameDe = "Nebelinsel", nameEn = "Fog Isle", center = new Vector3(-60f, 0f, 640f), radius = 85f,
+                minDepth = 4f, maxDepth = 28f, prevSiteId = null, prevCompletionNeeded = 0f, followersNeeded = 0, unlockFlag = StoryKeys.FogMap,
+                mapColor = new Color(0.949f, 0.549f, 0.745f),   // #F28CBE
+                descDe = "Tonis Insel. Hier singen die Fische – und manche gibt's nur hier.", descEn = "Tony's island. The fish sing here – and some live nowhere else." },
         };
 
-        public static DiveSite Get(string id) => All.Find(s => s.id == id);
+        public static DiveSite Get(string id)
+        {
+            if (id == null) return null;
+            for (int i = 0; i < All.Count; i++) if (All[i].id == id) return All[i];
+            return null;
+        }
     }
 }

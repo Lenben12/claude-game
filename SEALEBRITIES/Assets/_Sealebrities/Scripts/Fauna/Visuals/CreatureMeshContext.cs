@@ -6,9 +6,12 @@ namespace Sealebrities
 {
     internal enum CreatureMeshEyeStyle { Friendly, Fish, Shark, Squid, Octopus, Cuttle, Turtle, Mammal, Vampire, Angler }
 
+    /// Procedural limb animation family of a body plan (FaunaGaitAnimator; carried by CreatureRigExtra).
+    public enum CreatureGait : byte { None, Crab, Star, Bird, Bat, Lizard, Quadruped, Primate, Marine, Jaw }
+
     /// How the skin texture is mapped: Loft = u along the body (0 head .. 1 tail), v around (0 belly, 0.5 back);
     /// Disc = top-down projection (rays): v 0..0.48 belly, 0.52..1 back; Bell = jelly bell (solid translucent color).
-    internal enum CreatureMeshLayout { Loft, Disc, Bell }
+    internal enum CreatureMeshLayout { Loft, Disc, Bell, Custom }
 
     internal sealed class CreatureMeshBoneSpec
     {
@@ -116,7 +119,51 @@ namespace Sealebrities
         public float SkinSmoothness = 0.1f;
         public bool CastShadows = true;
 
-        public CreatureMeshContext(SpeciesDef s) { S = s; }
+        // ---- round 2: shading softness and the extra rig roles of the new body plans (CreatureRigExtra)
+        /// Normal smoothing per slot (0 faceted, 1 smooth; see CreatureMeshFlat.From). Fish and invertebrates stay
+        /// faceted (art bible §2.5); eyes are always smooth (round googly look); mammals, birds and land animals are
+        /// smooth "characters" (L.13 / G.1 "smooth back").
+        public readonly float[] Smooth = new float[CreatureMeshSlot.Count];
+        public float Crease = 50f;
+        /// Leg hip bones; LegKnees[i] = the knee bone of leg i (child of the hip) or −1.
+        public readonly List<int> Legs = new List<int>();
+        public readonly List<int> LegKnees = new List<int>();
+        /// Wing shoulder bones; WingTips[i] = wrist/elbow bone (child) or −1.
+        public readonly List<int> Wings = new List<int>();
+        public readonly List<int> WingTips = new List<int>();
+        /// Crab claw arm bones; ClawFingers[i] = the movable finger (dactyl) bone or −1.
+        public readonly List<int> Claws = new List<int>();
+        public readonly List<int> ClawFingers = new List<int>();
+        public readonly List<int> EyeStalks = new List<int>();
+        public readonly List<int> TailChain = new List<int>();
+        public readonly List<int> Ears = new List<int>();
+        public int Jaw = -1, Head = -1, BodyBone = -1;
+        public CreatureGait Gait = CreatureGait.None;
+        public bool HasExtraRig => Legs.Count > 0 || Wings.Count > 0 || Claws.Count > 0 || EyeStalks.Count > 0 || TailChain.Count > 0
+                                   || Ears.Count > 0 || Jaw >= 0 || Head >= 0 || BodyBone >= 0 || Gait != CreatureGait.None;
+
+        public CreatureMeshContext(SpeciesDef s)
+        {
+            S = s;
+            Smooth[CreatureMeshSlot.Eye] = 1f;
+            Smooth[CreatureMeshSlot.Pupil] = 1f;
+            Smooth[CreatureMeshSlot.Teeth] = 0.6f;
+        }
+
+        /// Smooth "character" shading for the body and limb slots (mammals, birds, land animals).
+        public void SmoothBody(float skin = 1f, float fin = 1f)
+        {
+            Smooth[CreatureMeshSlot.Skin] = skin;
+            Smooth[CreatureMeshSlot.Fin] = fin;
+            Smooth[CreatureMeshSlot.Shell] = Math.Max(Smooth[CreatureMeshSlot.Shell], skin * 0.6f);
+            Smooth[CreatureMeshSlot.Mouth] = 1f;
+            Crease = 72f;                       // 6–8-sided limbs and rounded bodies blend into one soft surface
+            if (skin >= 0.9f) SmoothTexture = true;
+        }
+
+        /// The skin texture is sampled bilinearly (soft colour borders on smooth "character" bodies) instead of the
+        /// point-filtered colour blocks of the faceted fish.
+        public bool SmoothTexture;
 
         public bool Friendly => !S.IsDangerous;
 

@@ -5,16 +5,19 @@ using UnityEngine.Rendering.Universal;
 
 namespace Sealebrities
 {
-    /// Photos for the phone gallery (playtest feedback #9): renders the player's current view into a 512 × 288
-    /// texture WITHOUT the first-person view models (the photo camera's near plane sits behind hands, held items and
-    /// the phone), plus a white shutter flash over the screen. The shutter sound comes from the FX module
-    /// (it listens to Gallery.Added). One render + one 512 × 288 readback per photo; render target and readback
-    /// texture are reused.
+    /// Photos for the phone gallery (playtest feedback #9, K.2 Sealog photos, L.4 collage tiles): renders the lens's
+    /// current view into a 512 × 288 texture WITHOUT the first-person view models – they live on the view-model layer
+    /// that the world camera (and so the copied photo camera) never renders (1d). Only without the player's overlay
+    /// camera (fallback) the near plane is pushed behind hands / held items / the phone. Plus a white shutter flash over
+    /// the screen; the shutter sound comes from the FX module (it listens to Gallery.Added). One render + one 512 × 288
+    /// readback per photo; render target and readback texture are reused.
     public sealed class FilmPhoto
     {
         public const int Width = 512, Height = 288;
-        /// Hands, held items and the raised phone all sit closer than this to the eye.
+        /// Fallback (no view-model overlay camera): hands, held items and the raised phone all sit closer than this.
         public const float PhotoNearClip = 0.65f;
+        /// With the overlay camera the photo may come much closer (macro shots of tiny animals, ch_macro).
+        public const float MacroNearClip = 0.05f;
         const float FlashSeconds = 0.32f;
         const float FlashAlpha = 0.85f;
 
@@ -34,9 +37,22 @@ namespace Sealebrities
         public FilmPhoto(Transform host) { this.host = host; }
 
         // ------------------------------------------------------------------ capture
+        /// Near plane for a photo of the first-person view: macro range with the view-model overlay camera (held items
+        /// are not on the world camera's layers), PhotoNearClip without it.
+        public static float NearClipFor(Camera view)
+        {
+            if (view == null) return PhotoNearClip;
+            return PlayerViewModelCamera.Overlay != null && (view.cullingMask & GameLayers.ViewModelMask) == 0
+                ? Mathf.Max(view.nearClipPlane, MacroNearClip)
+                : Mathf.Max(view.nearClipPlane, PhotoNearClip);
+        }
+
         /// Renders 'view' into the shared readable texture (valid until the next capture) or returns null on failure.
-        /// The caller must hide its own view models that could reach past PhotoNearClip.
-        public Texture2D Capture(Camera view)
+        /// The caller must hide its own view models that could reach past the near plane (fallback mode).
+        public Texture2D Capture(Camera view) => Capture(view, NearClipFor(view));
+
+        /// Same with an explicit near plane (the selfie lens uses its own – there are no hands in front of it).
+        public Texture2D Capture(Camera view, float nearClip)
         {
             if (view == null || host == null) return null;
             if (!EnsureTargets()) return null;
@@ -56,7 +72,7 @@ namespace Sealebrities
                 cam.rect = new Rect(0f, 0f, 1f, 1f);
                 cam.targetTexture = rt;
                 cam.aspect = Width / (float)Height;
-                cam.nearClipPlane = Mathf.Max(view.nearClipPlane, PhotoNearClip);
+                cam.nearClipPlane = Mathf.Max(0.01f, float.IsNaN(nearClip) ? PhotoNearClip : nearClip);
                 if (cam.farClipPlane < cam.nearClipPlane + 10f) cam.farClipPlane = cam.nearClipPlane + 10f;
                 CopyPipelineData(view, cam);
                 cam.Render();
@@ -102,7 +118,9 @@ namespace Sealebrities
                 var dst = to.GetUniversalAdditionalCameraData();
                 if (src == null || dst == null) return;
                 dst.renderType = CameraRenderType.Base;
-                dst.renderPostProcessing = src.renderPostProcessing;
+                // the player's view-model overlay may run the post-processing for the main camera's stack (main camera
+                // off): the photo camera renders alone and needs it itself
+                dst.renderPostProcessing = src.renderPostProcessing || PlayerViewModelCamera.StackRunsPostProcessing(src);
                 dst.antialiasing = src.antialiasing == AntialiasingMode.None ? AntialiasingMode.None : AntialiasingMode.FastApproximateAntialiasing;
                 dst.renderShadows = src.renderShadows;
                 dst.volumeLayerMask = src.volumeLayerMask;
@@ -117,12 +135,16 @@ namespace Sealebrities
 
         // ------------------------------------------------------------------ shutter flash
         /// White flash over the whole view, fading out in ~0.3 s (drawn last, after all scene geometry).
-        public void Flash(Camera view)
+        /// firstPerson: the player's view with the view-model overlay (flash on that layer); false for another lens
+        /// (selfie camera) that renders the default layer.
+        public void Flash(Camera view, bool firstPerson = true)
         {
             if (view == null) return;
             if (!EnsureFlash()) return;
             var t = flashGo.transform;
             if (t.parent != view.transform) t.SetParent(view.transform, false);
+            int layer = firstPerson && PlayerViewModelCamera.Overlay != null ? GameLayers.ViewModel : 0;
+            if (flashGo.layer != layer) flashGo.layer = layer;
             float z = Mathf.Max(0.02f, view.nearClipPlane + 0.02f);
             float h = 2f * z * Mathf.Tan(Mathf.Clamp(view.fieldOfView, 1f, 170f) * 0.5f * Mathf.Deg2Rad) * 1.3f;
             t.localPosition = new Vector3(0f, 0f, z);

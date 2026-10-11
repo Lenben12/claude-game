@@ -4,7 +4,8 @@ using UnityEngine.Rendering;
 
 namespace Sealebrities
 {
-    /// Low-poly ocean ("How to Fish": steel-blue faceted sea, turquoise only in the last metre at the shore).
+    /// Low-poly ocean ("How to Fish": steel-blue faceted sea; round 2 Q4: a wide turquoise lagoon ring around the main
+    /// island, then deep blue; at night a calmer, darker and less saturated navy instead of a vivid blue).
     /// A faceted near grid (3 m triangles, unwelded, flat normals from Waves.HeightAt) follows the camera, snapped to 12 m
     /// so every vertex always samples the same world position; a flat 12 m far ring and plain outer rings reach the horizon.
     /// Colour and opacity come from ONE small ramp texture: every vertex gets uv.x = WorldWaterMap ramp coordinate of the
@@ -41,6 +42,10 @@ namespace Sealebrities
         // (second pass: #6CCFDD α 0.58 still measured #93DBDF – darker, more saturated)
         static readonly Color UnderColor = new Color(0.298f, 0.737f, 0.816f, 0.52f);   // #4CBCD0
         static readonly Color UnderGlow = new Color(0.078f, 0.416f, 0.471f);           // #146A78
+        // Testversion-3 feedback "das Nachtmeer ist knallig blau": at night the surface albedo is darkened and loses more
+        // blue than red/green (a calm grey-navy under the moon), and the glints get softer.
+        static readonly Color NightTint = new Color(0.80f, 0.80f, 0.68f, 1f);
+        const float NightSmoothness = 0.40f;
 
         WorldWaterMap water;
         Mesh nearMesh, farMesh, outerMesh;
@@ -89,6 +94,8 @@ namespace Sealebrities
         void Build()
         {
             idEmission = Shader.PropertyToID("_EmissionColor");
+            idBaseColor = Shader.PropertyToID("_BaseColor");
+            idSmoothness = Shader.PropertyToID("_Smoothness");
 
             ramp = BuildRamp();
             topMat = new Material(MaterialLibrary.Lit) { name = "SB_OceanTop" };
@@ -403,9 +410,22 @@ namespace Sealebrities
                 float day = Mathf.Lerp(0.06f, 1f, EnvState.SunIntensity01);
                 underMat.SetColor(idEmission, UnderGlow * day);
             }
+            else
+            {
+                // calmer night sea (only re-applied when the night blend moved noticeably)
+                float night = Mathf.Clamp01(EnvState.Night01);
+                if (Mathf.Abs(night - nightApplied) > 0.01f)
+                {
+                    nightApplied = night;
+                    topMat.SetColor(idBaseColor, Color.Lerp(Color.white, NightTint, night));
+                    topMat.SetFloat(idSmoothness, Mathf.Lerp(Smoothness, NightSmoothness, night));
+                }
+            }
         }
 
         bool wavesFrozen;
+        float nightApplied = -1f;
+        int idBaseColor, idSmoothness;
 
         /// Displaces the welded grid, then rebuilds and uploads the flat-shaded dynamic triangles.
         void UpdateSurface(bool full)

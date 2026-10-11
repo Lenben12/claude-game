@@ -16,6 +16,10 @@ namespace Sealebrities
         public int face;
         public bool ready;
         public int pingMs;
+        /// Full character look (1c, Q51 gear, Q50 rank). suit/hat/face above stay for older peers.
+        public DiverLook look;
+        /// Stable per-machine player key (Settings.PlayerKey, F.3) – host only, never logged, never sent to other guests.
+        [NonSerialized] public string key;
         public bool IsLocal => id == Net.LocalId;
     }
 
@@ -24,11 +28,11 @@ namespace Sealebrities
     public enum NetCommand : byte
     {
         BankClips,          // args: JSON list of FootageClip from the client's dive
-        RegisterFilmed,     // speciesId, sizeCm, tier, clipValue
-        Upload,             // titleStyle, title
+        RegisterFilmed,     // speciesId, sizeCm, tier, clipValue [, photoId, depth] – with photoId = Journal.RegisterPhoto (K.2)
+        Upload,             // titleStyle, title [, thumbSpecies csv, customTitle 0/1, thumbQuality] (L.4)
         Buy,                // itemId, express
         OpenCrate,          // itemId
-        Sleep,              // – one sleeps = everybody sleeps
+        Sleep,              // – legacy direct sleep (solo/host path). Co-op beds use SleepVote (L.9: everybody must lie down)
         AddCatch,           // JSON FishItem
         ListFish,           // index in the fish inventory
         ListAllFish,        //
@@ -48,7 +52,9 @@ namespace Sealebrities
         public const int MaxPlayers = 4;
         public const int DefaultPort = 27015;
         public const int DiscoveryPort = 27016;
-        public const int ProtocolVersion = 1;
+        /// Bump on every wire, GameState or species-order change (2: Testversion 4 final – EvNotify actor, OpenCrate
+        /// day/time, Kiosk command, Hochsee species ungated). Older builds are refused with the VersionMismatch text.
+        public const int ProtocolVersion = 2;
 
         public static NetMode Mode;
         public static bool IsOnline => Mode != NetMode.Offline;
@@ -165,15 +171,76 @@ namespace Sealebrities
         static void ResetStatics() { BoatRemote = false; BoatDriverId = -1; CreaturesRemote = false; }
     }
 
-    /// Appearance of a bean diver (menu crew, intro, co-op avatars).
+    /// Appearance of a bean diver (menu crew, intro, co-op avatars, character preview, NPC builder).
+    ///
+    /// Conventions (1c, J.3):
+    /// * `face` is the legacy combined index and is always written as skin * 5 + mouth (DiverBuilder reads it today).
+    /// * lookVersion 0 = legacy data (only suit/cuff/hat/face set): Normalized() derives skin and mouth from face.
+    ///   (J.3 wrote "skin &lt; 0 marks old data" – a struct cannot default to −1, so lookVersion carries that.)
+    /// * Colours with alpha 0 mean "default": cuff → Auto (suit lightened 55 %), mask → #1E1B2B, fins → #2B2533.
+    /// Option ranges: Data/CosmeticsDatabase.cs.
     [Serializable]
     public struct DiverLook
     {
+        public const int CurrentVersion = 1;
+
         public Color suit;
         public Color cuff;
-        public int hat;        // 0 none, 1 bucket, 2 viking, 3 shark fin, 4 duck ...
-        public int face;       // mouth/eye expression variant
+        public int hat;        // 0 none, 1 bucket, 2 viking, 3 shark fin, 4 duck, 5 captain … (CosmeticsDatabase)
+        public int face;       // legacy: skin * 5 + mouth
         public bool sitting;
+
+        // ---- round 2 (1c)
+        public int lookVersion;
+        public int pattern;    // suit panel pattern 0..7
+        public int eyes;       // 0 googly, 1 sleepy, 2 cross-eyed, 3 stars, 4 hearts
+        public int brows;      // 0 none, 1 bushy, 2 grumpy, 3 surprised
+        public int skin;       // 0..5 (CosmeticsDatabase.SkinTones)
+        public int mouth;      // 0..4 (smile, open, o, flat, grin)
+        public Color mask;     // mask frame (α 0 = default)
+        public Color fins;     // fin colour (α 0 = default; tier colours override when finTier shows special fins)
+        public bool snorkel;
+
+        // ---- visible gear (Q51) and channel rank badge (Q50)
+        public int tankTier;   // 0 none … 5 trimix
+        public int finTier;    // 0 squeaky yellow … 3 scooter
+        public bool lampOnStrap, cameraOnStrap;
+        public int rank;       // Progression.RankIndex
+        /// K.7 / Q90 suit-shoulder sponsor patch: 1 + index into SponsorDatabase.Sponsors of the channel's first active
+        /// deal (0 = none). LOCAL: every machine sets it from the SHARED deals (DiverSponsor.CurrentIndex) – not on the wire.
+        public int sponsor;
+
+        public static readonly Color DefaultMask = new Color(0.118f, 0.106f, 0.169f);    // #1E1B2B
+        public static readonly Color DefaultFins = new Color(0.169f, 0.145f, 0.2f);      // #2B2533
+
+        /// Legacy-safe copy: derives skin/mouth from face for old data, rewrites face = skin * 5 + mouth, clamps indices.
+        public DiverLook Normalized()
+        {
+            var l = this;
+            if (l.lookVersion < 1)
+            {
+                int f = Mathf.Max(0, l.face);
+                l.skin = f / 5;
+                l.mouth = f % 5;
+                l.lookVersion = CurrentVersion;
+            }
+            l.skin = Mathf.Clamp(l.skin, 0, 5);
+            l.mouth = Mathf.Clamp(l.mouth, 0, 4);
+            l.face = l.skin * 5 + l.mouth;
+            if (l.hat < 0) l.hat = 0;
+            if (l.pattern < 0) l.pattern = 0;
+            if (l.eyes < 0) l.eyes = 0;
+            if (l.brows < 0) l.brows = 0;
+            l.suit.a = 1f;
+            return l;
+        }
+
+        /// Cuff colour to render (Auto → suit lightened 55 %).
+        public Color ResolvedCuff => cuff.a <= 0f ? WithAlpha(Color.Lerp(suit, Color.white, 0.55f)) : WithAlpha(cuff);
+        public Color ResolvedMask => mask.a <= 0f ? DefaultMask : WithAlpha(mask);
+        public Color ResolvedFins => fins.a <= 0f ? DefaultFins : WithAlpha(fins);
+
+        static Color WithAlpha(Color c) { c.a = 1f; return c; }
     }
 
     /// Animation surface of a built diver character (implemented by the Player module on the character root).

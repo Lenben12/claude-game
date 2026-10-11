@@ -56,20 +56,21 @@ namespace Sealebrities
             if (boat == null) return;
             if (boat.HelmOccupied)
             {
-                GameEvents.RaiseToast(Loc.Tr("Besetzt – jemand anderes steuert.", "Occupied – someone else is driving."));
+                GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Besetzt", "Occupied"), Loc.Tr("jemand steuert", "someone is driving"));
                 return;
             }
             boat.EnterHelm();
         }
     }
 
-    /// Stern dive ladder: climb back aboard from the water.
+    /// Stern dive ladder: climb back aboard from the water (with heavy salvage in your arms it is delivered on deck, K.3).
     public class BoatLadderInteractable : MonoBehaviour, IInteractable
     {
         public BoatController boat;
         readonly KeyPrompt prompt = new KeyPrompt(GameAction.Interact, "An Bord klettern", "Climb aboard");
+        readonly KeyPrompt promptSalvage = new KeyPrompt(GameAction.Interact, "Fund an Bord bringen", "Bring the find aboard");
 
-        public string GetPrompt() => boat != null && boat.CanClimbAboard() ? prompt.Text : null;
+        public string GetPrompt() => boat != null && boat.CanClimbAboard() ? (Carry.IsHeavy ? promptSalvage.Text : prompt.Text) : null;
 
         public bool CanInteract() => boat != null && boat.CanClimbAboard();
 
@@ -129,6 +130,185 @@ namespace Sealebrities
         {
             if (CanInteract()) boat.BoardFromDock();
         }
+    }
+
+    /// E.1 the boat's cooler box: snacks from the shared pantry. Opens the UI food panel (FoodSpots.OpenHandler) or,
+    /// without one, eats the most useful snack directly.
+    public class BoatCoolerInteractable : MonoBehaviour, IInteractable
+    {
+        public BoatController boat;
+        string cache;
+        int cacheCount = -1;
+        Language cacheLang;
+        string cacheKey;
+
+        public string GetPrompt()
+        {
+            if (!CanInteract()) return null;
+            int n = Pantry.TotalCount;
+            string key = GameInput.BindingLabel(GameAction.Interact);
+            if (cache == null || n != cacheCount || cacheLang != Loc.Current || !ReferenceEquals(key, cacheKey))
+            {
+                cacheCount = n;
+                cacheLang = Loc.Current;
+                cacheKey = key;
+                cache = n > 0
+                    ? key + Loc.Tr(" – Kühlbox (" + n + " Snacks)", " – Cooler (" + n + " snacks)")
+                    : key + Loc.Tr(" – Kühlbox (leer)", " – Cooler (empty)");
+            }
+            return cache;
+        }
+
+        public bool CanInteract()
+        {
+            var p = Refs.Player;
+            if (boat == null || p == null || (p is Object o && o == null)) return false;
+            return GameManager.I != null && GameManager.I.InGame && !p.IsInWater && !p.IsSeated && boat.PlayerAboard;
+        }
+
+        public void Interact()
+        {
+            if (!CanInteract()) return;
+            BoatSynth.PlayAt(BoatSynth.Thunk, transform.position, 0.25f, 1.6f, 10f);
+            if (FoodSpots.Open(FoodSpots.Boat)) return;
+            FoodSpots.EatNext();
+        }
+    }
+
+    /// The whole hull (colliders): "E – An Bord gehen" when the boat lies next to a dock, the village jetty or a
+    /// beach and the player stands on land within reach (L.8 second landing point – works at any jetty).
+    public class BoatBoardInteractable : MonoBehaviour, IInteractable
+    {
+        const float Reach = 4.5f;
+        public BoatController boat;
+        readonly KeyPrompt prompt = new KeyPrompt(GameAction.Interact, "An Bord gehen", "Board the boat");
+
+        public string GetPrompt() => CanInteract() ? prompt.Text : null;
+
+        public bool CanInteract()
+        {
+            if (boat == null || !boat.CanBoardFromDock()) return false;
+            var p = Refs.Player;
+            if (p == null || p.Root == null) return false;
+            Vector3 feet = p.Root.position;
+            if (feet.y < Waves.HeightAt(feet.x, feet.z) - 0.1f) return false;
+            Vector3 lp = boat.transform.InverseTransformPoint(feet);
+            float dx = Mathf.Max(0f, Mathf.Abs(lp.x) - 1.3f), dz = Mathf.Max(0f, lp.z - 3.8f) + Mathf.Max(0f, -4.4f - lp.z);
+            return dx * dx + dz * dz < Reach * Reach;
+        }
+
+        public void Interact()
+        {
+            if (CanInteract()) boat.BoardFromDock();
+        }
+    }
+
+    /// Getting off the boat anywhere it lies alongside something solid (the dock, the village jetty, a beach): while
+    /// the local player stands on deck at a rail and looks over it toward land within ~6.5 m, the prompt reads
+    /// "E – Aussteigen" and E puts them there. A proximity prompt like DockLadder (the interactor ray only sees the
+    /// rail): written only while nobody else owns the prompt. Probes run 5× per second, never per frame.
+    [DefaultExecutionOrder(76)]
+    public class BoatDisembark : MonoBehaviour
+    {
+        BoatController boat;
+        readonly KeyPrompt prompt = new KeyPrompt(GameAction.Interact, "Aussteigen", "Get off");
+        string written;
+        float probe;
+        bool hasSpot;
+        Vector3 spot;
+        float spotYaw;
+        static readonly float[] ProbeZ = { -2.6f, -1.2f, 0.4f, 1.8f };
+
+        public void Init(BoatController b) { boat = b; }
+
+        void LateUpdate()
+        {
+            var p = Refs.Player;
+            var gm = GameManager.I;
+            bool can = boat != null && gm != null && gm.InGame && p != null && !(p is Object o && o == null) && p.Root != null && p.View != null
+                       && !UIState.BlocksGameplay && !p.IsInWater && !p.IsSeated && !p.IsFainting && boat.PlayerAboard && !boat.PlayerDriving;
+            if (!can)
+            {
+                hasSpot = false;
+                Release();
+                return;
+            }
+            probe -= Time.deltaTime;
+            if (probe <= 0f)
+            {
+                probe = 0.2f;
+                hasSpot = FindSpot(p, out spot, out spotYaw);
+            }
+            string cur = InteractionPrompt.Text;
+            if (!hasSpot || (cur != null && !ReferenceEquals(cur, written)))
+            {
+                Release();
+                return;
+            }
+            if (written != null && GameInput.InteractPressed)
+            {
+                p.TeleportTo(spot, spotYaw);
+                BoatSynth.PlayAt(BoatSynth.Thunk, spot, 0.4f, 1.2f, 20f);
+                hasSpot = false;
+                Release();
+                return;
+            }
+            written = prompt.Text;
+            InteractionPrompt.Text = written;
+        }
+
+        /// The player stands at a rail and looks over it: is there land (≤ 1.6 m below / ≤ 1.2 m above the deck) out there?
+        bool FindSpot(IPlayer p, out Vector3 at, out float yaw)
+        {
+            at = Vector3.zero;
+            yaw = 0f;
+            Transform bt = boat.transform;
+            Vector3 lp = bt.InverseTransformPoint(p.Root.position);
+            Vector3 look = p.View.transform.forward;
+            look.y = 0f;
+            if (look.sqrMagnitude < 1e-4f) return false;
+            look.Normalize();
+            for (int side = -1; side <= 1; side += 2)
+            {
+                // near this rail and looking over it
+                if (side * lp.x < 0.15f) continue;
+                Vector3 outward = bt.right * side;
+                outward.y = 0f;
+                outward.Normalize();
+                if (Vector3.Dot(look, outward) < 0.45f) continue;
+                float deckY = p.Root.position.y;
+                for (int zi = 0; zi < ProbeZ.Length; zi++)
+                {
+                    if (Mathf.Abs(ProbeZ[zi] - lp.z) > 1.6f) continue;
+                    for (float d = 1.6f; d <= 6.6f; d += 0.5f)
+                    {
+                        Vector3 q = bt.TransformPoint(new Vector3(side * 1.1f, 0f, ProbeZ[zi])) + outward * d;
+                        float y = BoatSurface.Below(new Vector3(q.x, deckY + 3f, q.z), 6f, out bool water);
+                        if (water) continue;
+                        if (y < deckY - 1.6f || y > deckY + 1.2f) continue;
+                        if (BoatHitsBoat(q)) continue;
+                        at = new Vector3(q.x, y + 0.05f, q.z);
+                        yaw = Mathf.Atan2(outward.x, outward.z) * Mathf.Rad2Deg;
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        bool BoatHitsBoat(Vector3 q)
+        {
+            Vector3 lq = boat.transform.InverseTransformPoint(q);
+            return Mathf.Abs(lq.x) < 1.4f && lq.z > -4.6f && lq.z < 4.1f;
+        }
+
+        void Release()
+        {
+            if (written != null && ReferenceEquals(InteractionPrompt.Text, written)) InteractionPrompt.Text = null;
+            written = null;
+        }
+
+        void OnDestroy() => Release();
     }
 
     /// Anchor winch on the foredeck: drop or raise the anchor.

@@ -12,12 +12,21 @@ namespace Sealebrities
     /// clean end of a session. The host is player 0; a client's id is its transport connection id (1, 2, …).
     ///
     /// Flow: host StartHost → listener + LAN beacon → host starts/continues a game. Client Join → TCP connect →
-    /// Hello {protocol, version, name, look} → host Welcome {id, players, spawn hint, full state} (or Reject full/version)
-    /// → client fades into the host's world (GameManager.JoinAsClient, saving disabled). Drop-in join works any time the
-    /// host is in game. The host leaving ends the session for everybody (clients return to the menu with a notice).
+    /// Hello {protocol, version, name, legacy look, player key, full DiverLook} → host Welcome {id, players (+ looks),
+    /// spawn hint, full state, the guest's PlayerRecord} (or Reject full/version) → client fades into the host's world
+    /// (GameManager.JoinAsClient, saving disabled) and applies its record (F.3: hotbar, equipment choice, stats and
+    /// achievements kept in the HOST save under Settings.PlayerKey – a guest keeps everything when the host reloads).
+    /// Drop-in join works any time the host is in game. The host leaving ends the session for everybody (clients return
+    /// to the menu with „Dein Fortschritt ist beim Host gespeichert.“); the host's pause menu asks first (F.2,
+    /// HostLeaveNeedsConfirm). Ending a session remembers the friends' looks for the menu crew (Q44, lastCrew).
     ///
     /// Events: Net.PlayerJoined / Net.PlayerLeft are raised for REMOTE players only (the local entry is in Net.Players
     /// from the start). NetSession.Started fires once Net.Mode/Players are set; NetSession.Ended after the reset.
+    ///
+    /// Steam (recommended, Net/Steam): StartSteamHost after SteamLobby.CreateForHosting (P2P listen socket, no port, no
+    /// LAN beacon); JoinSteamLobby → SteamLobby.Join (lobby data / version check) → SteamNetTransport.StartSteamClient
+    /// to the lobby owner → the same Hello / Welcome handshake. Ending / failing a Steam session leaves the lobby.
+    /// Privacy: player names (default = Steam persona name) and Steam ids are never written to the log.
     public static class NetSession
     {
         public enum Phase { Idle, Hosting, Connecting, Joining, Joined }
@@ -26,6 +35,8 @@ namespace Sealebrities
         /// True on the hosting machine (also before the host entered the game).
         public static bool IsHostSide => Current == Phase.Hosting;
         public static bool IsConnecting => Current == Phase.Connecting;
+        /// The session (or the join in progress) runs over Steam (lobby + P2P relay) instead of TCP/IP.
+        public static bool IsSteam { get; private set; }
         /// Port the host actually listens on (may be a fallback port, see StartHost).
         public static int HostPort { get; private set; } = Net.DefaultPort;
         /// Port the player asked for when hosting (the lobby's port field shows this one).
@@ -47,6 +58,22 @@ namespace Sealebrities
         public static event Action Started;
         /// The session is over and everything is offline again. Argument: localized notice ("" when we left ourselves).
         public static event Action<string> Ended;
+        /// Names / looks / pings of the player list changed (host: after a broadcast, client: after a received list).
+        public static event Action PlayersChanged;
+
+        // ---- F.2 host leaves
+        /// Guests connected to this host right now (0 on clients / offline).
+        public static int GuestCount => Net.IsHost ? Mathf.Max(0, Net.Players.Count - 1) : 0;
+        /// The host's pause menu must ask „Alle werden getrennt. Wirklich beenden?“ before „Speichern & Sitzung beenden“
+        /// or „Spiel beenden“ (F.2).
+        public static bool HostLeaveNeedsConfirm => GuestCount > 0;
+        public static string HostLeaveQuestion => Loc.Tr("Alle werden getrennt. Wirklich beenden?", "Everyone will be disconnected. Really end?");
+        public static string HostLeaveConfirmLabel => Loc.Tr("Beenden", "End");
+        public static string HostLeaveCancelLabel => Loc.Tr("Abbrechen", "Cancel");
+
+        // ---- F.3 the guest's record from the Welcome (applied once the world is entered)
+        static PlayerRecord welcomeRecord;
+        static bool welcomeRecordKnown;
 
         /// Default suit colours P1–P4 (art bible §1.12) – used when two players picked the same colour.
         public static readonly Color[] PlayerColors =
@@ -57,6 +84,9 @@ namespace Sealebrities
 
         public const float TimeoutSeconds = 10f;
         const float HelloTimeout = 10f, NotReadyTimeout = 90f, WelcomeTimeout = 20f, RetryWelcomeTimeout = 8f;
+        /// Steam: entering the lobby + the first P2P route through the relay network can take a while.
+        const float SteamWelcomeTimeout = 40f;
+        const int SteamConnectTimeoutMs = 30000;
 
         sealed class Pending
         {
@@ -81,11 +111,15 @@ namespace Sealebrities
         static int retryPort;
         static bool retryExplicitPort = true;
 
+        // Steam join in progress (a newer join / cancel invalidates older lobby results)
+        static int steamJoinToken;
+
         static float Now => Time.realtimeSinceStartup;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics()
         {
+            IsSteam = false; steamJoinToken = 0;
             Current = Phase.Idle; HostPort = Net.DefaultPort; RequestedPort = Net.DefaultPort; JoinTarget = ""; HostName = "";
             retryExplicitPort = true;
             Status = ""; StatusIsError = false; StatusChanged = null; Started = null; Ended = null;
@@ -94,6 +128,7 @@ namespace Sealebrities
             ending = false; quitDone = false; installed = false; savingOverridden = false; savingPrev = false;
             hostToastDelay = -1f; clientToastDelay = -1f;
             retryEnabled = false; retryUntil = 0f; retryAt = 0f; retryHost = null; retryPort = 0;
+            PlayersChanged = null; welcomeRecord = null; welcomeRecordKnown = false;
         }
 
         internal static void Install()
@@ -125,29 +160,69 @@ namespace Sealebrities
             return p != null;
         }
 
-        /// Name this machine uses in co-op (-netname wins over the settings).
+        /// Name this machine uses in co-op: -netname, else the name from the lobby / settings, else the Steam persona name
+        /// (when Steam runs), else "Taucher".
         public static string LocalName()
         {
             string n = NetBoot.NameOverride;
-            return CleanName(string.IsNullOrWhiteSpace(n) ? Settings.DisplayName : n);
+            if (string.IsNullOrWhiteSpace(n)) n = Settings.Data != null ? Settings.Data.playerName : null;
+            if (string.IsNullOrWhiteSpace(n)) n = SteamService.PersonaName;
+            return CleanName(n);
         }
 
-        static NetPlayerInfo LocalInfo(int id) => new NetPlayerInfo
+        static NetPlayerInfo LocalInfo(int id)
         {
-            id = id,
-            name = LocalName(),
-            suit = Settings.Data.suitColor,
-            hat = Settings.Data.hat,
-            face = Settings.Data.face,
-            ready = true
-        };
+            var look = NetLookCodec.Sanitize(NetCrew.WireLook());
+            return new NetPlayerInfo
+            {
+                id = id,
+                name = LocalName(),
+                suit = look.suit,
+                hat = look.hat,
+                face = look.face,
+                look = look,
+                key = Settings.PlayerKey,
+                ready = true
+            };
+        }
 
         static string CleanName(string n)
         {
             if (string.IsNullOrWhiteSpace(n)) return Loc.Tr("Taucher", "Diver");
-            n = n.Trim().Replace('\n', ' ').Replace('\r', ' ').Replace('|', '/');
-            if (n.Length > Settings.MaxNameLength) n = n.Substring(0, Settings.MaxNameLength);
+            var sb = new System.Text.StringBuilder(n.Length);
+            for (int i = 0; i < n.Length; i++)
+            {
+                char c = n[i];
+                if (char.IsControl(c)) c = ' ';
+                else if (c == '|') c = '/';
+                sb.Append(c);
+            }
+            n = sb.ToString().Trim();
+            if (n.Length == 0) return Loc.Tr("Taucher", "Diver");
+            if (n.Length > Settings.MaxNameLength) n = n.Substring(0, Settings.MaxNameLength).Trim();
             return n;
+        }
+
+        /// A co-op name as the host stores it (trimmed, no control characters, max 16 characters, never empty).
+        public static string CleanPlayerName(string n) => CleanName(n);
+
+        /// Host: `name` made unique among the other players (a rename keeps its own name).
+        public static string UniqueNameFor(string name, int playerId)
+        {
+            string baseName = name;
+            int k = 2;
+            while (k < 20)
+            {
+                bool taken = false;
+                for (int i = 0; i < Net.Players.Count; i++)
+                {
+                    var p = Net.Players[i];
+                    if (p.id != playerId && string.Equals(p.name, name, StringComparison.OrdinalIgnoreCase)) { taken = true; break; }
+                }
+                if (!taken) return name;
+                name = baseName + " " + k++;
+            }
+            return name;
         }
 
         static void SetStatus(string text, bool error)
@@ -256,8 +331,56 @@ namespace Sealebrities
             else if (bind.Equals(IPAddress.Any) && LoopbackShadowed(port))
                 Debug.LogWarning("[Net] 127.0.0.1:" + port + " belongs to another program (e.g. Apple Mobile Device Service) – guests on this PC connect via the LAN address");
 
-            NetCoreRunner.Transport = t;
             HostPort = port;
+            IsSteam = false;
+            BeginHosting(t, "TCP host " + t.Endpoint, true, port != requested
+                ? Loc.Tr($"Host läuft auf Port {port} (Port {requested} ist auf diesem PC belegt)", $"Hosting on port {port} (port {requested} is taken on this PC)")
+                : Loc.Tr($"Host läuft (Port {port})", $"Hosting (port {port})"));
+            return true;
+        }
+
+        /// Hosting over Steam: P2P listen socket on the relay network (no port, no IP, no LAN beacon). Call after
+        /// SteamLobby.CreateForHosting succeeded; the caller then starts or loads the game (NewGame / LoadGame).
+        public static bool StartSteamHost(out string error)
+        {
+            error = null;
+            if (Current != Phase.Idle)
+            {
+                // ending a session leaves the Steam lobby – the caller created the lobby for THIS session, so keep it
+                ulong keep = SteamLobby.CurrentLobby;
+                EndSession(NetEndReason.LocalLeft, null, false);
+                if (keep != 0 && SteamLobby.CurrentLobby != keep)
+                {
+                    error = Loc.Tr("Die vorige Koop-Sitzung lief noch – bitte nochmal auf „Lobby öffnen“ klicken.",
+                                   "The previous co-op session was still running – please click “Open lobby” again.");
+                    return false;
+                }
+            }
+            if (!SteamService.Available)
+            {
+                error = SteamService.UnavailableText();
+                return false;
+            }
+            var t = new SteamNetTransport();
+            try
+            {
+                t.StartSteamServer();
+            }
+            catch (Exception e)
+            {
+                t.Shutdown(0);
+                error = Loc.Tr("Hosten über Steam nicht möglich: ", "Cannot host via Steam: ") + e.Message;
+                NetDiagnostics.SetError(error);
+                return false;
+            }
+            IsSteam = true;
+            BeginHosting(t, "Steam host (P2P relay)", false, Loc.Tr("Host läuft über Steam – lade deine Freunde ein.", "Hosting via Steam – invite your friends."));
+            return true;
+        }
+
+        static void BeginHosting(INetTransport t, string diagnostics, bool lanBeacon, string status)
+        {
+            NetCoreRunner.Transport = t;
             Net.Mode = NetMode.Host;
             Net.LocalId = 0;
             Net.LocalName = LocalName();
@@ -266,22 +389,23 @@ namespace Sealebrities
             HostName = Net.LocalName;
             ResetFlags();
             pending.Clear();
-            try { beacon = new NetLanBeacon(); }
-            catch (Exception e) { beacon = null; Debug.LogWarning("[Net] LAN beacon unavailable: " + e.Message); }
+            beacon = null;
+            if (lanBeacon)
+            {
+                try { beacon = new NetLanBeacon(); }
+                catch (Exception e) { beacon = null; Debug.LogWarning("[Net] LAN beacon unavailable: " + e.Message); }
+            }
             Current = Phase.Hosting;
             quitDone = false;
             Application.runInBackground = true;
             NetDiagnostics.Connected = true;
-            NetDiagnostics.Transport = "TCP host " + t.Endpoint;
+            NetDiagnostics.Transport = diagnostics;
             NetDiagnostics.LastError = "";
             NetCommands.BeginHost();
             NetState.BeginHost();
-            SetStatus(port != requested
-                ? Loc.Tr($"Host läuft auf Port {port} (Port {requested} ist auf diesem PC belegt)", $"Hosting on port {port} (port {requested} is taken on this PC)")
-                : Loc.Tr($"Host läuft (Port {port})", $"Hosting (port {port})"), false);
-            Debug.Log("[Net] hosting on " + t.Endpoint);
+            SetStatus(status, false);
+            Debug.Log("[Net] hosting (" + diagnostics + ")");
             Started?.Invoke();
-            return true;
         }
 
         static Pending FindPending(int conn)
@@ -312,15 +436,30 @@ namespace Sealebrities
                 Reject(p, NetEndReason.Full);
                 return;
             }
+            // round 2: the machine's player key (F.3 – never logged) and the full character look (1c)
+            string key = null;
+            DiverLook look;
+            bool legacy = r.AtEnd;
+            if (!legacy)
+            {
+                key = r.Str();
+                look = NetLookCodec.Read(r);
+            }
+            else look = NetLookCodec.FromLegacy(suit, hat, face);
+            look = NetLookCodec.Sanitize(look);
+            // a customised look (character screen) stays exactly as chosen; only legacy peers get a free colour
+            if (legacy) look.suit = UniqueSuit(look.suit);
             p.hello = true;
             p.since = Now;
             p.info = new NetPlayerInfo
             {
                 id = from,
                 name = UniqueName(CleanName(name)),
-                suit = UniqueSuit(suit),
-                hat = Mathf.Clamp(hat, 0, 16),
-                face = Mathf.Clamp(face, 0, 16),
+                suit = look.suit,
+                hat = look.hat,
+                face = look.face,
+                look = look,
+                key = UniqueKey(key, from),
                 ready = true
             };
             var gm = GameManager.I;
@@ -358,18 +497,51 @@ namespace Sealebrities
             // build everything that does not use the shared writer first
             Vector3 spawn = HostSpawnHint(out bool near, out float yaw);
             byte[] state = NetState.BuildSnapshot(out bool zipped, out int seq);
+            // F.3: the record this host keeps for that machine (a fresh one when the key is new)
+            bool known = PlayerRecords.Find(info.key) != null;
+            var rec = PlayerRecords.ForGuest(info.key, info.name);
+            string recJson = "";
+            if (rec != null)
+            {
+                rec.name = info.name;
+                rec.look = info.look;
+                try { recJson = JsonUtility.ToJson(rec); }
+                catch (Exception e) { Debug.LogWarning("[Net] player record could not be written: " + e.Message); recJson = ""; }
+            }
 
             var w = NetCoreWriter.Begin().Int(info.id);
             WritePlayers(w);
             w.Bool(near).Vec3(spawn).Float(yaw);
             w.Int((int)gm.State.difficulty);
             w.Bool(zipped).Int(seq).Blob(state);
+            w.Bool(known && recJson.Length > 0).Str(recJson);
             t.Send(info.id, NetCoreMsg.Welcome, 0, w.ToArray(), true);
 
             BroadcastPlayerList();
-            Debug.Log("[Net] player " + info.id + " '" + info.name + "' joined (" + Net.Players.Count + "/" + Net.MaxPlayers + ")");
+            // no names (or player keys) in the log: the default co-op name is the Steam persona name
+            Debug.Log("[Net] player " + info.id + " joined (" + Net.Players.Count + "/" + Net.MaxPlayers + ", " + (known ? "returning" : "new") + " crew member)");
             Net.RaisePlayerJoined(info);
-            GameEvents.RaiseToast(Loc.Tr($"{info.name} ist an Bord!", $"{info.name} joined the crew!"));
+            GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr($"{info.name} ist an Bord!", $"{info.name} joined the crew!"));
+        }
+
+        /// F.3 player keys must be unique in a session (two windows on one PC without -netname share settings.json):
+        /// a duplicate gets a per-connection suffix (its record then lives only for this session). Empty (older peers):
+        /// a random key.
+        static string UniqueKey(string key, int conn)
+        {
+            if (string.IsNullOrWhiteSpace(key)) return "guest-" + Guid.NewGuid().ToString("N");
+            key = key.Trim();
+            if (key.Length > 80) key = key.Substring(0, 80);
+            if (KeyTaken(key)) key = key + "#" + conn.ToString(CultureInfo.InvariantCulture);
+            return key;
+        }
+
+        static bool KeyTaken(string key)
+        {
+            if (key == Settings.PlayerKey) return true;
+            for (int i = 0; i < Net.Players.Count; i++) if (Net.Players[i].key == key) return true;
+            for (int i = 0; i < pending.Count; i++) if (pending[i].info != null && pending[i].info.key == key) return true;
+            return false;
         }
 
         static string UniqueName(string n)
@@ -434,11 +606,13 @@ namespace Sealebrities
             if (NetFlags.BoatDriverId == p.id) NetFlags.BoatDriverId = -1;
             NetCommands.Forget(p.id);
             BroadcastPlayerList();
-            Debug.Log("[Net] player " + p.id + " '" + p.name + "' left (" + reason + ")");
+            Debug.Log("[Net] player " + p.id + " left (" + reason + ")");
             Net.RaisePlayerLeft(p);
-            GameEvents.RaiseToast(reason == NetEndReason.Timeout || reason == NetEndReason.Lost
-                ? Loc.Tr($"{p.name} hat die Verbindung verloren", $"{p.name} lost the connection")
-                : Loc.Tr($"{p.name} ist von Bord gegangen", $"{p.name} left the crew"));
+            // L.10: icon · one short line · chip
+            if (reason == NetEndReason.Timeout || reason == NetEndReason.Lost)
+                GameEvents.RaiseNotify(NotifyKind.Warning, p.name, Loc.Tr("Verbindung weg", "Connection lost"));
+            else
+                GameEvents.RaiseNotify(NotifyKind.Info, p.name, Loc.Tr("von Bord", "left"));
         }
 
         static void OnBye(int from, byte[] payload)
@@ -451,6 +625,7 @@ namespace Sealebrities
             NetCoreRunner.Transport?.Disconnect(from, "bye");
         }
 
+        /// Player list: id, name, legacy look (suit/hat/face), ping and the full DiverLook (1c). Keys never travel.
         static void WritePlayers(NetCoreWriter w)
         {
             var list = Net.Players;
@@ -459,6 +634,8 @@ namespace Sealebrities
             {
                 var p = list[i];
                 w.Int(p.id).Str(p.name).Color(p.suit).Int(p.hat).Int(p.face).Int(p.pingMs);
+                var look = p.look.lookVersion >= 1 ? p.look : NetLookCodec.FromLegacy(p.suit, p.hat, p.face);
+                NetLookCodec.Write(w, look);
             }
         }
 
@@ -469,6 +646,7 @@ namespace Sealebrities
             for (int i = 0; i < n; i++)
             {
                 var p = new NetPlayerInfo { id = r.Int(), name = r.Str(), suit = r.Color(), hat = r.Int(), face = r.Int(), pingMs = r.Int(), ready = true };
+                p.look = NetLookCodec.Sanitize(NetLookCodec.Read(r));
                 into.Add(p);
             }
         }
@@ -479,7 +657,11 @@ namespace Sealebrities
             var w = NetCoreWriter.Begin();
             WritePlayers(w);
             NetBus.Send(NetCoreMsg.PlayerList, w.ToArray(), NetBus.Everyone, true);
+            PlayersChanged?.Invoke();
         }
+
+        /// Host: sends the player list now (a name or look changed – NetCrew).
+        public static void BroadcastPlayerListNow() => BroadcastPlayerList();
 
         // =================================================================== client
         /// Parses "ip", "ip:port", "[v6]:port" or "host:port".
@@ -560,6 +742,7 @@ namespace Sealebrities
             ResolveSamePcTarget(ref connectHost, ref connectPort, explicitPort);
             var t = new TcpNetTransport();
             NetCoreRunner.Transport = t;
+            IsSteam = false;
             Current = Phase.Connecting;
             quitDone = false;
             connectStarted = Now;
@@ -574,6 +757,58 @@ namespace Sealebrities
             catch (Exception e)
             {
                 FailJoin(Loc.Tr("Verbindung fehlgeschlagen: ", "Connection failed: ") + e.Message);
+            }
+        }
+
+        /// Joins a friend's Steam lobby (invite, "Spiel beitreten" in the friends list, +connect_lobby, lobby screen list):
+        /// enter the lobby (SEALEBRITIES + same version?) → P2P connect to the lobby owner → Hello / Welcome as usual.
+        public static void JoinSteamLobby(ulong lobbyId)
+        {
+            if (Current != Phase.Idle) EndSession(NetEndReason.LocalLeft, null, false);
+            retryEnabled = false;
+            var gm = GameManager.I;
+            if (gm != null && gm.InGame)
+            {
+                SetStatus(Loc.Tr("Erst zurück ins Hauptmenü.", "Return to the main menu first."), true);
+                return;
+            }
+            if (!SteamService.Available)
+            {
+                SetStatus(SteamService.UnavailableText(), true);
+                return;
+            }
+            IsSteam = true;
+            Current = Phase.Connecting;
+            quitDone = false;
+            connectStarted = Now;
+            JoinTarget = "Steam";
+            NetDiagnostics.Transport = "Steam client (lobby)";
+            SetStatus(Loc.Tr("Steam-Lobby wird betreten …", "Entering the Steam lobby …"), false);
+            Debug.Log("[Net] joining a co-op game via Steam");
+            int token = ++steamJoinToken;
+            SteamLobby.Join(lobbyId, (ok, hostId, err) => OnSteamLobbyEntered(token, ok, hostId, err));
+        }
+
+        static void OnSteamLobbyEntered(int token, bool ok, ulong hostId, string error)
+        {
+            if (token != steamJoinToken || Current != Phase.Connecting || !IsSteam) return;   // cancelled meanwhile
+            if (!ok)
+            {
+                FailJoin(string.IsNullOrEmpty(error) ? Loc.Tr("Beitritt über Steam fehlgeschlagen.", "Joining via Steam failed.") : error);
+                return;
+            }
+            var t = new SteamNetTransport();
+            NetCoreRunner.Transport = t;
+            connectStarted = Now;   // fresh timeout for the P2P route
+            NetDiagnostics.Transport = "Steam client (P2P relay)";
+            SetStatus(Loc.Tr("Verbinde über Steam mit dem Host …", "Connecting to the host via Steam …"), false);
+            try
+            {
+                t.StartSteamClient(hostId, SteamConnectTimeoutMs);
+            }
+            catch (Exception e)
+            {
+                FailJoin(Loc.Tr("Verbindung über Steam fehlgeschlagen: ", "Connecting via Steam failed: ") + e.Message);
             }
         }
 
@@ -673,6 +908,12 @@ namespace Sealebrities
             var t = NetCoreRunner.Transport;
             NetCoreRunner.Transport = null;
             t?.Shutdown(0);
+            if (IsSteam)
+            {
+                steamJoinToken++;
+                SteamLobby.Leave();
+                IsSteam = false;
+            }
             Current = Phase.Idle;
             NetDiagnostics.Connected = false;
             NetDiagnostics.Transport = "offline";
@@ -690,14 +931,25 @@ namespace Sealebrities
             var t = NetCoreRunner.Transport;
             if (t == null) return;
             SetStatus(Loc.Tr("Verbunden – warte auf den Host …", "Connected – waiting for the host …"), false);
+            var look = NetLookCodec.Sanitize(Settings.Look);
+            look.lampOnStrap = false;   // gear is unknown in the menu – the first in-game look update brings it
+            look.cameraOnStrap = false;
             var w = NetCoreWriter.Begin().Int(Net.ProtocolVersion).Str(Application.version).Str(LocalName())
-                .Color(Settings.Data.suitColor).Int(Settings.Data.hat).Int(Settings.Data.face);
+                .Color(look.suit).Int(look.hat).Int(look.face);
+            // round 2: player key (F.3, never logged) + full look (1c)
+            w.Str(Settings.PlayerKey);
+            NetLookCodec.Write(w, look);
             t.Send(0, NetCoreMsg.Hello, 0, w.ToArray(), true);
         }
 
         internal static void OnTransportFailed(string reason)
         {
             if (Current != Phase.Connecting) return;
+            if (IsSteam)
+            {
+                FailJoin(SteamConnectErrorText(reason));
+                return;
+            }
             if ((reason == "refused" || reason == "timeout") && TryScheduleRetry()) return;
             retryEnabled = false;
             FailJoin(ConnectErrorText(reason));
@@ -765,6 +1017,20 @@ namespace Sealebrities
             bool zipped = r.Bool();
             int seq = r.Int();
             byte[] blob = r.Blob();
+            // F.3: the record the host keeps for this machine
+            welcomeRecord = null;
+            welcomeRecordKnown = false;
+            if (!r.AtEnd)
+            {
+                bool known = r.Bool();
+                string json = r.Str();
+                if (known && !string.IsNullOrEmpty(json))
+                {
+                    try { welcomeRecord = JsonUtility.FromJson<PlayerRecord>(json); }
+                    catch (Exception e) { welcomeRecord = null; Debug.LogWarning("[Net] the host's player record could not be read: " + e.Message); }
+                    welcomeRecordKnown = welcomeRecord != null;
+                }
+            }
 
             GameState state;
             try { state = NetState.DecodeSnapshot(blob, zipped); }
@@ -812,6 +1078,17 @@ namespace Sealebrities
             if (gm == null) return;
             gm.JoinAsClient(state);
             Current = Phase.Joined;
+            // F.3: hotbar, equipment choice, stats and achievements this host kept for us (a rejoin after the host
+            // reloaded finds everything again); a host that never saw this machine keeps our local coop_player.json
+            bool known = welcomeRecordKnown && welcomeRecord != null;
+            if (known)
+            {
+                try { PlayerRecords.ApplyToLocal(welcomeRecord); }
+                catch (Exception e) { Debug.LogWarning("[Net] applying the player record failed: " + e.Message); known = false; }
+            }
+            welcomeRecord = null;
+            welcomeRecordKnown = false;
+            NetCrew.OnClientEnteredWorld(known);
             NetState.ClientEnteredWorld();
             if (near) PlaceNear(spawn, yaw);
             clientToastDelay = 1.2f;
@@ -856,7 +1133,7 @@ namespace Sealebrities
                 Net.Players.RemoveAt(i);
                 if (NetFlags.BoatDriverId == old.id) NetFlags.BoatDriverId = -1;
                 Net.RaisePlayerLeft(old);
-                if (announce) GameEvents.RaiseToast(Loc.Tr($"{old.name} ist von Bord gegangen", $"{old.name} left the crew"));
+                if (announce) GameEvents.RaiseNotify(NotifyKind.Info, old.name, Loc.Tr("von Bord", "left"));
             }
             for (int k = 0; k < tmpPlayers.Count; k++)
             {
@@ -868,7 +1145,7 @@ namespace Sealebrities
                     if (!np.IsLocal)
                     {
                         Net.RaisePlayerJoined(np);
-                        if (announce) GameEvents.RaiseToast(Loc.Tr($"{np.name} ist an Bord!", $"{np.name} joined the crew!"));
+                        if (announce) GameEvents.RaiseNotify(NotifyKind.Info, np.name, Loc.Tr("an Bord!", "joined!"));
                     }
                 }
                 else
@@ -877,9 +1154,12 @@ namespace Sealebrities
                     cur.suit = np.suit;
                     cur.hat = np.hat;
                     cur.face = np.face;
+                    cur.look = np.look;
                     cur.pingMs = np.pingMs;
+                    if (cur.IsLocal) Net.LocalName = np.name;   // the host may have made our name unique
                 }
             }
+            PlayersChanged?.Invoke();
         }
 
         static void OnPlayerPings(int from, byte[] payload)
@@ -936,11 +1216,13 @@ namespace Sealebrities
                 case Phase.Hosting: TickHost(dt); break;
                 case Phase.Connecting:
                     // auto-retrying joins give up on a silent attempt sooner (something else may answer on that port)
-                    if (Now - connectStarted > (retryEnabled ? RetryWelcomeTimeout : WelcomeTimeout))
+                    if (Now - connectStarted > (IsSteam ? SteamWelcomeTimeout : retryEnabled ? RetryWelcomeTimeout : WelcomeTimeout))
                     {
-                        if (TryScheduleRetry()) break;
+                        if (!IsSteam && TryScheduleRetry()) break;
                         retryEnabled = false;
-                        FailJoin(Loc.Tr("Der Host antwortet nicht (Zeitüberschreitung).", "The host does not answer (timeout)."));
+                        FailJoin(IsSteam
+                            ? SteamConnectErrorText("timeout")
+                            : Loc.Tr("Der Host antwortet nicht (Zeitüberschreitung).", "The host does not answer (timeout)."));
                     }
                     break;
                 case Phase.Joining:
@@ -1016,15 +1298,20 @@ namespace Sealebrities
             if (hostToastDelay > 0f)
             {
                 hostToastDelay -= dt;
-                if (hostToastDelay <= 0f && inGame)
+                if (hostToastDelay <= 0f && inGame && IsSteam)
+                {
+                    GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Koop über Steam offen", "Co-op open via Steam"), Loc.Tr("Esc → Freunde einladen", "Esc → Invite friends"));
+                    if (GameManager.SavingDisabled)
+                        GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Testsitzung", "Test session"), Loc.Tr("nicht gespeichert", "not saved"));
+                }
+                else if (hostToastDelay <= 0f && inGame)
                 {
                     string ip = NetAddresses.PrimaryLan();
                     if (!string.IsNullOrEmpty(ip) && HostPort != Net.DefaultPort) ip += ":" + HostPort;
-                    GameEvents.RaiseToast(string.IsNullOrEmpty(ip)
-                        ? Loc.Tr($"Koop offen – Port {HostPort}", $"Co-op open – port {HostPort}")
-                        : Loc.Tr($"Koop offen – Freunde verbinden sich mit {ip}", $"Co-op open – friends connect to {ip}"));
+                    GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Koop offen", "Co-op open"),
+                        string.IsNullOrEmpty(ip) ? Loc.Tr($"Port {HostPort}", $"Port {HostPort}") : ip);
                     if (GameManager.SavingDisabled)
-                        GameEvents.RaiseToast(Loc.Tr("Testsitzung: wird nicht gespeichert", "Test session: not saved"));
+                        GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Testsitzung", "Test session"), Loc.Tr("nicht gespeichert", "not saved"));
                 }
             }
         }
@@ -1048,7 +1335,7 @@ namespace Sealebrities
             {
                 clientToastDelay -= dt;
                 if (clientToastDelay <= 0f && Current == Phase.Joined)
-                    GameEvents.RaiseToast(Loc.Tr($"Du bist in {HostName}s Spiel", $"You joined {HostName}'s game"));
+                    GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Koop verbunden", "Co-op joined"), HostName);
             }
         }
 
@@ -1112,6 +1399,7 @@ namespace Sealebrities
 
                 if (Net.IsOnline)
                 {
+                    RememberCrew();
                     tmpPlayers.Clear();
                     for (int i = 0; i < Net.Players.Count; i++) if (!Net.Players[i].IsLocal) tmpPlayers.Add(Net.Players[i]);
                     for (int i = 0; i < tmpPlayers.Count; i++) Net.RaisePlayerLeft(tmpPlayers[i]);
@@ -1137,6 +1425,12 @@ namespace Sealebrities
                 pending.Clear();
                 NetCoreRunner.Transport = null;
                 t?.Shutdown(wasHost ? 300 : 150);
+                if (IsSteam)
+                {
+                    steamJoinToken++;
+                    SteamLobby.Leave();   // also clears the rich presence
+                    IsSteam = false;
+                }
                 Current = Phase.Idle;
                 hostToastDelay = -1f;
                 clientToastDelay = -1f;
@@ -1153,6 +1447,26 @@ namespace Sealebrities
             {
                 ending = false;
             }
+        }
+
+        /// Q44: the main-menu crew = you + up to 3 friends of the last co-op session (looks only – never names or keys).
+        static void RememberCrew()
+        {
+            if (GameManager.AutomatedRun) return;   // test runs never write the player's settings
+            var d = Settings.Data;
+            if (d == null) return;
+            int n = 0;
+            for (int i = 0; i < Net.Players.Count; i++)
+            {
+                var p = Net.Players[i];
+                if (p == null || p.IsLocal) continue;
+                if (n == 0) d.lastCrew.Clear();
+                var look = p.look.lookVersion >= 1 ? p.look : NetLookCodec.FromLegacy(p.suit, p.hat, p.face);
+                look.sitting = false;
+                d.lastCrew.Add(NetLookCodec.Sanitize(look));
+                if (++n >= 3) break;
+            }
+            if (n > 0) Settings.MarkDirty();
         }
 
         /// Application quit: say goodbye and close the sockets, but keep Net.Mode (a client must not save on quit).
@@ -1186,7 +1500,9 @@ namespace Sealebrities
         {
             switch (reason)
             {
-                case NetEndReason.HostLeft: return Loc.Tr("Der Host hat das Spiel beendet.", "The host ended the game.");
+                case NetEndReason.HostLeft:
+                    return Loc.Tr("Der Host hat die Sitzung beendet. Dein Fortschritt ist beim Host gespeichert.",
+                                  "The host ended the session. Your progress is saved with the host.");
                 case NetEndReason.Full: return Loc.Tr("Das Spiel ist voll (4 von 4 Tauchern).", "The game is full (4 of 4 divers).");
                 case NetEndReason.VersionMismatch:
                     return Loc.Tr($"Andere Spielversion als der Host ({hostVersion ?? "?"} / du: {Application.version}). Bitte beide dieselbe Version starten.",
@@ -1196,6 +1512,26 @@ namespace Sealebrities
                 case NetEndReason.Kicked: return Loc.Tr("Du wurdest aus der Sitzung entfernt.", "You were removed from the session.");
                 case NetEndReason.LocalLeft: return "";
                 default: return Loc.Tr("Verbindung zum Host verloren.", "Lost the connection to the host.");
+            }
+        }
+
+        static string SteamConnectErrorText(string reason)
+        {
+            switch (reason)
+            {
+                case "timeout":
+                    return Loc.Tr("Keine Verbindung über Steam (Zeitüberschreitung). Ist der Host noch im Spiel? Beide neu starten und nochmal einladen – sonst „Per IP / Heimnetz“.",
+                                  "No connection via Steam (timeout). Is the host still in the game? Restart both games and invite again – otherwise use “By IP / home network”.");
+                case "refused":
+                case "closed":
+                    return Loc.Tr("Der Host nimmt gerade keine Verbindung an – ist sein Spiel noch offen?", "The host does not accept connections right now – is the game still open?");
+                case "steam":
+                    return Loc.Tr("Keine Verbindung zu Steam – bitte prüfen, ob Steam online ist.", "No connection to Steam – please check that Steam is online.");
+                case "unreachable":
+                    return Loc.Tr("Steam findet keinen Weg zum Host (Netzwerk / Firewall). Nochmal versuchen – sonst „Per IP / Heimnetz“.",
+                                  "Steam cannot reach the host (network / firewall). Try again – otherwise use “By IP / home network”.");
+                default:
+                    return Loc.Tr("Verbindung über Steam fehlgeschlagen: ", "Connecting via Steam failed: ") + reason;
             }
         }
 

@@ -19,11 +19,14 @@ namespace Sealebrities
         FXGodRays rays;
         FXAudio audio;
         FXGraphics graphics;
+        FXFogBankRenderer fogBank;
+        FXViewModelFill vmFill;
 
         bool initialized, subscribed;
         bool pendingSplash, pendingSplashUnder, pendingSettings;
-        float lastSplashTime = -100f;
-        bool wasUnderwater;
+        float lastSplashTime = -100f, lastBodySplash = -100f;
+        bool wasUnderwater, wasInWater;
+        float pendingBody = -1f;
         Camera configuredCam;
 
         public void Init()
@@ -35,6 +38,8 @@ namespace Sealebrities
             try { particles = new FXParticles(transform); } catch (Exception e) { Fail("particles", e); particles = null; }
             try { rays = new FXGodRays(transform); } catch (Exception e) { Fail("god rays", e); rays = null; }
             try { audio = new FXAudio(transform); } catch (Exception e) { Fail("audio", e); audio = null; }
+            try { fogBank = new FXFogBankRenderer(transform); } catch (Exception e) { Fail("fog bank", e); fogBank = null; }
+            try { vmFill = new FXViewModelFill(transform); } catch (Exception e) { Fail("view-model fill light", e); vmFill = null; }
             graphics = new FXGraphics();
             ApplySettings();
             Subscribe();
@@ -56,6 +61,8 @@ namespace Sealebrities
             try { if (particles != null) particles.Dispose(); } catch (Exception) { }
             try { if (rays != null) rays.Dispose(); } catch (Exception) { }
             try { if (audio != null) audio.Dispose(); } catch (Exception) { }
+            try { if (fogBank != null) fogBank.Dispose(); } catch (Exception) { }
+            try { if (vmFill != null) vmFill.Dispose(); } catch (Exception) { }
             try { if (post != null) post.Dispose(); } catch (Exception) { }
             try { if (graphics != null) graphics.RestoreEditorDefaults(); } catch (Exception) { }
         }
@@ -133,7 +140,31 @@ namespace Sealebrities
                 // returning to the menu raises UnderwaterChanged(false) after InGame is already cleared: no splash then
                 if (f.inGame) HandleSplash(pendingSplashUnder);
             }
+            if (pendingBody >= 0f)
+            {
+                float strength = pendingBody;
+                pendingBody = -1f;
+                float now = Time.unscaledTime;
+                if (now - lastBodySplash > 0.8f)
+                {
+                    lastBodySplash = now;
+                    try
+                    {
+                        if (particles != null) particles.BodySplash(f, f.playerPos, strength);
+                        if (audio != null) audio.PlayBodySplash(strength);
+                    }
+                    catch (Exception e) { Debug.LogWarning("Sealebrities FX: body splash failed: " + e.Message); }
+                }
+            }
 
+            if (fogBank != null)
+            {
+                try { fogBank.Tick(f); } catch (Exception e) { Fail("fog bank", e); try { fogBank.Dispose(); } catch (Exception) { } fogBank = null; }
+            }
+            if (vmFill != null)
+            {
+                try { vmFill.Tick(f); } catch (Exception e) { Fail("view-model fill light", e); try { vmFill.Dispose(); } catch (Exception) { } vmFill = null; }
+            }
             if (post != null)
             {
                 try { post.Tick(f); } catch (Exception e) { Fail("post-processing", e); post = null; }
@@ -174,7 +205,7 @@ namespace Sealebrities
             try
             {
                 if (particles != null) particles.Splash(f, under, strength);
-                if (audio != null) audio.PlaySplash(strength);
+                if (audio != null) audio.PlaySplash(strength, under);
             }
             catch (Exception e) { Debug.LogWarning("Sealebrities FX: splash failed: " + e.Message); }
         }
@@ -213,6 +244,9 @@ namespace Sealebrities
             {
                 f.underwater = p.IsUnderwater;
                 f.inWater = p.IsInWater;
+                var root = p.Root;
+                f.playerPos = root != null ? root.position : f.camPos;
+                f.velY = p.Velocity.y;
                 f.depth = f.underwater ? Mathf.Max(0f, p.Depth) : 0f;
                 f.air01 = Mathf.Clamp01(p.Air01);
                 f.maxSafeDepth = p.MaxSafeDepth;
@@ -223,6 +257,8 @@ namespace Sealebrities
             {
                 f.underwater = false;
                 f.inWater = false;
+                f.playerPos = f.camPos;
+                f.velY = 0f;
                 f.depth = 0f;
                 f.air01 = 1f;
                 f.maxSafeDepth = 9999f;
@@ -234,6 +270,11 @@ namespace Sealebrities
             else if (f.underwater) f.sinceSubmerge += Time.unscaledDeltaTime;
             else f.sinceSubmerge = 100f;
             wasUnderwater = f.underwater;
+
+            // Q9: the body hits the water (jump from the dock, the boat, the swim raft …) while the head is still above it
+            bool enteredWater = f.inWater && !wasInWater && f.hasPlayer && f.inGame && !f.underwater;
+            wasInWater = f.inWater;
+            if (enteredWater && f.velY < -1.8f) pendingBody = Mathf.Clamp01((-f.velY - 1.8f) / 5f);
 
             f.night01 = Mathf.Clamp01(EnvState.Night01);
             f.sun01 = Mathf.Clamp01(EnvState.SunIntensity01);

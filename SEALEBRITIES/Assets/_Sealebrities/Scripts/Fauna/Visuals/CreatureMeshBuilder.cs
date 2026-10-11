@@ -96,7 +96,73 @@ namespace Sealebrities
         public int Count => Verts != null ? Verts.Length : 0;
         public int TriangleCount { get { int n = 0; for (int i = 0; i < Tris.Length; i++) n += Tris[i].Length / 3; return n; } }
 
-        public static CreatureMeshFlat From(CreatureMeshBuilder b, bool[] facetUv)
+        public static CreatureMeshFlat From(CreatureMeshBuilder b, bool[] facetUv) => From(b, facetUv, null, 50f);
+
+        /// smooth[slot] 0 = faceted (face normal), 1 = smooth (area-weighted average of the faces that share the corner's
+        /// position within creaseDeg), values in between soften the facets. Thin double-faced parts (fins) keep their
+        /// two sides apart because opposite faces are beyond the crease angle.
+        public static CreatureMeshFlat From(CreatureMeshBuilder b, bool[] facetUv, float[] smooth, float creaseDeg)
+        {
+            var f = Flatten(b, facetUv);
+            if (smooth != null) f.SmoothNormals(smooth, creaseDeg);
+            return f;
+        }
+
+        /// Replaces the face normals of the smooth slots (see From). Pure managed code (bake thread).
+        void SmoothNormals(float[] smooth, float creaseDeg)
+        {
+            float cosCrease = (float)Math.Cos(creaseDeg * Math.PI / 180.0);
+            const float Q = 4096f;   // position quantization (0.25 mm in model units)
+            for (int s = 0; s < CreatureMeshSlot.Count; s++)
+            {
+                float k = s < smooth.Length ? CreatureMeshMath.Clamp01(smooth[s]) : 0f;
+                if (k <= 0f) continue;
+                var idx = Tris[s];
+                if (idx == null || idx.Length == 0) continue;
+                // area-weighted face normals per position bucket
+                var buckets = new Dictionary<long, List<int>>(idx.Length);
+                for (int t = 0; t < idx.Length; t++)
+                {
+                    long key = Key(Verts[idx[t]], Q);
+                    if (!buckets.TryGetValue(key, out var l)) { l = new List<int>(6); buckets[key] = l; }
+                    l.Add(t);
+                }
+                var faceN = new Vector3[idx.Length / 3];
+                var faceA = new Vector3[idx.Length / 3];
+                for (int t = 0; t < faceN.Length; t++)
+                {
+                    Vector3 pa = Verts[idx[t * 3]], pb = Verts[idx[t * 3 + 1]], pc = Verts[idx[t * 3 + 2]];
+                    Vector3 cr = Vector3.Cross(pb - pa, pc - pa);
+                    faceA[t] = cr;
+                    faceN[t] = CreatureMeshMath.Norm(cr);
+                }
+                var outN = new Vector3[idx.Length];
+                for (int t = 0; t < idx.Length; t++)
+                {
+                    Vector3 own = faceN[t / 3];
+                    Vector3 sum = Vector3.zero;
+                    var l = buckets[Key(Verts[idx[t]], Q)];
+                    for (int j = 0; j < l.Count; j++)
+                    {
+                        int f2 = l[j] / 3;
+                        if (Vector3.Dot(faceN[f2], own) < cosCrease) continue;
+                        sum += faceA[f2];
+                    }
+                    Vector3 sm = sum.sqrMagnitude > 1e-20f ? CreatureMeshMath.Norm(sum) : own;
+                    outN[t] = k >= 0.999f ? sm : CreatureMeshMath.Norm(Vector3.Lerp(own, sm, k));
+                    if (outN[t].sqrMagnitude < 0.5f) outN[t] = own.sqrMagnitude > 0.5f ? own : Vector3.up;
+                }
+                for (int t = 0; t < idx.Length; t++) Normals[idx[t]] = outN[t];
+            }
+        }
+
+        static long Key(Vector3 p, float q)
+        {
+            long x = (long)Math.Round(p.x * q), y = (long)Math.Round(p.y * q), z = (long)Math.Round(p.z * q);
+            return (x & 0x1FFFFF) | ((y & 0x1FFFFF) << 21) | ((z & 0x1FFFFF) << 42);
+        }
+
+        static CreatureMeshFlat Flatten(CreatureMeshBuilder b, bool[] facetUv)
         {
             var src = b.Verts;
             var keep = new List<int>[CreatureMeshSlot.Count];

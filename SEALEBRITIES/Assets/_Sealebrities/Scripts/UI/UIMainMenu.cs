@@ -110,7 +110,15 @@ namespace Sealebrities
         }
 
         /// Rebuild on the next frame (safe inside click callbacks).
-        void Refresh() { dirty = true; }
+        public void Refresh() { dirty = true; }
+
+        /// After the first-start character screen (Q42/1c): straight to the difficulty cards of a new game.
+        public void ShowNewGame()
+        {
+            if (!Visible) Show();
+            page = Page.Difficulty;
+            Refresh();
+        }
 
         public void Tick(float dt)
         {
@@ -165,11 +173,12 @@ namespace Sealebrities
             if (GameManager.HasSave) col.Add(MenuItem(Loc.Tr("Fortsetzen", "Continue"), OnContinue, true));
             col.Add(MenuItem(Loc.Tr("Neues Spiel", "New Game"), () => { page = Page.Difficulty; Refresh(); }, !GameManager.HasSave));
             col.Add(MenuItem(Loc.Tr("Mit Freunden", "With Friends"), OnFriends, false));
+            col.Add(MenuItem(Loc.Tr("Charakter", "Character"), () => ui.OpenCharacter(CharacterScreenContext.MainMenu, null), false));
             col.Add(MenuItem(Loc.Tr("Einstellungen", "Settings"), () => { page = Page.Settings; Refresh(); }, false));
             col.Add(MenuItem(Loc.Tr("Beenden", "Quit"), OnQuit, false));
 
             // footer: version + language quick switch
-            var footer = UIKit.HudText(Loc.Tr("Testversion 3", "Test build 3") + " · " + Application.version, 14f, new Color(1f, 1f, 1f, 0.5f), false);
+            var footer = UIKit.HudText(Loc.Tr("Testversion 4", "Test build 4") + " · " + Application.version, 14f, new Color(1f, 1f, 1f, 0.5f), false);
             UIKit.Abs(footer, 120f, null, null, 36f);
             mainPage.Add(footer);
             var lang = UIKit.Row();
@@ -288,8 +297,10 @@ namespace Sealebrities
 
         VisualElement DifficultyCard(Difficulty d)
         {
+            bool locked = !DifficultySettings.IsUnlocked(d);
+            if (locked && selected == d) selected = Difficulty.OpenWater;
             bool sel = d == selected;
-            Color accent = UIPalette.DifficultyColor(d);
+            Color accent = locked ? UIPalette.Silhouette : UIPalette.DifficultyColor(d);
             var ds = DifficultySettings.For(d);
 
             var card = UIKit.Col();
@@ -300,6 +311,23 @@ namespace Sealebrities
             UIKit.Pad(card, 26f, 24f, 24f, 24f);
             UIKit.Border(card, sel ? 5f : 2f, sel ? UIPalette.Coral : UIPalette.A(UIPalette.Ink, 0.08f));
             card.style.translate = new Translate(0f, sel ? -10f : 0f);
+            if (locked)
+            {
+                // Q79: Schwer unlocks after a finale on Normal (grey card, lock glyph, one-line hint)
+                card.style.backgroundColor = UIPalette.A(UIPalette.CardAlt, 0.92f);
+                card.RegisterCallback<ClickEvent>(_ => UIAudio.Nope());
+                card.Add(UIWidgets.IconTile(UIGlyphs.Lock, accent, 110f));
+                var ln = UIKit.Text(Loc.DifficultyName(d), 36f, UIPalette.Silhouette, true);
+                ln.style.marginTop = 14f;
+                card.Add(ln);
+                var hint = UIKit.Para(DifficultySettings.LockedHint(d) ?? Loc.Tr("Schwer – frei nach dem Finale auf Normal", "Hard – unlocks after finishing Normal"), 18f, UIPalette.InkSoft);
+                hint.style.marginTop = 16f;
+                hint.style.unityTextAlign = TextAnchor.UpperCenter;
+                card.Add(hint);
+                UIKit.IgnorePicking(card);
+                card.pickingMode = PickingMode.Position;
+                return card;
+            }
             UIKit.Clickable(card, () => { selected = d; Refresh(); }, sel ? Color.white : UIPalette.A(UIPalette.Card, 0.95f), Color.white);
 
             card.Add(UIWidgets.IconTile(UIGlyphs.ForDifficulty(d), accent, 110f));
@@ -353,6 +381,8 @@ namespace Sealebrities
             var card = UIWidgets.ModalCard(860f);
             card.Add(UIWidgets.Header(UIGlyphs.Gear, UIPalette.Rgb(0x9AA3AE), Loc.Tr("Einstellungen", "Settings"), () => { settings?.CancelCapture(); page = Page.Main; Refresh(); }, 30f));
             if (settings == null) settings = new UISettingsView(false);
+            settings.OnWatchIntro = () => { settings?.CancelCapture(); page = Page.Main; ui.WatchIntro(); };
+            settings.OnOpenCharacter = () => ui.OpenCharacter(CharacterScreenContext.MainMenu, null);
             settings.Root.RemoveFromHierarchy();
             card.Add(settings.Root);
             settings.Refresh();
@@ -370,7 +400,7 @@ namespace Sealebrities
                 if (!ok)
                 {
                     starting = false;
-                    GameEvents.RaiseToast(Loc.Tr("Spielstand konnte nicht geladen werden.", "Could not load the save."));
+                    GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Spielstand defekt", "Save could not load"));
                     Rebuild();
                 }
             }, 1.4f);
@@ -380,7 +410,7 @@ namespace Sealebrities
         {
             if (starting || GameManager.I == null) return;
             starting = true;
-            var d = selected;
+            var d = DifficultySettings.IsUnlocked(selected) ? selected : Difficulty.OpenWater;
             Fader.FadeThrough(() =>
             {
                 if (GameManager.I != null) GameManager.I.NewGame(d);
@@ -395,13 +425,13 @@ namespace Sealebrities
                 catch (System.Exception e)
                 {
                     Debug.LogException(e);
-                    ui.Notes.Push(UIGlyphs.Crew, UIPalette.Turquoise, Loc.Tr("Mit Freunden", "With friends"), Loc.Tr("Lobby konnte nicht geöffnet werden.", "Could not open the lobby."));
+                    ui.Notes.Push(UIGlyphs.Crew, UIPalette.Turquoise, Loc.Tr("Lobby-Fehler", "Lobby error"), Loc.Tr("Mit Freunden", "With friends"));
                 }
             }
             else
             {
                 UIAudio.Nope();
-                ui.Notes.Push(UIGlyphs.Crew, UIPalette.Turquoise, Loc.Tr("Mit Freunden", "With friends"), Loc.Tr("Mehrspieler ist in diesem Build nicht verfügbar.", "Multiplayer is not available in this build."), "nolobby", null, false);
+                ui.Notes.Push(UIGlyphs.Crew, UIPalette.Turquoise, Loc.Tr("Kein Mehrspieler", "No multiplayer"), Loc.Tr("in diesem Build", "in this build"), "nolobby", null, false);
             }
         }
 

@@ -32,6 +32,20 @@ namespace Sealebrities
             return Get(x, y);
         }
 
+        /// Bilinear sample (FilterMode.Bilinear on the GPU) – smooth "character" skins.
+        public Color SampleBilinear(Vector2 uv)
+        {
+            float fx = uv.x * W - 0.5f, fy = uv.y * H - 0.5f;
+            if (float.IsNaN(fx) || float.IsNaN(fy)) return C[0];
+            int x0 = (int)Math.Floor(fx), y0 = (int)Math.Floor(fy);
+            float tx = fx - x0, ty = fy - y0;
+            Color a = Get(x0, y0), b = Get(x0 + 1, y0), c = Get(x0, y0 + 1), d = Get(x0 + 1, y0 + 1);
+            Color ab = CreatureMeshMath.Mix(a, b, tx), cd = CreatureMeshMath.Mix(c, d, tx);
+            return CreatureMeshMath.Mix(ab, cd, ty);
+        }
+
+        public Color Sample(Vector2 uv, bool bilinear) => bilinear ? SampleBilinear(uv) : Sample(uv);
+
         public Color32[] ToColor32()
         {
             var r = new Color32[C.Length];
@@ -49,7 +63,7 @@ namespace Sealebrities
     /// Low-poly creature painting: solid colors and crisp color-block patterns (clownfish bands, tang palette,
     /// whale-shark spots ...) on tiny textures. No noise, no scales, no normal maps. Mottled species are painted
     /// as random tone blocks that the mesh samples once per facet (see CreatureMeshFlat).
-    internal static class CreatureMeshPaint
+    internal static partial class CreatureMeshPaint
     {
         // palette anchors (same values as Core/LowPoly; kept managed so baking can run off the main thread)
         static readonly Color White = new Color(0.957f, 0.945f, 0.918f, 1f);
@@ -131,6 +145,8 @@ namespace Sealebrities
                 for (int i = 0; i < img.C.Length; i++) img.C[i] = P.A;
                 return img;
             }
+            var r2 = SkinR2(ctx, P);
+            if (r2 != null) return r2;
             if (ctx.Layout == CreatureMeshLayout.Disc) return Disc(ctx, P);
 
             switch (P.Id)
@@ -461,7 +477,7 @@ namespace Sealebrities
 
         static CreatureMeshImage Disc(CreatureMeshContext ctx, Pal P)
         {
-            bool manta = P.Variant == "manta";
+            bool manta = P.Variant == "manta", eagleRay = P.Variant == "eagle";
             // square texels on the disc: the top / bottom halves each cover 48 % of the rows
             int W = manta ? 64 : 32;
             int H = Math.Max(16, Math.Min(128, 2 * (int)Math.Round(W * ctx.DiscLength / 0.96f)));
@@ -506,7 +522,7 @@ namespace Sealebrities
                             int ox = (int)(P.R(cx, cy, 1) * 2.99f), oy = (int)(P.R(cx, cy, 2) * 2.99f);
                             bool spot = P.R(cx, cy, 3) < 0.55f && lx >= ox && lx <= ox + 1 && ly >= oy && ly <= oy + 1;
                             if (rim) c = Mix(P.A, P.C, 0.45f);
-                            else if (spot) c = Mix(P.B, Rgb(0.55f, 0.85f, 1f), 0.2f);
+                            else if (spot) c = eagleRay ? Mix(P.B, White, 0.15f) : Mix(P.B, Rgb(0.55f, 0.85f, 1f), 0.2f);
                             else if (ax < 0.05f && along > 0.15f && along < 0.62f) c = Mul(P.A, 0.84f);
                         }
                         else
@@ -550,6 +566,7 @@ namespace Sealebrities
         static Color FinTexel(CreatureMeshContext ctx, Pal P, int band, int x, int s, int y)
         {
             Color A = P.A, B = P.B, C = P.C;
+            if (FinR2(ctx, P, band, x, s, y, out Color r2)) return r2;
             switch (P.Id)
             {
                 case "clownfish":

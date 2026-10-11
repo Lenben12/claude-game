@@ -3,8 +3,10 @@ using UnityEngine;
 
 namespace Sealebrities
 {
-    /// Items that can sit in a hotbar slot and be held in a hand.
-    public enum HoldItem { None, Camera, Flashlight, FishingRod }
+    /// Items that can sit in a hotbar slot and be held in a hand. QuestItem (L.7, K.3) is never on the hotbar: it is
+    /// what the hands hold while the local player carries a quest item / heavy salvage (Carry.Current – the model is
+    /// chosen by the carried item id). APPEND new values at the end (sent as bytes in the avatar state).
+    public enum HoldItem { None, Camera, Flashlight, FishingRod, QuestItem }
 
     public enum Hand { Right, Left }
 
@@ -66,6 +68,9 @@ namespace Sealebrities
         /// The gear slot that decides which model/stats an item uses (Camera → camera tier etc.).
         public static GearSlot GearSlotOf(HoldItem i) =>
             i == HoldItem.Flashlight ? GearSlot.Lamp : i == HoldItem.FishingRod ? GearSlot.Rod : GearSlot.Camera;
+
+        /// Items that may sit in a hotbar slot (QuestItem never does – it comes from Carry).
+        public static bool IsHotbarItem(HoldItem i) => i == HoldItem.Camera || i == HoldItem.Flashlight || i == HoldItem.FishingRod;
 
         // ------------------------------------------------------------------ state access
         static GameState Sync()
@@ -179,7 +184,7 @@ namespace Sealebrities
         /// The local player owns at least one item of the matching gear slot (camera / lamp / rod).
         public static bool Owns(HoldItem i)
         {
-            if (i == HoldItem.None) return false;
+            if (!IsHotbarItem(i)) return false;
             var gm = GameManager.I;
             if (gm == null || gm.State == null) return false;
             var owned = gm.State.ownedItems;
@@ -222,7 +227,7 @@ namespace Sealebrities
                     if (Time.unscaledTime - lastDeniedToast > 2f)
                     {
                         lastDeniedToast = Time.unscaledTime;
-                        GameEvents.RaiseToast(Loc.Tr("Noch nicht gekauft", "Not owned yet"));
+                        GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Noch nicht gekauft", "Not owned yet"));
                     }
                     return;
                 }
@@ -235,7 +240,7 @@ namespace Sealebrities
                         if (Time.unscaledTime - lastDeniedToast > 2f)
                         {
                             lastDeniedToast = Time.unscaledTime;
-                            GameEvents.RaiseToast(Loc.Tr("Nicht im Wasser", "Not in the water"));
+                            GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Nicht im Wasser", "Not in the water"));
                         }
                         return;
                     }
@@ -273,6 +278,7 @@ namespace Sealebrities
         {
             var s = Sync();
             if (s == null || slot < 0 || slot >= SlotsPerHand) return;
+            if (item != HoldItem.None && !IsHotbarItem(item)) return;
             HoldItem prevR = Active(Hand.Right), prevL = Active(Hand.Left);
             HoldItem displaced = Arr(h)[slot];
             if (displaced == item) return;
@@ -307,14 +313,54 @@ namespace Sealebrities
             Changed?.Invoke();
         }
 
-        /// Reads the hotbar keys (1–6 by default). Call once per frame from the local player.
+        /// Reads the hotbar keys (1–6 by default) and the mouse wheel (Q17: wheel = right hand, Shift+wheel = left hand,
+        /// cycling through the slots incl. the empty hand). Call once per frame from the local player.
+        /// The wheel is ignored while the camera is aimed (it zooms), in the selfie view (arm length / hotbar keys pick
+        /// expressions) and while carrying a quest item.
         public static void HandleInput()
         {
             if (!CanSelectNow || GameManager.I == null || !GameManager.I.InGame) return;
+            if (SelfieState.Active || Carry.IsCarrying) return;
             for (int i = 0; i < SlotsPerHand; i++)
             {
                 if (GameInput.SlotPressed(Hand.Right, i)) Select(Hand.Right, i);
                 if (GameInput.SlotPressed(Hand.Left, i)) Select(Hand.Left, i);
+            }
+            int scroll = GameInput.HotbarScroll;
+            if (scroll != 0)
+            {
+                var cam = Refs.HandCamera;
+                bool aiming = cam != null && !(cam is UnityEngine.Object o && o == null) && cam.IsAiming;
+                if (!aiming) Cycle(GameInput.HotbarScrollLeftHand ? Hand.Left : Hand.Right, scroll);
+            }
+        }
+
+        /// Moves a hand's selection one step (dir +1 = next slot, −1 = previous) through empty hand → slot 1 → 2 → 3,
+        /// skipping empty slots, items not owned yet and the rod while swimming.
+        public static void Cycle(Hand h, int dir)
+        {
+            var s = Sync();
+            if (s == null || dir == 0 || !CanSelectNow) return;
+            dir = dir > 0 ? 1 : -1;
+            int cur = ActiveSlot(h);
+            const int positions = SlotsPerHand + 1;   // -1 (empty) .. SlotsPerHand-1
+            for (int step = 1; step < positions; step++)
+            {
+                int idx = (((cur + 1 + dir * step) % positions) + positions) % positions - 1;
+                if (idx < 0)
+                {
+                    if (cur >= 0) { SetRawActive(s, h, -1); Changed?.Invoke(); }
+                    return;
+                }
+                var item = Arr(h)[idx];
+                if (item == HoldItem.None || !Owns(item)) continue;
+                if (IsTwoHanded(item))
+                {
+                    var p = Refs.Player;
+                    if (p != null && !(p is UnityEngine.Object po && po == null) && p.IsInWater) continue;
+                }
+                Select(h, idx);
+                return;
             }
         }
 

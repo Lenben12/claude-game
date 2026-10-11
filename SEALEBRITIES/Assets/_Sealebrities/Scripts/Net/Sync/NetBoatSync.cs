@@ -199,7 +199,7 @@ namespace Sealebrities
                 kickToastTime = Time.unscaledTime;
                 var d = Net.Find(NetFlags.BoatDriverId);
                 string who = d != null && !string.IsNullOrEmpty(d.name) ? d.name : Loc.Tr("Jemand", "Someone");
-                GameEvents.RaiseToast(Loc.Tr(who + " steuert schon das Boot", who + " is already steering the boat"));
+                GameEvents.RaiseNotify(NotifyKind.Info, who, Loc.Tr("steuert schon", "is steering"));
             }
         }
 

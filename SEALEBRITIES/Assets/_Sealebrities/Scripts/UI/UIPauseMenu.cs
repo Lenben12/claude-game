@@ -33,6 +33,14 @@ namespace Sealebrities
 
         public bool IsOpen => UIState.PauseOpen;
 
+        /// The character screen (1c) opened from here: hide the card but stay paused; shown again when it closes.
+        public void SetHidden(bool hidden)
+        {
+            if (!UIState.PauseOpen) return;
+            root.style.display = hidden ? DisplayStyle.None : DisplayStyle.Flex;
+            if (!hidden) { anim = 0f; Refresh(); }
+        }
+
         public void Open()
         {
             if (UIState.PauseOpen) return;
@@ -135,7 +143,7 @@ namespace Sealebrities
                 panel.Add(crewHost);
                 crewTimer = 0f;
                 BuildCrew();
-                if (Net.IsHost)
+                if (Net.IsHost && !NetSession.IsSteam)   // Steam sessions: friends come by invite, IP/port mean nothing
                 {
                     // the address friends type into "Beitreten" (LAN / VPN); port forwarding hint lives in the lobby
                     string ip = null;
@@ -148,7 +156,19 @@ namespace Sealebrities
 
             panel.Add(UIKit.Spacer(20f));
             AddButton(UIGlyphs.Play, Loc.Tr("Weiter", "Resume"), UIBtnKind.Primary, Close);
-            AddButton(UIGlyphs.Gear, Loc.Tr("Einstellungen", "Settings"), UIBtnKind.Secondary, () => { settingsPage = true; Refresh(); });
+            // L.9 host safety valve: after 60 s at n−1/n the host may skip the night for an AFK friend
+            if (SleepVote.ForceSleepAvailable)
+                AddButton(UIGlyphs.Moon, Loc.Tr("Schlafen erzwingen", "Force sleep"), UIBtnKind.Accent, () => { Close(); SleepVote.ForceSleep(); });
+            var row = UIKit.Row();
+            row.style.marginBottom = 10f;
+            var ch = MakeButton(UIGlyphs.Person, Loc.Tr("Charakter", "Character"), UIBtnKind.Secondary,
+                () => ui.OpenCharacter(CharacterScreenContext.Pause, null));
+            ch.style.flexGrow = 1; ch.style.flexBasis = 0; ch.style.marginBottom = 0f;
+            row.Add(ch);
+            var st = MakeButton(UIGlyphs.Gear, Loc.Tr("Einstellungen", "Settings"), UIBtnKind.Secondary, () => { settingsPage = true; Refresh(); });
+            st.style.flexGrow = 1; st.style.flexBasis = 0; st.style.marginBottom = 0f; st.style.marginLeft = 10f;
+            row.Add(st);
+            panel.Add(row);
             // unstuck: wedged in the cave / ravine / rocks → back to the hut (per player, no co-op routing needed)
             if (CanReturnToHut()) AddButton(UIGlyphs.House, Loc.Tr("Zur Hütte", "Back to the hut"), UIBtnKind.Secondary, OnReturnToHut);
             if (Net.IsClient)
@@ -177,6 +197,10 @@ namespace Sealebrities
                 if (p == null || (p is UnityEngine.Object o && o == null) || p.IsSeated) return;
                 Vector3 pos = PlayerController.ResolveSpawn(out float yaw);
                 p.TeleportTo(pos, yaw);   // leaving the water this way banks the clips like any other exit
+                // the boat comes home too (moored at the dock) – unless another co-op player still drives it, stands on
+                // it or dives next to it; co-op guests ask the host, who moves the shared boat
+                try { BoatHome.AfterLocalPlayerWentHome(); }
+                catch (Exception e) { Debug.LogException(e); }
             });
         }
 
@@ -229,12 +253,18 @@ namespace Sealebrities
         {
             panel.Add(UIWidgets.Header(UIGlyphs.Gear, UIPalette.Rgb(0x9AA3AE), Loc.Tr("Einstellungen", "Settings"), () => { settings?.CancelCapture(); settingsPage = false; Refresh(); }, 30f));
             if (settings == null) settings = new UISettingsView(false);
+            settings.OnOpenCharacter = () => ui.OpenCharacter(CharacterScreenContext.Pause, null);
             settings.Root.RemoveFromHierarchy();
             panel.Add(settings.Root);
             settings.Refresh();
         }
 
         void AddButton(UIGlyph.DrawFn icon, string text, UIBtnKind kind, Action onClick)
+        {
+            panel.Add(MakeButton(icon, text, kind, onClick));
+        }
+
+        Button MakeButton(UIGlyph.DrawFn icon, string text, UIBtnKind kind, Action onClick)
         {
             var b = UIKit.Btn("", onClick, kind, 21f);
             b.style.flexDirection = FlexDirection.Row;
@@ -249,10 +279,22 @@ namespace Sealebrities
             l.style.marginLeft = 14f;
             l.pickingMode = PickingMode.Ignore;
             b.Add(l);
-            panel.Add(b);
+            return b;
         }
 
-        void OnSaveAndMenu()
+        /// F.2: the host ending the session (or quitting) with guests connected asks first.
+        static bool GuestsConnected => Net.IsHost && Net.PlayerCount > 1;
+
+        void ConfirmEndSession(Action then)
+        {
+            if (!GuestsConnected) { then(); return; }
+            UIDialog.Show(UIGlyphs.Crew, UIPalette.Coral, Loc.Tr("Alle werden getrennt. Wirklich beenden?", "Everyone will be disconnected. Really end?"), null,
+                Loc.Tr("Abbrechen", "Cancel"), Loc.Tr("Beenden", "End"), then, null, true);
+        }
+
+        void OnSaveAndMenu() => ConfirmEndSession(DoSaveAndMenu);
+
+        void DoSaveAndMenu()
         {
             if (leaving || GameManager.I == null) return;
             leaving = true;
@@ -282,7 +324,9 @@ namespace Sealebrities
             }, 1.2f);
         }
 
-        void OnQuit()
+        void OnQuit() => ConfirmEndSession(DoQuit);
+
+        void DoQuit()
         {
             if (leaving) return;
             if (GameManager.I != null) GameManager.I.Save();

@@ -9,8 +9,10 @@ namespace Sealebrities
     /// Hierarchy:  Player (CharacterController, PlayerController, PlayerInteractor, PlayerNarcosis; layer Ignore Raycast)
     ///               Head (pitch, eye height)
     ///                 Main Camera (Camera, AudioListener, URP data) – bob/shake offsets; other modules may attach models here
-    ///                   Flashlight (spot Light, PlayerFlashlight)
+    ///                   Flashlight (spot Light, PlayerFlashlight) – lights the world
     ///                   ViewModel (PlayerHands: mitten hands, lamp, fallback rod, 3D phone)
+    ///                   ViewModelCamera (URP overlay in the main camera's stack, PlayerViewModelCamera): draws every
+    ///                     mesh below the Main Camera (layer 30) on top of the world, runs the post-processing
     /// Also: PlayerIntro (launch intro) and PlayerMenuCamera (crew on the dock in the main menu).
     public static class PlayerFactory
     {
@@ -93,6 +95,9 @@ namespace Sealebrities
             flashlight.Init(pc, light);
             hands.Init(pc);
             pc.Init(cam, head, root, flashlight, hands);
+
+            // ---- held items on their own overlay camera: world geometry (dock, posts, rocks) never cuts them
+            PlayerViewModelCamera.Attach(cam);
             go.AddComponent<PlayerInteractor>().Init(pc);
             go.AddComponent<PlayerNarcosis>().Init(pc);
 

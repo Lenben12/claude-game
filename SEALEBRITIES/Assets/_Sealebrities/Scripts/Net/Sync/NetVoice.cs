@@ -5,16 +5,27 @@ using UnityEngine;
 namespace Sealebrities
 {
     /// Proximity voice chat. Microphone → 16 kHz mono → 40 ms frames → µ-law → unreliable message (host relays).
-    /// Sends only while Settings.MicLive allows it: push-to-talk key held (GameAction.PushToTalk), or open mic above
-    /// an RMS gate (with a short hang time); never when the voice mode is Off or the mic is muted. Receivers play each
-    /// speaker through a 3D source on the avatar's head (linear 2–30 m, ~120 ms jitter buffer), muffled when the
-    /// speaker or the listener is under water. No microphone → receiving still works.
-    /// Testing: start with "-voiceloopback" to hear your own microphone (works offline, too).
+    /// Sends only while Settings.MicLive allows it: open mic (the default, F.5) above the noise gate
+    /// (Settings.voiceGateDb, −45 dBFS, 300 ms hang time), or the push-to-talk key held (GameAction.PushToTalk); never
+    /// when the voice mode is Off or the mic is muted. Receivers play each speaker through a 3D source on the avatar's
+    /// head with the F.5 range rules (NetCoopRules.Link): above water 2–30 m; under water (speaker OR listener)
+    /// 2–10 m muffled; with the underwater radio (every diver involved wears it, every party above water is on the
+    /// boat) up to 200 m with a radio band-pass and a light crackle. ~120 ms jitter buffer. No microphone → receiving
+    /// still works. Testing: start with "-voiceloopback" to hear your own microphone (works offline, too).
     public sealed class NetVoice : MonoBehaviour
     {
-        const float OpenMicGate = 0.012f;     // RMS (~-38 dBFS)
-        const float OpenMicHold = 0.4f;       // keep sending a little after the voice drops below the gate
+        const float OpenMicHold = 0.3f;       // F.5: 300 ms hang time after the voice drops below the gate
         const float SpeakingHold = 0.3f;
+        // frame flags
+        const byte FlagUnder = 1, FlagRadio = 2, FlagBoat = 4;
+
+        /// Open-mic gate as RMS (Settings.voiceGateDb, default −45 dBFS ≈ 0.0056).
+        static float GateRms => Mathf.Pow(10f, Mathf.Clamp(Settings.Data.voiceGateDb, -80f, -10f) / 20f);
+
+        /// Link the voice of a player currently uses toward this machine (diagnostics, tests: "10 m under water").
+        public static VoiceLink LinkOf(int playerId) => Instance != null && Instance.links.TryGetValue(playerId, out var l) ? l : VoiceLink.Air;
+        /// Hearing range in meters of that player's voice right now.
+        public static float RangeOf(int playerId) => NetCoopRules.MaxDistance(LinkOf(playerId));
 
         public static NetVoice Instance { get; private set; }
 
@@ -77,9 +88,13 @@ namespace Sealebrities
         // ------------------------------------------------------------------ playback
         readonly Dictionary<int, NetVoicePlayer> players = new Dictionary<int, NetVoicePlayer>();
         readonly List<int> stale = new List<int>(4);
-        readonly Dictionary<int, bool> speakerUnderwater = new Dictionary<int, bool>();
+        readonly Dictionary<int, byte> speakerFlags = new Dictionary<int, byte>();
+        readonly Dictionary<int, VoiceLink> links = new Dictionary<int, VoiceLink>();
         NetVoicePlayer loopbackPlayer;
         bool handlersOn;
+        // the local player's radio (crew item, equipped per player) – re-read once a second
+        bool localRadio;
+        float radioTimer;
 
         void Awake()
         {
@@ -130,7 +145,8 @@ namespace Sealebrities
             }
             lastVoiceTime.Remove(p.id);
             loudness.Remove(p.id);
-            speakerUnderwater.Remove(p.id);
+            speakerFlags.Remove(p.id);
+            links.Remove(p.id);
         }
 
         void OnSessionEnded(string reason)
@@ -139,7 +155,8 @@ namespace Sealebrities
             players.Clear();
             lastVoiceTime.Clear();
             loudness.Clear();
-            speakerUnderwater.Clear();
+            speakerFlags.Clear();
+            links.Clear();
         }
 
         /// Re-checks the capture devices (e.g. after plugging in a headset).
@@ -174,7 +191,21 @@ namespace Sealebrities
             LocalTransmitting = (micClip != null || tone) && now - lastSendTime < 0.15f;
             loopbackTalking = micClip != null && now - lastLoopTime < 0.15f;
 
+            radioTimer -= Time.unscaledDeltaTime;
+            if (radioTimer <= 0f)
+            {
+                radioTimer = 1f;
+                var gm = GameManager.I;
+                localRadio = gm != null && gm.InGame && gm.Gear.hasRadio;
+            }
+
             UpdatePlayers();
+        }
+
+        static bool LocalOnBoat()
+        {
+            var b = Refs.Boat;
+            return NetWorldSync.Alive(b) && (b.PlayerAboard || b.PlayerDriving);
         }
 
         // ------------------------------------------------------------------ microphone
@@ -277,12 +308,12 @@ namespace Sealebrities
             float rms = Mathf.Sqrt(sum / n);
             LocalLevel = Mathf.Clamp01(rms * 6f);
 
-            // gate: push-to-talk / open mic (+ RMS gate) / off / muted
+            // gate: push-to-talk / open mic (+ noise gate, F.5) / off / muted
             var d = Settings.Data;
             bool live = Settings.MicLive;
             if (live && d.voiceMode == VoiceMode.OpenMic)
             {
-                if (rms >= OpenMicGate) openUntil = Time.unscaledTime + OpenMicHold;
+                if (rms >= GateRms) openUntil = Time.unscaledTime + OpenMicHold;
                 live = Time.unscaledTime < openUntil;
             }
             if (!live) return;
@@ -328,10 +359,14 @@ namespace Sealebrities
             {
                 lastSendTime = Time.unscaledTime;
                 lastLocalLevel = Mathf.Clamp01(rms * 8f);
+                byte fl = 0;
+                if (under) fl |= FlagUnder;
+                if (localRadio) fl |= FlagRadio;
+                if (LocalOnBoat()) fl |= FlagBoat;
                 writer.Reset();
                 writer.Byte((byte)Mathf.Clamp(Net.LocalId, 0, 255));
                 writer.UShort(seq);
-                writer.Byte(under ? (byte)1 : (byte)0);
+                writer.Byte(fl);
                 writer.Bytes(encoded, 0, n);
                 NetBus.Send(NetSyncMsg.VoiceFrame, writer.ToArray(), NetBus.Everyone, false);
                 FramesSent++;
@@ -356,7 +391,7 @@ namespace Sealebrities
             if (Net.IsHost) origin = fromId;
             if (origin == Net.LocalId) return;
             int s = r.UShort();
-            bool speakerUnder = r.Byte() != 0;
+            byte speakerFl = r.Byte();
             if (!r.Bytes(encoded, NetVoiceCodec.FrameSamples)) return;
             FramesReceived++;
             if (Settings.Data.voiceMode == VoiceMode.Off) return;   // "Off" also mutes everybody else
@@ -375,15 +410,17 @@ namespace Sealebrities
                 players[origin] = vp;
             }
             vp.Enqueue(decoded, NetVoiceCodec.FrameSamples, s);
-            speakerUnderwater[origin] = speakerUnder;
+            speakerFlags[origin] = speakerFl;
         }
 
         void UpdatePlayers()
         {
             var p = Refs.Player;
-            bool listenerUnder = NetWorldSync.Alive(p) && p.IsUnderwater;
+            bool alive = NetWorldSync.Alive(p);
+            bool listenerUnder = alive && p.IsUnderwater;
+            bool listenerBoat = LocalOnBoat();
             Vector3 listenerPos = Vector3.zero;
-            if (NetWorldSync.Alive(p) && p.View != null) listenerPos = p.View.transform.position;
+            if (alive && p.View != null) listenerPos = p.View.transform.position;
             else if (Camera.main != null) listenerPos = Camera.main.transform.position;
 
             stale.Clear();
@@ -394,13 +431,18 @@ namespace Sealebrities
                 int id = kv.Key;
                 bool spatial = NetAvatarSync.TryGet(id, out var av) && av.Visible;
                 Vector3 pos = spatial ? av.HeadPosition : listenerPos;
-                speakerUnderwater.TryGetValue(id, out bool su);
-                if (spatial) su |= av.Underwater;
-                vp.UpdateOutput(pos, spatial, su || listenerUnder);
+                speakerFlags.TryGetValue(id, out byte sf);
+                bool su = (sf & FlagUnder) != 0 || (spatial && av.Underwater);
+                bool sr = (sf & FlagRadio) != 0;
+                bool sb = (sf & FlagBoat) != 0 || (spatial && av.OnBoat);
+                var link = NetCoopRules.Link(su, sr, sb, listenerUnder, localRadio, listenerBoat);
+                links[id] = link;
+                float dist = spatial ? Vector3.Distance(pos, listenerPos) : 0f;
+                vp.UpdateOutput(pos, spatial, link, dist);
             }
-            for (int i = 0; i < stale.Count; i++) players.Remove(stale[i]);
+            for (int i = 0; i < stale.Count; i++) { players.Remove(stale[i]); links.Remove(stale[i]); }
 
-            if (loopbackPlayer != null) loopbackPlayer.UpdateOutput(listenerPos, false, listenerUnder);
+            if (loopbackPlayer != null) loopbackPlayer.UpdateOutput(listenerPos, false, listenerUnder ? VoiceLink.Water : VoiceLink.Air, 0f);
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

@@ -70,8 +70,10 @@ namespace Sealebrities
 
             if (photos.Count == 0)
             {
-                body.Add(PhoneKit.Empty(UIGlyphs.Camera, Loc.Tr("Noch keine Fotos. Kamera zielen (", "No photos yet. Aim the camera (") +
-                                                         GameInput.BindingLabel(GameAction.Aim) + ") + " + GameInput.BindingLabel(GameAction.Photo)));
+                // the combo the tutorial teaches (Aim + Use); the Photo key works on its own as well
+                body.Add(PhoneKit.Empty(UIGlyphs.Camera, Loc.Tr("Noch keine Fotos. ", "No photos yet. ") +
+                                                         GameInput.BindingLabel(GameAction.Aim) + " + " + GameInput.BindingLabel(GameAction.Use) + " · " +
+                                                         Loc.Tr("Foto = Eintrag (oder ", "photo = entry (or ") + GameInput.BindingLabel(GameAction.Photo) + ")"));
                 return;
             }
 

@@ -166,6 +166,9 @@ namespace Sealebrities
         public readonly UIAppFollowFish FollowFish;
         public readonly UIAppMap Map;
         public readonly UIAppMessages Messages;
+        public readonly UIAppDeals Deals;
+        public readonly UIAppFin Fin;
+        public readonly UIAppWeather Weather;
         public readonly UIAppSettings Settings;
 
         static Texture2D wallpaper;
@@ -287,6 +290,9 @@ namespace Sealebrities
             Messages = Register(new UIAppMessages());
             FollowFish = Register(new UIAppFollowFish());
             Krill = Register(new UIAppKrill());
+            Deals = Register(new UIAppDeals());
+            Fin = Register(new UIAppFin());
+            Weather = Register(new UIAppWeather());
             Settings = Register(new UIAppSettings());
 
             CreateRenderTarget(mainSettings);
@@ -308,7 +314,7 @@ namespace Sealebrities
         public bool In3D => in3D;
 
         public static bool CanOpen =>
-            GameManager.I != null && GameManager.I.InGame && !UIState.MainMenuOpen && !UIState.LoadingOpen && !UIState.PauseOpen && !UIState.InventoryOpen;
+            GameManager.I != null && GameManager.I.InGame && !UIState.MainMenuOpen && !UIState.LoadingOpen && !UIState.PauseOpen && !UIState.InventoryOpen && !UIState.CharacterOpen;
 
         // ------------------------------------------------------------------ render texture panel
         void CreateRenderTarget(PanelSettings mainSettings)
@@ -549,28 +555,37 @@ namespace Sealebrities
             var gm = GameManager.I;
             var s = gm != null ? gm.State : null;
 
-            var clock = UIKit.Text(gm != null ? gm.ClockString : "--:--", 92f, UIPalette.Ink, true);
-            clock.style.unityTextAlign = TextAnchor.MiddleCenter;
-            clock.style.marginTop = 6f;
-            page.Add(clock);
+            var top = UIKit.Row();
+            top.style.justifyContent = Justify.Center;
+            top.style.alignItems = Align.FlexEnd;
+            var clock = UIKit.Text(gm != null ? gm.ClockString : "--:--", 76f, UIPalette.Ink, true);
+            top.Add(clock);
             if (s != null)
             {
-                var day = UIKit.Text(Loc.Tr("Tag ", "Day ") + s.day, PhoneKit.Body, UIPalette.InkSoft, true);
-                day.style.unityTextAlign = TextAnchor.MiddleCenter;
-                page.Add(day);
-
+                var day = UIKit.Text("  " + Loc.Tr("Tag ", "Day ") + s.day, PhoneKit.Body, UIPalette.InkSoft, true);
+                day.style.marginBottom = 14f;
+                top.Add(day);
+            }
+            page.Add(top);
+            if (s != null)
+            {
                 var w = UIKit.Row();
-                w.style.marginTop = 18f;
+                w.style.marginTop = 8f;
                 w.Add(PhoneKit.Stat(UIGlyphs.Coin, UIPalette.Sun, UIKit.Compact(s.money) + " $"));
                 w.Add(UIKit.HSpacer(10f));
-                w.Add(PhoneKit.Stat(UIGlyphs.Person, UIPalette.Turquoise, UIKit.Compact(s.followers)));
+                var fol = PhoneKit.Stat(UIGlyphs.Person, UIPalette.Turquoise, UIKit.Compact(s.followers));
+                // Q50 channel rank badge on the follower tile
+                var badge = new UIRankBadge(Progression.RankIndex(s.followers), 44f);
+                badge.style.marginLeft = 8f;
+                fol.Add(badge);
+                w.Add(fol);
                 page.Add(w);
             }
 
             var grid = UIKit.Row();
             grid.style.flexWrap = Wrap.Wrap;
             grid.style.alignItems = Align.FlexStart;
-            grid.style.marginTop = 28f;
+            grid.style.marginTop = 20f;
             page.Add(grid);
             foreach (var app in apps) grid.Add(AppTile(app));
 
@@ -580,12 +595,12 @@ namespace Sealebrities
         VisualElement AppTile(UIPhoneApp app)
         {
             var tile = UIKit.Col();
-            tile.style.width = Length.Percent(33.33f);
+            tile.style.width = Length.Percent(25f);
             tile.style.alignItems = Align.Center;
-            tile.style.marginBottom = 22f;
+            tile.style.marginBottom = 16f;
 
-            var icon = UIWidgets.IconTile(app.Icon, app.Color, 112f);
-            UIKit.Radius(icon, 26f);
+            var icon = UIWidgets.IconTile(app.Icon, app.Color, 96f);
+            UIKit.Radius(icon, 24f);
             icon.style.overflow = Overflow.Visible;
             int badge = app.Badge;
             if (badge != 0)
@@ -608,9 +623,13 @@ namespace Sealebrities
                 icon.Add(lockBg);
             }
             tile.Add(icon);
-            var label = UIKit.Text(app.Title, 22f, UIPalette.Ink, true);
-            label.style.marginTop = 8f;
+            var label = UIKit.Text(app.Title, 19f, UIPalette.Ink, true);
+            label.style.marginTop = 6f;
             label.style.unityTextAlign = TextAnchor.MiddleCenter;
+            label.style.whiteSpace = WhiteSpace.NoWrap;
+            label.style.overflow = Overflow.Hidden;
+            label.style.textOverflow = TextOverflow.Ellipsis;
+            label.style.maxWidth = 126f;
             tile.Add(label);
 
             UIKit.IgnorePicking(tile);

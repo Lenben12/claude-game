@@ -61,14 +61,14 @@ namespace Sealebrities
 
         // ------------------------------------------------------------------ cave
         /// Floor height of the clearing in front of the cave, the passage and the chamber.
-        public const float CaveFloorY = 13f;
+        public const float CaveFloorY = 14.4f;
         /// Half width of the passage carved into the hill (walls are near-vertical rock).
         public const float CaveHalfWidth = 3.2f;
         /// Length of the passage from the mouth (rock face) to the chamber entry.
         public const float CaveLength = 13f;
         public const float CaveChamberRadius = 6f;
         /// The hill above the passage reaches at least CaveFloorY + this (props add the rock roof at ~CaveFloorY + 4.5).
-        public const float CaveHillHeight = 11f;
+        public const float CaveHillHeight = 7.3f;
         /// Horizontal unit vector pointing from the mouth INTO the hill (the mouth faces −CaveDir: north-east, toward the trail).
         public static readonly Vector3 CaveDir;
         /// Centre of the mouth on the rock face (y = CaveFloorY).
@@ -78,12 +78,12 @@ namespace Sealebrities
 
         // ------------------------------------------------------------------ ravine + rope bridge
         /// Level of both rims at the rope bridge.
-        public const float RavineRimY = 23.5f;
+        public const float RavineRimY = 18.5f;
         public const float RavineDepth = 7.5f;
         /// Half width at the top (≈ 13 m wide) and at the floor.
         public const float RavineHalfWidthTop = 6.5f, RavineHalfWidthFloor = 2.2f;
         /// West and east end of the ravine axis (y = 0; the floor fades out at both ends).
-        public const float RavineWestX = -66f, RavineEastX = 26f;
+        public const float RavineWestX = -41f, RavineEastX = 16f;
         /// Rope bridge anchors on the north and south rim (y = RavineRimY), 14 m apart.
         public static readonly Vector3 BridgeNorth, BridgeSouth;
 
@@ -96,7 +96,7 @@ namespace Sealebrities
         public static readonly WorldSpot[] TidePoolSpots;
 
         // ------------------------------------------------------------------ radio tower ruins
-        public const float RadioPlateauY = 22f;
+        public const float RadioPlateauY = 15f;
         public const float RadioPlateauRadius = 13f;
 
         // ------------------------------------------------------------------ second beach
@@ -105,15 +105,46 @@ namespace Sealebrities
 
         // ------------------------------------------------------------------ hidden bay
         /// The small sandy beach at the inner (east) end of the hidden cove (y = 0; the ground is ~0.5-2 m there).
-        public static readonly Vector3 HiddenBayBeach = new Vector3(WorldLayout.HiddenBay.x + 40f, 0f, WorldLayout.HiddenBay.z);
-        /// A walkable gully (≈ 20°, 5 m wide) cut through the cove's southern ridge from the radio tower side down to
+        public static readonly Vector3 HiddenBayBeach = new Vector3(WorldLayout.HiddenBay.x + 27f, 0f, WorldLayout.HiddenBay.z);
+        /// A walkable gully (≈ 21°, 5 m wide) cut through the cove's southern ridge from the radio tower plateau down to
         /// HiddenBayBeach: top end (y = ground) and bottom end on the beach. A trail to the hidden bay should use it.
-        public static readonly Vector3 BayGullyTop = new Vector3(-146f, 16.4f, -82f), BayGullyBottom = new Vector3(-146f, 0.9f, -38f);
+        public static readonly Vector3 BayGullyTop = new Vector3(-76f, 14.5f, -60f), BayGullyBottom = new Vector3(-89f, 0.9f, -26f);
+        /// Round 2 (0.75 plan): a walkable ramp from the lighthouse trail down into the cave clearing.
+        /// Round 2b (L.5): no cave ramp any more (the cave mouth is in the waterfall cliff) – both zero = unused.
+        public static readonly Vector3 CaveRampTop = Vector3.zero, CaveRampBottom = Vector3.zero;
+
+        // ------------------------------------------------------------------ village (round 2b)
+        /// Flat village terrace behind the second beach (ellipse half axes along x / z, y = terrace height).
+        public const float VillageTerraceY = 1.7f, VillageHalfX = 24f, VillageHalfZ = 12f;
 
         // ------------------------------------------------------------------ sea stacks + landmark islands
         /// Rocky islets just off the main island coast (position.y = top height).
         public static readonly WorldSpot[] SeaStacks;
         public static readonly MiniIsland[] MiniIslands;
+
+        // ------------------------------------------------------------------ detail pass (round 2b, L.5 "much more detailed", L.3)
+        /// Small coves bitten into the coastline away from the points of interest: position = the shoreline point the cove
+        /// is centred on (y = 0), radius = how far the bay reaches inland. Each has a narrow sandy beach at its back, rock
+        /// or cliff around it. Good spots for props (rowboat, campfire, a secret under a cliff).
+        public static readonly WorldSpot[] SmallCoves;
+        /// Rock ledges / outcrops on the hill flanks (≥ 11 m from every trail, ≥ 20 m from every anchor): position.y =
+        /// height of the flat rock top above the slope it sits on, radius of the flat top + steep sides. Painted as rock.
+        public static readonly WorldSpot[] RockLedges;
+        /// Flat skerries just above the water off the cliff coasts (position.y = top height above sea level, radius).
+        public static readonly WorldSpot[] Skerries;
+        /// L.3: patch reefs in the lagoon around the main island (6–12 m across, 1.5–4 m deep, none in the boat lanes, the
+        /// village lagoon, the hidden-bay mouth or the house reef). The terrain raises a knobbly rock mound under each
+        /// (position.y = seabed height of the mound top, negative) inside a slightly deeper sand halo; props grow the coral
+        /// patch on it and register its habitat anchors. Deterministic list, identical on every machine.
+        public static readonly WorldSpot[] LagoonPatchReefs;
+        /// L.3 house reef: the reef crest runs along the lagoon edge at this distance from the island centre (3–4 m deep,
+        /// ≈ 34 m wide), a sandy back-reef lies inside it, spur-and-groove channels cut the fore-reef outside it.
+        public const float ReefCrestR = 176f, ReefCrestHalfWidth = 17f;
+        /// Grooves of the fore-reef: spacing along the crest (m) and how deep they cut (m).
+        public const float SpurSpacing = 11f, GrooveDepth = 1.7f;
+        /// Seabed detail zone of the house reef (x0, z0, x1, z1 – aligned to the 128 m terrain chunks): the terrain uses
+        /// 1.6 m facets here, so the short sand ripples (3–6 m wavelength) and the spur-and-groove channels stay crisp.
+        public static readonly Vector4 ReefDetailRect = new Vector4(128f, -128f, 256f, 128f);
 
         static WorldFeatures()
         {
@@ -137,8 +168,8 @@ namespace Sealebrities
             FallRampTop = new Vector3(top.x + 5.5f, FallTopY, top.z + 3.4f);
             FallRampBottom = new Vector3(top.x + 15f, FallFootY - 0.3f, top.z - 6f);
 
-            // cave: the mouth faces north-east toward the trail from the lighthouse, the hill rises to the south-west
-            CaveDir = new Vector3(-0.6f, 0f, -0.8f);
+            // cave (round 2b): the mouth sits in the waterfall cliff and the passage runs straight into the plateau
+            CaveDir = -FallDir;
             Vector3 e = WorldLayout.CaveEntrance;
             CaveMouth = new Vector3(e.x, CaveFloorY, e.z);
             float chamberS = CaveLength + CaveChamberRadius - 1.5f;
@@ -168,20 +199,20 @@ namespace Sealebrities
             Vector3 sb = WorldLayout.SecondBeach;
             SecondBeachHeadlands = new[]
             {
-                new WorldSpot(sb.x - 41f, 3.2f, sb.z - 3f, 9f),
-                new WorldSpot(sb.x + 40f, 2.6f, sb.z + 4f, 8f),
+                new WorldSpot(sb.x - 31f, 3.2f, sb.z - 1f, 8f),
+                new WorldSpot(sb.x + 30f, 2.6f, sb.z + 3f, 7f),
             };
 
-            // in 4-8 m of water, away from the dock, the house reef, the second beach and the boat lanes
+            // in the lagoon just off the coast, away from the dock, the house reef, the second beach and the boat lanes
             SeaStacks = new[]
             {
-                new WorldSpot(-68f, 6f, 188f, 5f),
-                new WorldSpot(-186f, 7.5f, 108f, 6f),
-                new WorldSpot(-244f, 8.5f, 43f, 6.5f),
-                new WorldSpot(-204f, 6.5f, -172f, 7f),
-                new WorldSpot(-75f, 5f, -206f, 5f),
-                new WorldSpot(110f, 6f, -192f, 5.5f),
-                new WorldSpot(40f, 4.5f, 230f, 4.5f),
+                new WorldSpot(-42f, 6f, 117f, 5f),
+                new WorldSpot(-116f, 7.5f, 67f, 6f),
+                new WorldSpot(-151f, 8.5f, 26f, 6.5f),
+                new WorldSpot(-126f, 6.5f, -107f, 7f),
+                new WorldSpot(-46f, 5f, -128f, 5f),
+                new WorldSpot(69f, 6f, -119f, 5.5f),
+                new WorldSpot(25f, 4.5f, 143f, 4.5f),
             };
 
             MiniIslands = new[]
@@ -190,6 +221,59 @@ namespace Sealebrities
                 new MiniIsland { id = "wreck", center = WorldLayout.WreckIsland, shoreRadius = 35f, peak = 10f, steepness = 1.4f, rocky = 0.6f },
                 new MiniIsland { id = "blue_drop", center = WorldLayout.BlueDropIsland, shoreRadius = 33f, peak = 12f, steepness = 3.2f, rocky = 0.85f },
                 new MiniIsland { id = "deep_trench", center = WorldLayout.TrenchIsland, shoreRadius = 34f, peak = 4f, steepness = 4.6f, rocky = 0.1f },
+                new MiniIsland { id = "fog_isle", center = WorldLayout.FogIsland, shoreRadius = 30f, peak = 16f, steepness = 1.2f, rocky = 0.45f },
+            };
+
+            // ---- detail pass (positions probed against the 0.62 island: away from anchors, trails, boat lanes)
+            SmallCoves = new[]
+            {
+                new WorldSpot(101f, 0f, 62f, 10f),     // north of the dock beach: a little swimming bight
+                new WorldSpot(-4f, 0f, 113f, 8f),      // under the lighthouse cliff: the "north beach"
+                new WorldSpot(-73f, 0f, 87f, 9f),      // north-west cliff coast
+                new WorldSpot(-120f, 0f, 44f, 10f),    // west coast, skerries in its mouth
+                new WorldSpot(-64.5f, 0f, -112f, 9f),  // south-west, below the radio tower hills
+            };
+            RockLedges = new[]
+            {
+                new WorldSpot(36f, 2.2f, 96f, 4.5f),
+                new WorldSpot(-52f, 3.0f, -28f, 5.5f),
+                new WorldSpot(24f, 2.4f, 44f, 5f),
+                new WorldSpot(-104f, 2.6f, -56f, 5f),
+                new WorldSpot(4f, 3.2f, -4f, 6f),
+                new WorldSpot(-8f, 2.5f, -56f, 5f),
+                new WorldSpot(0f, 2.8f, 56f, 5.5f),
+                new WorldSpot(-40f, 3.0f, 80f, 5f),
+                new WorldSpot(28f, 1.8f, -20f, 4.5f),
+                new WorldSpot(-84f, 2.8f, 40f, 5.5f),
+                new WorldSpot(12f, 2.0f, 96f, 4.5f),
+                new WorldSpot(-48f, 2.4f, 12f, 4.5f),
+                new WorldSpot(-100f, 2.0f, -80f, 4.5f),
+                new WorldSpot(-32f, 2.6f, -64f, 5f),
+            };
+            Skerries = new[]
+            {
+                new WorldSpot(-22f, 0.7f, 124f, 3f),
+                new WorldSpot(-94f, 0.9f, 79f, 3.5f),
+                new WorldSpot(-130f, 0.6f, 47f, 2.8f),
+                new WorldSpot(-138f, 1.0f, -50f, 3.5f),
+                new WorldSpot(-96f, 0.6f, -114f, 3f),
+            };
+            LagoonPatchReefs = new[]
+            {
+                new WorldSpot(90.3f, -1.5f, 100.3f, 4.5f),
+                new WorldSpot(31.4f, -2.45f, 178.3f, 6f),
+                new WorldSpot(7.2f, -1.5f, 137.3f, 4.5f),
+                new WorldSpot(-41.5f, -2.3f, 144.7f, 5.5f),
+                new WorldSpot(-84.4f, -1.65f, 125.2f, 5f),
+                new WorldSpot(-119.8f, -2.1f, 93.6f, 4f),
+                new WorldSpot(-157.4f, -2.15f, 57.3f, 6f),
+                new WorldSpot(-165.5f, -1.85f, -57f, 5f),
+                new WorldSpot(-126.1f, -2.25f, -130.6f, 5.5f),
+                new WorldSpot(-77.5f, -1.65f, -134.2f, 4.5f),
+                new WorldSpot(-29.3f, -1.55f, -137.9f, 5f),
+                new WorldSpot(69.5f, -2.25f, -149.1f, 6f),
+                new WorldSpot(96.4f, -1.5f, -110.9f, 4.5f),
+                new WorldSpot(134f, -1.6f, -83.7f, 5f),
             };
         }
 

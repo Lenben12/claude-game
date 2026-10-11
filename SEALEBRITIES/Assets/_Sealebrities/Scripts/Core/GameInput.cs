@@ -7,10 +7,13 @@ using UnityEngine.InputSystem.Controls;
 namespace Sealebrities
 {
     /// Rebindable game actions (Settings → Steuerung). Order is stable: append new values at the end.
+    /// Round 2: StreamDare (T, accept a livestream dare – C.5), Selfie (H, selfie view – K.4).
+    /// Crouch on land (L.6) uses Down (no own action).
     public enum GameAction
     {
         Forward, Back, Left, Right, Up, Down, Sprint, Jump, Interact, LightToggle, Phone, Journal, Inventory, Pause,
-        RightSlot1, RightSlot2, RightSlot3, LeftSlot1, LeftSlot2, LeftSlot3, Anchor, PushToTalk, Use, Aim, Photo
+        RightSlot1, RightSlot2, RightSlot3, LeftSlot1, LeftSlot2, LeftSlot3, Anchor, PushToTalk, Use, Aim, Photo,
+        StreamDare, Selfie
     }
 
     /// A key OR a mouse button. key != Key.None → keyboard binding; otherwise mouseButton
@@ -87,6 +90,8 @@ namespace Sealebrities
             d[(int)GameAction.Use] = InputBinding.FromMouse(0);
             d[(int)GameAction.Aim] = InputBinding.FromMouse(1);
             d[(int)GameAction.Photo] = InputBinding.FromKey(Key.P);
+            d[(int)GameAction.StreamDare] = InputBinding.FromKey(Key.T);
+            d[(int)GameAction.Selfie] = InputBinding.FromKey(Key.H);
             return d;
         }
 
@@ -125,9 +130,12 @@ namespace Sealebrities
         static bool Up(Key k) { var c = KeyCtl(k); return c != null && c.wasReleasedThisFrame; }
 
         // ------------------------------------------------------------------ actions
-        public static bool Held(GameAction a) => HeldB(bindings[(int)a]) || (simActive && SimHeld((int)a));
-        public static bool Down(GameAction a) => DownB(bindings[(int)a]) || (simActive && simDown[(int)a] == Time.frameCount);
-        public static bool Up(GameAction a) => UpB(bindings[(int)a]) || (simActive && simUp[(int)a] == Time.frameCount);
+        /// While a text field has focus (UIState.TextInput, L.4) every action except Pause reads as not pressed.
+        static bool Blocked(GameAction a) => UIState.TextInput && a != GameAction.Pause;
+
+        public static bool Held(GameAction a) => !Blocked(a) && (HeldB(bindings[(int)a]) || (simActive && SimHeld((int)a)));
+        public static bool Down(GameAction a) => !Blocked(a) && (DownB(bindings[(int)a]) || (simActive && simDown[(int)a] == Time.frameCount));
+        public static bool Up(GameAction a) => !Blocked(a) && (UpB(bindings[(int)a]) || (simActive && simUp[(int)a] == Time.frameCount));
 
         // ------------------------------------------------------------------ simulated input (automated tests only)
         // AutoPlaytest drives the real gameplay code through these: a simulated action is OR-ed with the devices.
@@ -189,6 +197,7 @@ namespace Sealebrities
         {
             for (int i = 0; i < simFrom.Length; i++) { simFrom[i] = -1; simUntil[i] = -1; simDown[i] = -1; simUp[i] = -1; }
             simLookFrame = -1;
+            simScrollFrame = -1;
             simActive = false;
         }
 
@@ -263,6 +272,40 @@ namespace Sealebrities
                 return y > 0.01f ? 1f : y < -0.01f ? -1f : 0f;
             }
         }
+
+        /// Q17 hotbar wheel: +1 = next slot (wheel down), −1 = previous slot (wheel up), 0 = none. 0 while a text field
+        /// or a modal UI has focus. The camera's aim zoom keeps using ZoomStep (Hands.HandleInput skips the wheel while aiming).
+        public static int HotbarScroll
+        {
+            get
+            {
+                if (UIState.TextInput || UIState.BlocksGameplay) return 0;
+                int sim = simActive && simScrollFrame == Time.frameCount ? simScroll : 0;
+                if (sim != 0) return sim;
+                var m = M;
+                if (m == null) return 0;
+                float y = m.scroll.ReadValue().y;
+                return y < -0.01f ? 1 : y > 0.01f ? -1 : 0;
+            }
+        }
+
+        /// Shift+wheel cycles the left hand (Q17) – raw Shift keys, independent of the sprint binding.
+        public static bool HotbarScrollLeftHand => Held(Key.LeftShift) || Held(Key.RightShift);
+
+        static int simScroll, simScrollFrame = -1;
+
+        /// Test only: one hotbar wheel step (+1 next / −1 previous) in the next frame.
+        public static void SimScroll(int dir)
+        {
+            simActive = true;
+            simScroll = dir > 0 ? 1 : dir < 0 ? -1 : 0;
+            simScrollFrame = Time.frameCount + 1;
+        }
+
+        /// Selfie view toggle (K.4, default H).
+        public static bool SelfiePressed => Down(GameAction.Selfie);
+        /// Accept a livestream dare (C.5, default T).
+        public static bool StreamDarePressed => Down(GameAction.StreamDare);
 
         public static bool KeyHeld(Key k) => Held(k);
         public static bool KeyDown(Key k) => Down(k);
@@ -472,7 +515,7 @@ namespace Sealebrities
                 case GameAction.Left: return Loc.Tr("Links", "Left");
                 case GameAction.Right: return Loc.Tr("Rechts", "Right");
                 case GameAction.Up: return Loc.Tr("Auftauchen", "Swim up");
-                case GameAction.Down: return Loc.Tr("Abtauchen", "Swim down");
+                case GameAction.Down: return Loc.Tr("Abtauchen / Ducken", "Swim down / Crouch");
                 case GameAction.Sprint: return Loc.Tr("Sprinten", "Sprint");
                 case GameAction.Jump: return Loc.Tr("Springen", "Jump");
                 case GameAction.Interact: return Loc.Tr("Benutzen", "Interact");
@@ -491,6 +534,8 @@ namespace Sealebrities
                 case GameAction.PushToTalk: return Loc.Tr("Sprechen (Push-to-Talk)", "Push to talk");
                 case GameAction.Use: return Loc.Tr("Aufnehmen / Auswerfen", "Record / cast");
                 case GameAction.Aim: return Loc.Tr("Zielen", "Aim");
+                case GameAction.StreamDare: return Loc.Tr("Mutprobe annehmen", "Accept dare");
+                case GameAction.Selfie: return Loc.Tr("Selfie-Ansicht", "Selfie view");
                 default: return Loc.Tr("Foto", "Photo");
             }
         }

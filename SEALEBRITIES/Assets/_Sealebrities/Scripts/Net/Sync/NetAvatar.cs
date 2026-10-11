@@ -4,10 +4,13 @@ using UnityEngine.Rendering;
 
 namespace Sealebrities
 {
-    /// A remote co-op player in this world: bean diver model (DiverModels.Build, low-poly fallback when the Player
-    /// module does not provide one), 100 ms interpolated pose, hand items, lamp light + beam, exhale bubbles under
-    /// water and a world-space nameplate with a speaking icon. While visible it is registered in Divers (fauna, audio)
-    /// and as an IFaunaDiver so the host's animals react to it.
+    /// A remote co-op player in this world: bean diver model (DiverModels.Build with the player's full look – suit,
+    /// cuffs, pattern, hat, face, mask, fins, visible gear, rank badge; low-poly fallback when the Player module does
+    /// not provide one), 100 ms interpolated pose, the L.13 motion set (IDiverMotion when the puppet implements it),
+    /// the K.4 selfie pose + expression, a carried quest item / salvage piece, the slumped unconscious pose (F.1),
+    /// fishing line + float (D.1), hand items, lamp light + beam, exhale bubbles under water and a world-space
+    /// nameplate with a speaking icon. While visible it is registered in Divers (fauna, audio) and as an IFaunaDiver
+    /// so the host's animals react to it.
     public sealed class NetAvatar : MonoBehaviour, IFaunaDiver
     {
         /// Player colours of the art bible (P1..P4) used when a player has not picked a suit colour.
@@ -16,6 +19,10 @@ namespace Sealebrities
             new Color(0.933f, 0.498f, 0.176f), new Color(0.247f, 0.722f, 0.769f),
             new Color(0.878f, 0.376f, 0.494f), new Color(0.949f, 0.788f, 0.298f)
         };
+
+        /// Strap items (Q51) follow the hands only after they were stable this long (no model rebuild per hand switch).
+        const float StrapSettleSeconds = 1.5f;
+        const int LinePoints = 14;
 
         public int PlayerId { get; private set; }
         public string PlayerName { get; private set; } = "";
@@ -41,10 +48,22 @@ namespace Sealebrities
         public bool Recording => (flags & NetAvatarSync.FRecording) != 0;
         public bool Aiming => (flags & NetAvatarSync.FAiming) != 0;
         public bool OnBoat => (flags & NetAvatarSync.FOnBoat) != 0;
+        public bool InSelfie => (flags & NetAvatarSync.FSelfie) != 0;
+        public bool Unconscious => (flags & NetAvatarSync.FUnconscious) != 0;
+        public bool Towing => (flags & NetAvatarSync.FTowing) != 0;
+        public bool Carrying => (flags & NetAvatarSync.FCarry) != 0;
+        public bool Fishing => (flags & NetAvatarSync.FFishing) != 0;
         public HoldItem RightItem { get; private set; }
         public HoldItem LeftItem { get; private set; }
         public float Air01 { get; private set; } = 1f;
         public float Depth { get; private set; }
+        /// L.13 motion state of the remote player (and the 0..1 phase of its cycle).
+        public MotionState Motion { get; private set; }
+        public float MotionPhase { get; private set; }
+        /// K.4 selfie expression (SelfieExpression as byte).
+        public byte Expression { get; private set; }
+        /// Carried item id (null = hands free) – K.3 / L.7.
+        public string CarriedItem => carryId;
 
         readonly SyncSnapBuffer<NetAvatarSample> buffer = new SyncSnapBuffer<NetAvatarSample>(12);
         ushort flags;
@@ -55,8 +74,13 @@ namespace Sealebrities
         // visuals
         GameObject modelGo;
         IDiverPuppet puppet;
+        IDiverMotion motionPuppet;
         DiverLook builtLook;
         bool hasLook;
+        DiverLook infoLook;            // the look from the player list (straps = "owns")
+        bool infoHasLook;
+        HoldItem strapRight, strapLeft;
+        float strapStable;
         bool ownLamp = true;
         Transform look;          // eye position, yaw + pitch of the remote camera
         Light lamp;
@@ -65,10 +89,24 @@ namespace Sealebrities
         float bubbleTimer;
         bool wasUnderwater;
         float occlusionTimer;
+        float slump;             // 0..1 unconscious tilt for puppets without the motion set
+
+        // carried item
+        GameObject carryGo;
+        string carryId;
+
+        // fishing line + float
+        LineRenderer fishLine;
+        Transform bobber;
+        readonly Vector3[] linePts = new Vector3[LinePoints];
+        Vector3 bobberShown;
+        bool bobberHas;
+        byte lastRod;
 
         static Mesh beamMesh;
         static Material beamMat;
         static Texture2D beamTex;
+        static Mesh facetSphere;
 
         // ------------------------------------------------------------------ setup
         public void Init(int id, NetPlayerInfo info)
@@ -116,25 +154,37 @@ namespace Sealebrities
                 PlayerName = name;
                 if (plate != null) plate.SetName(name);
             }
-            var lk = new DiverLook
+            DiverLook lk;
+            if (info != null && info.look.lookVersion >= 1) lk = info.look;
+            else
             {
-                suit = info != null ? info.suit : DefaultSuits[Mathf.Abs(PlayerId) % DefaultSuits.Length],
-                hat = info != null ? info.hat : 0,
-                face = info != null ? info.face : 0,
-                sitting = false
-            };
+                lk = NetLookCodec.FromLegacy(info != null ? info.suit : DefaultSuits[Mathf.Abs(PlayerId) % DefaultSuits.Length],
+                                             info != null ? info.hat : 0, info != null ? info.face : 0);
+                lk.lampOnStrap = false;
+                lk.cameraOnStrap = false;
+            }
             lk.suit.a = 1f;
             // nobody picked a colour (factory default orange): use the art-bible player colour of this slot so the
             // crew can be told apart (host stays orange)
             if (Mathf.Abs(lk.suit.r - 1f) < 0.01f && Mathf.Abs(lk.suit.g - 0.55f) < 0.01f && Mathf.Abs(lk.suit.b - 0.2f) < 0.01f)
                 lk.suit = DefaultSuits[Mathf.Abs(PlayerId) % DefaultSuits.Length];
-            lk.cuff = Color.Lerp(lk.suit, Color.white, 0.6f);
-            if (!hasLook || !SameLook(lk, builtLook)) BuildModel(lk);
+            lk.sitting = false;
+            infoLook = lk;
+            infoHasLook = true;
+            var want = WithStraps(lk, strapRight, strapLeft);
+            want.sponsor = DiverSponsor.CurrentIndex;
+            if (!hasLook || !NetLookCodec.Same(want, builtLook)) BuildModel(want);
         }
 
-        static bool SameLook(DiverLook a, DiverLook b) =>
-            a.hat == b.hat && a.face == b.face && Mathf.Abs(a.suit.r - b.suit.r) < 0.004f
-            && Mathf.Abs(a.suit.g - b.suit.g) < 0.004f && Mathf.Abs(a.suit.b - b.suit.b) < 0.004f;
+        /// Q51: the lamp hangs on the shoulder strap and the camera on the chest strap while they are not in a hand.
+        static DiverLook WithStraps(DiverLook l, HoldItem right, HoldItem left)
+        {
+            bool lampHeld = right == HoldItem.Flashlight || left == HoldItem.Flashlight;
+            bool camHeld = right == HoldItem.Camera || left == HoldItem.Camera;
+            l.lampOnStrap = l.lampOnStrap && !lampHeld;
+            l.cameraOnStrap = l.cameraOnStrap && !camHeld;
+            return l;
+        }
 
         void BuildModel(DiverLook lk)
         {
@@ -143,6 +193,7 @@ namespace Sealebrities
             if (modelGo != null) Destroy(modelGo);
             modelGo = null;
             puppet = null;
+            motionPuppet = null;
 
             GameObject go = null;
             var build = DiverModels.Build;
@@ -159,9 +210,12 @@ namespace Sealebrities
             StripForAvatar(go);
             modelGo = go;
             puppet = go.GetComponentInChildren<IDiverPuppet>(true);
+            motionPuppet = puppet as IDiverMotion;
+            if (motionPuppet == null) motionPuppet = go.GetComponentInChildren<IDiverMotion>(true);
             ownLamp = go.GetComponent<NetAvatarFallback>() != null;   // the fallback has no lamp light of its own
             modelOffset = Vector3.zero;
             if (!Visible) modelGo.SetActive(false);
+            if (carryGo != null) AttachCarry();
         }
 
         /// Remote avatars never collide, listen or render a camera (no physics fights with the interpolated pose).
@@ -188,6 +242,37 @@ namespace Sealebrities
         {
             Divers.Remove(transform);
             FaunaContext.UnregisterRemote(transform);
+        }
+
+        // ------------------------------------------------------------------ lying on a sleep spot (L.9)
+        /// Puppet geometry while lying (DiverPuppet: pivot 0.95 m dropped 0.55 m and pitched −86°, head toward −forward):
+        /// the eyes end up ~0.67 m behind the root, the back ~0.12 m above it.
+        const float LieEyeBack = 0.67f, LieBackAboveRoot = 0.12f, LieSnapRange = 3f;
+
+        /// Nearest PropInfo.SleepSpots entry within LieSnapRange of the sender's root (it pressed E there – no protocol
+        /// change needed). Returns the root position / yaw that lays the puppet on it, head at the spot's head end.
+        static bool SnapToSleepSpot(Vector3 root, out Vector3 pos, out float yaw)
+        {
+            pos = root;
+            yaw = 0f;
+            var spots = PropInfo.SleepSpots;
+            int best = -1;
+            float bestD = LieSnapRange * LieSnapRange;
+            for (int i = 0; i < spots.Count; i++)
+            {
+                Vector3 d = spots[i].lie - root;
+                d.y *= 0.5f;
+                float dd = d.sqrMagnitude;
+                if (dd < bestD) { bestD = dd; best = i; }
+            }
+            if (best < 0) return false;
+            var s = spots[best];
+            yaw = s.yaw;
+            Vector3 fwd = Quaternion.Euler(0f, s.yaw, 0f) * Vector3.forward;
+            // the spot's `lie` is the first-person eye just above the cloth / mattress
+            float surface = s.lie.y - (s.kind == SleepSpotInfo.Hammock ? 0.27f : 0.09f);
+            pos = new Vector3(s.lie.x, surface - LieBackAboveRoot, s.lie.z) + fwd * LieEyeBack;
+            return true;
         }
 
         // ------------------------------------------------------------------ network input
@@ -226,6 +311,9 @@ namespace Sealebrities
             LeftItem = d.left;
             Air01 = d.air01;
             Depth = d.depth;
+            Motion = d.motion;
+            Expression = d.expression;
+            MotionPhase = a.motion == b.motion ? LerpPhase(a.phase, b.phase, f) : d.phase;
             bool onBoat = (flags & NetAvatarSync.FOnBoat) != 0;
 
             if (onBoat)
@@ -242,6 +330,13 @@ namespace Sealebrities
             {
                 pos += v * Mathf.Min(over, 0.25f);   // short extrapolation when a packet is late
             }
+            // lying on a co-op sleep spot (L.9): the sender's root stays where it pressed E (only its camera lies down) –
+            // snap the puppet onto the nearest bed / hammock / bunk so it rests on the mattress instead of the floor
+            if (Motion == MotionState.Lie && !onBoat && SnapToSleepSpot(pos, out Vector3 liePos, out float lieYaw))
+            {
+                pos = liePos;
+                yaw = lieYaw;
+            }
 
             transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, yaw, 0f));
             vel = v;
@@ -250,8 +345,11 @@ namespace Sealebrities
             look.localRotation = Quaternion.Euler(pitch, 0f, 0f);
             lookFwd = look.forward;
 
-            // ---- calm period for the host's predators after this diver fainted
-            if (Fainting) calmUntil = Time.time + 30f;
+            // ---- calm period for the host's predators after this diver fainted / while unconscious
+            if (Fainting || Unconscious) calmUntil = Time.time + 30f;
+
+            // ---- Q51 straps follow the hands once they are stable (no rebuild for a quick switch)
+            UpdateStraps(dt);
 
             // ---- character pose
             bool underwater = Underwater;
@@ -260,29 +358,37 @@ namespace Sealebrities
             float speed = swimming ? v.magnitude : new Vector2(v.x, v.z).magnitude;
             if (onBoat) speed = 0f;
             float talk = NetVoice.Loudness(PlayerId);
+            bool unconscious = Unconscious;
             if (NetWorldSync.Alive(puppet))
             {
                 try
                 {
-                    puppet.SetPose(swimming, seated, speed, RightItem, LeftItem, LightOn);
-                    puppet.SetTalking(talk);
+                    if (NetWorldSync.Alive(motionPuppet))
+                    {
+                        motionPuppet.SetMotion(Motion, speed, MotionPhase, RightItem, LeftItem, LightOn);
+                        motionPuppet.SetExpression(Expression);
+                    }
+                    else puppet.SetPose(swimming && !unconscious, seated, unconscious ? 0f : speed, RightItem, LeftItem, LightOn);
+                    puppet.SetTalking(unconscious ? 0f : talk);
                     AlignHead(swimming, dt);
                 }
                 catch (Exception e)
                 {
                     Debug.LogWarning("Sealebrities/Net: avatar puppet threw: " + e.Message);
                     puppet = null;
+                    motionPuppet = null;
                 }
             }
+            UpdateSlump(unconscious, dt);
 
             // ---- lamp + visible beam (under water or at night); the Player module's puppet brings its own lamp light
-            bool lightOn = LightOn && ownLamp;
+            bool lightOn = LightOn && ownLamp && !unconscious;
             if (lamp.enabled != lightOn) lamp.enabled = lightOn;
             bool showBeam = lightOn && (underwater || EnvState.Night01 > 0.25f) && Settings.Data.quality != GraphicsQuality.Low;
             if (beam.activeSelf != showBeam) beam.SetActive(showBeam);
 
-            // ---- exhale bubbles from the regulator
-            if (underwater)
+            // ---- exhale bubbles from the regulator (an unconscious diver's bubbles stop – F.1)
+            if (underwater && !unconscious)
             {
                 if (!wasUnderwater) bubbleTimer = 0.4f;
                 bubbleTimer -= dt;
@@ -294,9 +400,14 @@ namespace Sealebrities
             }
             wasUnderwater = underwater;
 
+            // ---- carried item + fishing line
+            UpdateCarry();
+            UpdateFishing(ref d, dt);
+
             // ---- nameplate (billboard above the head, hidden beyond visibility / when occluded)
             if (plate != null)
             {
+                plate.SetStatus(unconscious ? Loc.Tr("bewusstlos", "passed out") : null);
                 Vector3 anchor = head + Vector3.up * 0.53f;
                 bool camUnder = false;
                 var lp = Refs.Player;
@@ -312,6 +423,59 @@ namespace Sealebrities
                 if (checkOcclusion) occlusionTimer = 0.25f;
                 plate.Tick(cam, anchor, range, NetVoice.IsSpeaking(PlayerId), checkOcclusion);
             }
+        }
+
+        static float LerpPhase(float a, float b, float f)
+        {
+            float d = b - a;
+            if (d > 0.5f) d -= 1f;
+            else if (d < -0.5f) d += 1f;
+            return Mathf.Repeat(a + d * f, 1f);
+        }
+
+        float sponsorPoll;
+
+        void UpdateStraps(float dt)
+        {
+            if (!infoHasLook) return;
+            // the channel's sponsor patch follows the shared deals (checked every 2 s)
+            sponsorPoll -= dt;
+            if (sponsorPoll <= 0f)
+            {
+                sponsorPoll = 2f;
+                int sp = DiverSponsor.CurrentIndex;
+                if (hasLook && sp != builtLook.sponsor)
+                {
+                    var w = builtLook;
+                    w.sponsor = sp;
+                    BuildModel(w);
+                    return;
+                }
+            }
+            if (RightItem != strapRight || LeftItem != strapLeft)
+            {
+                strapRight = RightItem;
+                strapLeft = LeftItem;
+                strapStable = 0f;
+                return;
+            }
+            if (strapStable >= StrapSettleSeconds) return;
+            strapStable += dt;
+            if (strapStable < StrapSettleSeconds) return;
+            var want = WithStraps(infoLook, strapRight, strapLeft);
+            want.sponsor = DiverSponsor.CurrentIndex;
+            if (!NetLookCodec.Same(want, builtLook)) BuildModel(want);
+        }
+
+        /// F.1 slumped pose for puppets without the motion set: the body rolls onto its side and drifts.
+        void UpdateSlump(bool unconscious, float dt)
+        {
+            if (modelGo == null || NetWorldSync.Alive(motionPuppet)) return;
+            float target = unconscious ? 1f : 0f;
+            if (Mathf.Approximately(slump, target) && target == 0f) return;
+            slump = Mathf.MoveTowards(slump, target, dt * (unconscious ? 0.8f : 2f));
+            float sway = Mathf.Sin(Time.time * 0.7f + PlayerId) * 6f * slump;
+            modelGo.transform.localRotation = Quaternion.Euler(18f * slump + sway, 0f, 72f * slump);
         }
 
         /// In the horizontal swim pose a puppet that pivots around its belly moves its head away from where the remote
@@ -340,6 +504,8 @@ namespace Sealebrities
             {
                 if (lamp != null) lamp.enabled = false;
                 if (beam != null && beam.activeSelf) beam.SetActive(false);
+                if (carryGo != null && carryGo.activeSelf) carryGo.SetActive(false);
+                HideFishing();
                 Divers.Remove(transform);
                 FaunaContext.UnregisterRemote(transform);
             }
@@ -349,6 +515,166 @@ namespace Sealebrities
                 FaunaContext.RegisterRemote(transform, this);
                 Divers.Add(transform);
             }
+        }
+
+        // ------------------------------------------------------------------ carried item (K.3, L.7)
+        void UpdateCarry()
+        {
+            string want = NetCrew.ItemOf(PlayerId);
+            if (string.IsNullOrEmpty(want) && Carrying) want = carryId ?? "item";   // the flag arrived before CarryState
+            if (want == carryId)
+            {
+                if (carryGo != null && !carryGo.activeSelf) carryGo.SetActive(true);
+                return;
+            }
+            carryId = want;
+            if (carryGo != null) Destroy(carryGo);
+            carryGo = null;
+            if (string.IsNullOrEmpty(want)) return;
+            carryGo = BuildCarryProp(want);
+            AttachCarry();
+        }
+
+        void AttachCarry()
+        {
+            if (carryGo == null) return;
+            // in front of the chest, following the look pitch a little (both hands hold it – the puppet's carry pose)
+            carryGo.transform.SetParent(look, false);
+            bool heavy = carryId != null && carryId.StartsWith("salv:", StringComparison.Ordinal);
+            carryGo.transform.localPosition = heavy ? new Vector3(0f, -0.62f, 0.5f) : new Vector3(0.05f, -0.5f, 0.42f);
+            carryGo.transform.localRotation = Quaternion.identity;
+        }
+
+        /// Simple How-to-Fish style stand-ins (the Player module's own carry models are first-person only):
+        /// heavy salvage = a banded sea chest, coconuts = a faceted brown nut, finds = a small sandy box, quest items =
+        /// a woven crate with a yellow band.
+        static GameObject BuildCarryProp(string id)
+        {
+            var root = new GameObject("Carried");
+            string lower = id.ToLowerInvariant();
+            if (lower.StartsWith("salv:", StringComparison.Ordinal))
+            {
+                Box(root.transform, Vector3.zero, new Vector3(0.62f, 0.4f, 0.42f), LowPoly.Wood);
+                Box(root.transform, new Vector3(0f, 0.21f, 0f), new Vector3(0.64f, 0.06f, 0.44f), LowPoly.WoodDark);
+                Box(root.transform, new Vector3(-0.2f, 0f, 0f), new Vector3(0.05f, 0.42f, 0.44f), LowPoly.CoralYellow);
+                Box(root.transform, new Vector3(0.2f, 0f, 0f), new Vector3(0.05f, 0.42f, 0.44f), LowPoly.CoralYellow);
+            }
+            else if (lower.Contains("coconut") || lower.Contains("kokos"))
+            {
+                var nut = new GameObject("Nut");
+                nut.transform.SetParent(root.transform, false);
+                nut.transform.localScale = Vector3.one * 0.2f;
+                nut.AddComponent<MeshFilter>().sharedMesh = FacetSphere();
+                var mr = nut.AddComponent<MeshRenderer>();
+                mr.sharedMaterial = LowPoly.Mat(new Color(0.42f, 0.27f, 0.21f));
+                mr.shadowCastingMode = ShadowCastingMode.On;
+            }
+            else if (lower.StartsWith("find:", StringComparison.Ordinal))
+            {
+                Box(root.transform, Vector3.zero, new Vector3(0.16f, 0.1f, 0.12f), LowPoly.WetSand);
+            }
+            else
+            {
+                Box(root.transform, Vector3.zero, new Vector3(0.3f, 0.24f, 0.24f), LowPoly.WoodLight);
+                Box(root.transform, new Vector3(0f, 0.04f, 0f), new Vector3(0.31f, 0.05f, 0.25f), LowPoly.CoralYellow);
+            }
+            return root;
+        }
+
+        static void Box(Transform parent, Vector3 pos, Vector3 scale, Color c)
+        {
+            var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            var col = go.GetComponent<Collider>();
+            if (col != null) Destroy(col);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = pos;
+            go.transform.localScale = scale;
+            var r = go.GetComponent<MeshRenderer>();
+            r.sharedMaterial = LowPoly.Mat(c);
+            r.shadowCastingMode = ShadowCastingMode.On;
+        }
+
+        static Mesh FacetSphere()
+        {
+            if (facetSphere != null) return facetSphere;
+            var tmp = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            var src = tmp.GetComponent<MeshFilter>().sharedMesh;
+            facetSphere = LowPoly.Flatten(src);
+            facetSphere.name = "SB_NetFacetSphere";
+            Destroy(tmp);
+            return facetSphere;
+        }
+
+        // ------------------------------------------------------------------ fishing line + float (D.1)
+        void UpdateFishing(ref NetAvatarSample s, float dt)
+        {
+            bool fishing = Fishing;
+            bool hasBobber = fishing && (flags & NetAvatarSync.FBobber) != 0 && s.bobber != Vector3.zero;
+            if (!hasBobber)
+            {
+                HideFishing();
+                return;
+            }
+            EnsureFishingObjects();
+            var st = (FishingRodTool.RodState)s.rod;
+            Vector3 target = s.bobber;
+            // bite: the float is pulled under; reeling: it skims toward the diver (the stream brings the positions)
+            if (st == FishingRodTool.RodState.Bite) target.y -= 0.12f;
+            if (!bobberHas || (bobberShown - target).sqrMagnitude > 64f) bobberShown = target;
+            else bobberShown = Vector3.Lerp(bobberShown, target, 1f - Mathf.Exp(-10f * dt));
+            if (lastRod != s.rod && st == FishingRodTool.RodState.Bite) FaunaBubbles.Poof(bobberShown, 0.12f, 8);
+            lastRod = s.rod;
+            bobberHas = true;
+            if (!bobber.gameObject.activeSelf) bobber.gameObject.SetActive(true);
+            bobber.position = bobberShown;
+
+            // rod tip: raised in front of the right shoulder
+            Vector3 flatFwd = transform.forward;
+            Vector3 right = transform.right;
+            Vector3 tip = transform.position + Vector3.up * 2.05f + flatFwd * 1.35f + right * 0.32f;
+            float tension = s.tension;
+            float sag = Mathf.Lerp(0.55f, 0.02f, Mathf.Clamp01(tension * 1.6f)) * Mathf.Clamp01(Vector3.Distance(tip, bobberShown) / 8f);
+            for (int i = 0; i < LinePoints; i++)
+            {
+                float t = i / (float)(LinePoints - 1);
+                Vector3 p = Vector3.Lerp(tip, bobberShown, t);
+                p.y -= Mathf.Sin(t * Mathf.PI) * sag;
+                linePts[i] = p;
+            }
+            if (!fishLine.enabled) fishLine.enabled = true;
+            fishLine.SetPositions(linePts);
+        }
+
+        void EnsureFishingObjects()
+        {
+            if (fishLine == null)
+            {
+                var lg = new GameObject("FishingLine");
+                lg.transform.SetParent(transform, false);
+                fishLine = lg.AddComponent<LineRenderer>();
+                fishLine.useWorldSpace = true;
+                fishLine.positionCount = LinePoints;
+                fishLine.widthMultiplier = 0.008f;
+                fishLine.numCapVertices = 0;
+                fishLine.sharedMaterial = BoatMats.Line;
+                fishLine.shadowCastingMode = ShadowCastingMode.Off;
+                fishLine.receiveShadows = false;
+                fishLine.enabled = false;
+            }
+            if (bobber == null)
+            {
+                bobber = FishingVisuals.BuildBobber(transform);
+                var cols = bobber.GetComponentsInChildren<Collider>(true);
+                for (int i = 0; i < cols.Length; i++) Destroy(cols[i]);
+                bobber.gameObject.SetActive(false);
+            }
+        }
+
+        void HideFishing()
+        {
+            bobberHas = false;
+            if (fishLine != null && fishLine.enabled) fishLine.enabled = false;
+            if (bobber != null && bobber.gameObject.activeSelf) bobber.gameObject.SetActive(false);
         }
 
         /// Underwater sight distance by depth (art bible §2.2: 19 m in the shallows → 11 m at ≥ 80 m).
@@ -414,6 +740,6 @@ namespace Sealebrities
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { beamMesh = null; beamMat = null; beamTex = null; }
+        static void ResetStatics() { beamMesh = null; beamMat = null; beamTex = null; facetSphere = null; }
     }
 }

@@ -5,6 +5,9 @@ namespace Sealebrities
 {
     /// Entry point (props engineer): underwater decor for every dive site plus floating site buoys.
     /// Called by WorldBuilder after the terrain exists: "yield return UnderwaterDecor.Build(root)".
+    /// Round 2b: the L.3 reefs (house reef patch recipe, 14 lagoon patch reefs, fringing reefs around every landmark
+    /// island, the Fog Isle), habitat anchors, the K.3 extras (finds and salvage, research-stake spots, currents,
+    /// caves, the challenge boards at the buoys), the MS Clickbait interior (H.1) and the underwater collectibles.
     public static class UnderwaterDecor
     {
         /// Decor of a site is only active while the main camera is within this horizontal distance of its center.
@@ -12,14 +15,13 @@ namespace Sealebrities
 
         public static IEnumerator Build(Transform root)
         {
-            PropInfo.AnemoneSpots.Clear();
-            PropInfo.WreckHoles.Clear();
-            PropInfo.WreckHoleNormals.Clear();
-            PropInfo.VentPositions.Clear();
+            PropInfo.ClearUnderwater();
+            PropCoop.Install();
 
             var uw = PropUtil.WorldRoot("UnderwaterDecor", root);
             yield return PropRun.Safe(PropMats.PrewarmUnderwater(), "underwater materials");
             yield return PropRun.Safe(PropCoralKit.Prepare(), "coral variants");
+            yield return PropRun.Safe(PropReefKit.Prepare(), "reef colonies");
 
             foreach (var site in DiveSites.All)
             {
@@ -28,19 +30,36 @@ namespace Sealebrities
                 IEnumerator work;
                 switch (site.id)
                 {
-                    case "house_reef": work = PropReef.Build(decor, site); break;
-                    case "kelp_forest": work = PropKelp.Build(decor, site); break;
+                    case "house_reef": work = PropReefs.HouseReef(decor, site); break;
+                    case "kelp_forest": PropUnder.PlanKelpTunnel(site); work = PropKelp.Build(decor, site); break;
                     case "wreck": work = PropWreck.Build(decor, site); break;
                     case "blue_drop": work = PropDeep.BuildDropOff(decor, site); break;
                     case "deep_trench": work = PropDeep.BuildTrench(decor, site); break;
+                    case "fog_isle": work = PropReefs.FogReef(decor, site); break;
                     default: work = PropDeep.BuildGeneric(decor, site); break;
                 }
                 yield return PropRun.Safe(work, "site " + site.id);
+                if (site.id == "fog_isle")
+                {
+                    try { PropFogIsle.Underwater(decor, site); }
+                    catch (System.Exception e) { Debug.LogError("Sealebrities props: Nebelgrotte failed: " + e); }
+                }
+                yield return PropRun.Safe(PropUnder.SiteExtras(decor, site), "site extras " + site.id);
                 siteRoot.gameObject.AddComponent<PropSiteActivation>().Init(decor.gameObject, site.center, ActivationRange);
                 try { CreateBuoy(uw, site); }
                 catch (System.Exception e) { Debug.LogError("Sealebrities props: buoy " + site.id + " failed: " + e); }
                 if (PropRun.Due()) yield return null;
             }
+
+            // L.3: lagoon patch reefs around the main island and fringing reefs around every landmark island
+            yield return PropRun.Safe(PropReefs.Lagoon(uw), "lagoon reefs");
+            foreach (var mi in WorldFeatures.MiniIslands)
+                yield return PropRun.Safe(PropReefs.Fringing(uw, mi.id, mi.center, mi.shoreRadius, mi.id == "kelp_forest", mi.id == "fog_isle" ? 12 : 9, 300 + mi.id.Length * 17), "fringing reef " + mi.id);
+            try { PropIslandExtras.BuoyLane(uw); }
+            catch (System.Exception e) { Debug.LogError("Sealebrities props: buoy lane failed: " + e); }
+
+            // underwater collectibles (wreck rooms, ledges, caves, the shells at the sites)
+            yield return PropRun.Safe(PropCollect.BuildUnderwater(uw), "underwater collectibles");
 
             // coral variant meshes have been merged into the site chunks; free them
             foreach (var t in new[] { PropCoralType.Branching, PropCoralType.Brain, PropCoralType.Table, PropCoralType.Fan, PropCoralType.Sponge, PropCoralType.Anemone, PropCoralType.Whip })
@@ -55,12 +74,13 @@ namespace Sealebrities
             PropCoralKit.Of(PropCoralType.Anemone).Clear();
             PropCoralKit.Of(PropCoralType.Whip).Clear();
             PropCoralKit.Ready = false;
+            PropReefKit.Release();
 
             PropInfo.UnderwaterBuilt = true;
         }
 
         /// Chunky low-poly marker buoy at the site center: orange 8-sided body with a white band, pole, a faceted flag
-        /// in the site's map color and a night blinker.
+        /// in the site's map color and a night blinker. Next to it floats the board with today's photo tasks (K.3).
         static void CreateBuoy(Transform parent, DiveSite site)
         {
             var go = new GameObject("Buoy_" + site.id);
@@ -103,10 +123,30 @@ namespace Sealebrities
             flag.Quad2(m0, e0, e1, m1, Vector3.forward);
             PropUtil.MeshObject(flagPivot, "Flag", flag.ToMesh("BuoyFlag"), PropMats.Flag(site.mapColor), Vector3.zero, Quaternion.identity);
 
+            // K.3 challenge board on the buoy (white board with a camera glyph; E reads today's two photo tasks)
+            var board = new PropMeshBuilder();
+            board.Box(new Vector3(0f, 1.05f, -0.52f), new Vector3(0.62f, 0.42f, 0.04f));
+            PropUtil.MeshObject(t, "TaskBoard", board.ToMesh("BuoyTaskBoard"), PropMats.White, Vector3.zero, Quaternion.identity);
+            var glyph = new PropMeshBuilder();
+            glyph.Box(new Vector3(0f, 1.05f, -0.545f), new Vector3(0.26f, 0.17f, 0.02f));
+            glyph.Cylinder(new Vector3(0f, 1.05f, -0.56f), Quaternion.Euler(90f, 0f, 0f), 0.06f, 0.06f, 0.02f, 8, true, true);
+            glyph.Box(new Vector3(-0.08f, 1.15f, -0.545f), new Vector3(0.07f, 0.04f, 0.02f));
+            PropUtil.MeshObject(t, "TaskGlyph", glyph.ToMesh("BuoyTaskGlyph"), PropMats.Ink, Vector3.zero, Quaternion.identity);
+            board.Clear();
+            board.Box(new Vector3(0f, 0.6f, -0.5f), new Vector3(0.05f, 0.5f, 0.05f));
+            PropUtil.MeshObject(t, "TaskPost", board.ToMesh("BuoyTaskPost"), PropMats.Metal, Vector3.zero, Quaternion.identity);
+            var bgo = new GameObject("TaskBoardUse");
+            bgo.transform.SetParent(t, false);
+            bgo.transform.localPosition = new Vector3(0f, 0.6f, -0.6f);
+            var bsc = bgo.AddComponent<SphereCollider>();
+            bsc.isTrigger = true;
+            bsc.radius = 1.4f;
+            bgo.AddComponent<PropChallengeBoard>();
+
             var b = go.AddComponent<PropBuoy>();
             b.x = site.center.x;
             b.z = site.center.z;
-            b.yaw = Mathf.Abs(site.id.GetHashCode() % 360);
+            b.yaw = Mathf.Abs(FindsDatabase.StableHash(site.id) % 360);
             b.flag = flagPivot;
             b.blinker = blink;
         }

@@ -5,7 +5,7 @@ using UnityEngine;
 namespace Sealebrities
 {
     /// Pictograms for signposts and signs (language independent: icons instead of words).
-    public enum PropIcon { Hut, Dock, Helipad, Lighthouse, Waterfall, Cave, Bridge, TidePools, Beach, Radio, Bay, Warning, Fish }
+    public enum PropIcon { Hut, Dock, Helipad, Lighthouse, Waterfall, Cave, Bridge, TidePools, Beach, Radio, Bay, Warning, Fish, Village, Driftwood }
 
     /// Textures of the props module. Low-poly style: NO surface/noise/normal maps. Only
     ///  - tiny point-filtered block textures for crisp graphics (helipad "H", hut sign, poster, ship name), and
@@ -110,6 +110,56 @@ namespace Sealebrities
             string t = "FINTUBE";
             Text(px, W, H, t, (W - TextWidth(t)) / 2, 11, PropPal.Ink);
             return LowPoly.BlockTexture(W, H, px, "SB_Poster");
+        });
+
+        /// Painted sign label: one or two lines ("|" separates them) of 5x7 pixel text on a board color with a darker
+        /// edge (point filtered). Width follows the text; height 11 (one line) or 20 (two lines).
+        public static Texture2D Label(string text, Color board, Color ink) => Get("label_" + text + "_" + ColorUtility.ToHtmlStringRGB(board) + ColorUtility.ToHtmlStringRGB(ink), () =>
+        {
+            string[] lines = (text ?? "").Split('|');
+            int w = 8;
+            for (int i = 0; i < lines.Length; i++) w = Mathf.Max(w, TextWidth(lines[i]) + 6);
+            int h = lines.Length > 1 ? 20 : 11;
+            var px = Fill(w, h, board);
+            Color edge = PropMats.Value(board, 0.78f);
+            Rect(px, w, h, 0, 0, w - 1, 0, edge);
+            Rect(px, w, h, 0, h - 1, w - 1, h - 1, edge);
+            Rect(px, w, h, 0, 0, 0, h - 1, edge);
+            Rect(px, w, h, w - 1, 0, w - 1, h - 1, edge);
+            for (int i = 0; i < lines.Length && i < 2; i++)
+            {
+                int top = lines.Length > 1 ? (i == 0 ? h - 3 : h - 12) : h - 3;
+                Text(px, w, h, lines[i], (w - TextWidth(lines[i])) / 2, top, ink);
+            }
+            return LowPoly.BlockTexture(w, h, px, "SB_Label");
+        });
+
+        /// Pixel aspect (width / height) of a label texture.
+        public static float LabelAspect(string text)
+        {
+            string[] lines = (text ?? "").Split('|');
+            int w = 8;
+            for (int i = 0; i < lines.Length; i++) w = Mathf.Max(w, TextWidth(lines[i]) + 6);
+            return w / (float)(lines.Length > 1 ? 20 : 11);
+        }
+
+        /// Woven palm-leaf / cloth pattern in the village colors (L.8: geometric wave patterns in #3FA9A0, #EE7F2D,
+        /// #F2C94C on a light ground) – 16 x 8, point filtered, for sails, banners and the meeting-house cloth.
+        public static Texture2D WavePattern(int variant) => Get("wave_" + variant, () =>
+        {
+            const int W = 16, H = 8;
+            Color[] cols = { LowPoly.Hex("#3FA9A0"), LowPoly.Hex("#EE7F2D"), LowPoly.Hex("#F2C94C") };
+            Color ground = LowPoly.Hex("#EDE6DA");
+            var px = Fill(W, H, ground);
+            Color a = cols[variant % 3], b = cols[(variant + 1) % 3];
+            for (int x = 0; x < W; x++)
+            {
+                int y = 2 + Mathf.RoundToInt(Mathf.Abs((x % 8) - 4) * 0.5f);
+                px[y * W + x] = a;
+                px[(y + 1) * W + x] = a;
+                if (x % 4 == 0) { px[6 * W + x] = b; px[0 * W + x] = b; }
+            }
+            return LowPoly.BlockTexture(W, H, px, "SB_WavePattern");
         });
 
         /// Ship name on the stern of the wreck.
@@ -241,6 +291,14 @@ namespace Sealebrities
                 "................", "................", "................", "................", ".....######....#", "...#########..##",
                 "..##x#######.###", ".############.##", "..###########..#", "...#########....", ".....######.....", "................",
                 "................", "................", "................", "................" },
+            new[] { // Village (stilt house over the lagoon)
+                "................", ".......##.......", ".....######.....", "...##########...", "..############..", "....########....",
+                "....#xx##xx#....", "....#xx##xx#....", "....########....", "....#......#....", "....#..##..#....", "..bbbbbbbbbbbb..",
+                ".b..b..b..b..b..", "................", "................", "................" },
+            new[] { // Driftwood beach (message in a bottle on the waves)
+                "................", "................", "........x.......", ".......xxx......", "......##x##.....", "......#...#.....",
+                ".....##...##....", "....##.yy..##...", "....#..yy...#...", "....##.....##...", ".....#######....", "................",
+                "..bbbb....bbbb..", ".b....bbbb....b.", "................", "................" },
         };
 
         /// 16 x 16 pictogram on a weathered board (point filtered). '#' white, 'x' ink, 'r' red, 'y' yellow, 'b' blue.

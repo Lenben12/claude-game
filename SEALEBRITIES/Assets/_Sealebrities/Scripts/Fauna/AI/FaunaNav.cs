@@ -46,11 +46,12 @@ namespace Sealebrities
 
         /// Upper limit (world y) of a species' preferred band.
         public static float BandTop(SpeciesDef s, float halfHeight, float surfaceY)
-            => Mathf.Min(-s.minDepth, surfaceY - 1f - halfHeight);
+            => Mathf.Min(-s.BandMin(FaunaContext.NightNow), surfaceY - 1f - halfHeight);
 
-        /// Lower limit (world y) of a species' preferred band at the given seafloor height.
+        /// Lower limit (world y) of a species' preferred band at the given seafloor height (night shift applied, L.1:
+        /// lanternfish rise 30 m at night).
         public static float BandBottom(SpeciesDef s, float groundY, float clearance)
-            => Mathf.Max(-s.maxDepth, groundY + clearance);
+            => Mathf.Max(-s.BandMax(FaunaContext.NightNow), groundY + clearance);
 
         /// Picks a random reachable point for wandering: inside the leash circle, over water deep enough for the
         /// species and inside its depth band. bottomBias 0 = anywhere in the band, 1 = right above the seafloor.

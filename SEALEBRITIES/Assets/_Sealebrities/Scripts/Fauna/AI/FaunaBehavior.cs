@@ -20,12 +20,34 @@ namespace Sealebrities
         public static FaunaBehavior Create(SpeciesDef s, bool hallucination)
         {
             if (hallucination) return new FaunaHallucinationBehavior();
+            // ---- round 2: body plans with their own movement first
+            switch (s.plan)
+            {
+                case BodyPlan.Crab: return new FaunaCrabBehavior();
+                case BodyPlan.Starfish: return new FaunaStarfishBehavior();
+                case BodyPlan.Dolphin: return new FaunaDolphinBehavior();
+                case BodyPlan.Whale: return new FaunaWhaleBehavior();
+                case BodyPlan.Bird:
+                    return s.behavior == BehaviorType.Soar ? (FaunaBehavior)new FaunaSoarBehavior() : new FaunaPerchBirdBehavior();
+                case BodyPlan.Bat: return new FaunaBatBehavior();
+                case BodyPlan.Lizard:
+                    return s.behavior == BehaviorType.Climb ? (FaunaBehavior)new FaunaClimbBehavior() : new FaunaBaskBehavior();
+                case BodyPlan.Quadruped:
+                    return s.behavior == BehaviorType.Herd ? (FaunaBehavior)new FaunaHerdBehavior() : new FaunaLandWanderBehavior();
+                case BodyPlan.Primate: return new FaunaMonkeyBehavior();
+            }
+            if (s.variant == "flying") return new FaunaFlyingFishBehavior();
+            if (s.variant == "goblin") return new FaunaGoblinBehavior();
+            if (s.variant == "gulper") return new FaunaGulperBehavior();
+            if (s.variant == "coelacanth") return new FaunaHoverBehavior();
             switch (s.behavior)
             {
                 case BehaviorType.Schooling: return new FaunaSchoolingBehavior();
                 case BehaviorType.Skittish: return new FaunaSkittishBehavior();
                 case BehaviorType.Curious: return new FaunaCuriousBehavior();
                 case BehaviorType.Predator: return new FaunaPredatorBehavior();
+                case BehaviorType.Crawler: return new FaunaWalkerBehavior();
+                case BehaviorType.Playful: return new FaunaDolphinBehavior();
                 case BehaviorType.Ambush:
                     if (s.plan == BodyPlan.Eel) return new FaunaMorayBehavior();
                     return new FaunaAnglerBehavior();
@@ -35,10 +57,24 @@ namespace Sealebrities
                 case BehaviorType.Drifter:
                     if (s.plan == BodyPlan.VampireSquid) return new FaunaVampireSquidBehavior();
                     if (s.plan == BodyPlan.Sunfish) return new FaunaSunfishBehavior();
-                    return new FaunaJellyBehavior();
+                    if (s.plan == BodyPlan.Jelly) return new FaunaJellyBehavior();
+                    return new FaunaHoverBehavior();
                 default: return new FaunaWanderBehavior();
             }
         }
+
+        /// Something touched / startled the animal (mischief, a diver right on top of it). Default: nothing.
+        public virtual void Poke(Vector3 from) { }
+
+        /// Horizontal distance from the focused diver's feet (land animals: the head is 1.6 m up).
+        protected float FeetDistXZ => FaunaNav.DistXZ(c.pos, FaunaContext.PlayerRootPos);
+
+        /// The focused diver stands / walks on land (or on the dock, boat) – land animals react to that.
+        protected bool PlayerOnLandNear(float radius) => FaunaContext.HasPlayer && !FaunaContext.PlayerUnderwater && FeetDistXZ < radius
+                                                       && Mathf.Abs(FaunaContext.PlayerRootPos.y - c.pos.y) < 4f;
+
+        /// Sets the round-2 action channel (0..1) read by the gait animator (and replicated to co-op proxies).
+        protected void Action(float a01) { c.lureMul = 1f + 2f * Mathf.Clamp01(a01); }
 
         // ------------------------------------------------------------------ shared helpers
         protected bool PlayerNearby(float radius)

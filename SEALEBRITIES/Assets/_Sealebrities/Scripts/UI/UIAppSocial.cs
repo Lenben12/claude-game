@@ -4,67 +4,6 @@ using UnityEngine.UIElements;
 
 namespace Sealebrities
 {
-    /// KRILL.tv livestream app (locked below 1,000 followers, "coming in the next update" above).
-    public class UIAppKrill : UIPhoneApp
-    {
-        public override string Id => "krill";
-        public override string Title => "KRILL.tv";
-        public override Color Color => UIPalette.Violet;
-        public override UIGlyph.DrawFn Icon => UIGlyphs.Broadcast;
-
-        public override bool ShowLock
-        {
-            get
-            {
-                var s = UIKit.State;
-                return s == null || s.followers < Progression.LivestreamFollowers;
-            }
-        }
-
-        public override void Build(VisualElement body)
-        {
-            var s = UIKit.State;
-            if (s == null) return;
-            bool unlocked = s.followers >= Progression.LivestreamFollowers;
-
-            var hero = UIKit.Col();
-            hero.style.alignItems = Align.Center;
-            hero.style.marginTop = 30f;
-            var circle = UIKit.Box();
-            UIKit.Size(circle, 200f, 200f);
-            UIKit.Radius(circle, 100f);
-            circle.style.backgroundColor = UIPalette.A(UIPalette.Violet, 0.18f);
-            UIKit.Border(circle, 4f, UIPalette.Violet);
-            UIKit.Center(circle);
-            circle.Add(new UIGlyph(unlocked ? UIGlyphs.Broadcast : UIGlyphs.Lock, UIPalette.Violet, 110f));
-            hero.Add(circle);
-
-            var live = UIKit.Pill("● LIVE", UIPalette.Live, Color.white, PhoneKit.Small);
-            live.style.alignSelf = Align.Center;
-            live.style.marginTop = 18f;
-            hero.Add(live);
-
-            var title = PhoneKit.T(unlocked ? Loc.Tr("Kommt im nächsten Update", "Coming in the next update")
-                                            : Loc.Tr("Livestream ab 1.000 Followern", "Livestream from 1,000 followers"), PhoneKit.Big, UIPalette.Ink, true);
-            title.style.marginTop = 16f;
-            title.style.unityTextAlign = TextAnchor.MiddleCenter;
-            hero.Add(title);
-            body.Add(hero);
-
-            if (!unlocked)
-            {
-                var bar = PhoneKit.Bar(s.followers / (float)Progression.LivestreamFollowers, UIPalette.Violet, 18f);
-                bar.style.marginTop = 26f;
-                body.Add(bar);
-                var row = UIKit.Row();
-                row.style.marginTop = 8f;
-                row.Add(new UIGlyph(UIGlyphs.Person, UIPalette.Turquoise, 28f));
-                row.Add(UIKit.Text(" " + Loc.Number(s.followers) + " / " + Loc.Number(Progression.LivestreamFollowers), PhoneKit.Body, UIPalette.Ink, true));
-                body.Add(row);
-            }
-        }
-    }
-
     /// FollowFish: follower count, growth chart, totals and the milestone list.
     public class UIAppFollowFish : UIPhoneApp
     {
@@ -113,6 +52,36 @@ namespace Sealebrities
             tiles.Add(UIKit.HSpacer(8f));
             tiles.Add(PhoneKit.Stat(UIGlyphs.Book, UIPalette.Turquoise, Journal.DiscoveredCount + "/" + SpeciesDatabase.All.Count));
             body.Add(tiles);
+
+            // Q50 channel ranks with badges
+            body.Add(PhoneKit.Section(Loc.Tr("Ränge", "Ranks"), UIGlyphs.Trophy));
+            int rank = Progression.RankIndex(s.followers);
+            var ranks = UIKit.Row();
+            ranks.style.flexWrap = Wrap.Wrap;
+            ranks.style.justifyContent = Justify.SpaceBetween;
+            for (int i = 0; i < Progression.Ranks.Length; i++)
+            {
+                bool have = i <= rank;
+                var tile = UIKit.Col();
+                tile.style.width = Length.Percent(24f);
+                tile.style.alignItems = Align.Center;
+                tile.style.marginBottom = 10f;
+                UIKit.Radius(tile, 18f);
+                UIKit.Pad(tile, 10f, 4f, 8f, 4f);
+                tile.style.backgroundColor = i == rank ? UIPalette.A(UIGlyphs.RankColor(i), 0.25f) : Color.white;
+                if (i == rank) UIKit.Border(tile, 2f, UIWidgets.Ink(UIGlyphs.RankColor(i)));
+                var badge = new UIRankBadge(i, 64f);
+                badge.style.opacity = have ? 1f : 0.3f;
+                tile.Add(badge);
+                var n = UIKit.Text(Progression.RankName(i), 16f, have ? UIPalette.Ink : UIPalette.Silhouette, true);
+                n.style.marginTop = 4f;
+                n.style.unityTextAlign = TextAnchor.MiddleCenter;
+                n.style.whiteSpace = WhiteSpace.Normal;
+                tile.Add(n);
+                tile.Add(UIKit.Text(UIKit.Compact(Progression.Ranks[i].followers), 15f, UIPalette.InkSoft, true));
+                ranks.Add(tile);
+            }
+            body.Add(ranks);
 
             body.Add(PhoneKit.Section(Loc.Tr("Meilensteine", "Milestones"), UIGlyphs.Star));
             var next = Progression.NextMilestone(s.followers);

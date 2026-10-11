@@ -6,14 +6,16 @@ namespace Sealebrities
     /// Per-frame inputs for the camera model animation.
     public struct FilmRigInput
     {
-        public bool visible;         // the camera is the active item of a hand and gameplay is not blocked
+        public bool visible;         // the camera is the active item of a hand and gameplay is not blocked (not in the selfie view)
         public bool leftHand;        // held in the left (offhand) hand → mirrored pose
         public bool aiming;
         public bool recording;
         public bool lampOn;
         public bool underwater;
-        public bool hasTarget;
-        public bool framingOk;       // the current target is framed well enough to count
+        public bool hasTarget;       // legacy: an animal is detected
+        public bool framingOk;       // legacy: a Sealog photo subject is in the frame
+        /// FilmMaterials.Screen* state of the device screen (−1 = derive from the legacy flags).
+        public int screenState;
         public float zoom;           // current smoothed zoom (1..maxZoom)
         public float zoom01;         // 0..1 within the camera's zoom range (lens travel)
         public float fieldOfView;    // current view FOV in degrees
@@ -22,6 +24,8 @@ namespace Sealebrities
         public float progress01;
         public Vector2 lookDelta;    // GameInput.Look this frame
         public float moveSpeed;      // player speed m/s
+        /// 1d pull-back (m): a wall / plank right in front of the eye pushes the camera back and down.
+        public float pullBack;
     }
 
     /// One built camera model (one gear tier) attached to the player's view camera.
@@ -33,6 +37,10 @@ namespace Sealebrities
     {
         public GameObject root;
         public int tier;
+        /// Golden camera (Sealog 100 %).
+        public bool gold;
+        /// Triangles of the camera model (without the mitten) – L.13 budget statistics.
+        public int triangles;
 
         // dynamic parts
         public MeshRenderer screen;
@@ -151,14 +159,17 @@ namespace Sealebrities
             pos += bob + new Vector3(-sway.x * 0.0018f, -sway.y * 0.0018f, -0.012f * kk);
             float hide = 1f - Mathf.SmoothStep(0f, 1f, visBlend);
             pos += new Vector3(0.02f * side, -EquipDrop, -0.03f) * hide;
+            // 1d: something right in front of the eye pushes the camera back and down (never into the wall)
+            float pull = Mathf.Max(0f, input.pullBack);
+            if (pull > 0f) pos += new Vector3(0f, -0.5f * pull, -pull);
 
             // keep the apparent on-screen size constant while the view zooms (model is a child of the camera)
             float fov = Mathf.Clamp(input.fieldOfView, 1f, 170f);
             float baseFov = Mathf.Clamp(input.baseFov > 1f ? input.baseFov : fov, 1f, 170f);
             float scale = Mathf.Tan(fov * 0.5f * Mathf.Deg2Rad) / Mathf.Tan(baseFov * 0.5f * Mathf.Deg2Rad);
             var t = root.transform;
-            t.localPosition = new Vector3(pos.x * scale, pos.y * scale, pos.z);
-            t.localRotation = rot * Quaternion.Euler(sway.y - 3f * kk + hide * 12f, -sway.x, -sway.x * 0.5f);
+            t.localPosition = new Vector3(pos.x * scale, pos.y * scale, Mathf.Max(0.12f, pos.z));
+            t.localRotation = rot * Quaternion.Euler(sway.y - 3f * kk + hide * 12f + pull * 25f, -sway.x, -sway.x * 0.5f);
             t.localScale = new Vector3(scale * side, scale, scale);   // negative X mirrors the model into the left hand
 
             // ---------------- REC dot + tally light (blink while recording)
@@ -171,11 +182,11 @@ namespace Sealebrities
             // ---------------- screen state (swap cached materials only on change)
             int st;
             if (kick > 0.5f) st = FilmMaterials.ScreenCaptured;
+            else if (input.screenState >= 0) st = input.screenState;
             else if (!input.recording && !input.aiming) st = FilmMaterials.ScreenStandby;
             else if (!input.hasTarget) st = FilmMaterials.ScreenLive;
-            else if (input.progress01 >= 1f) st = FilmMaterials.ScreenCaptured;
-            else if (input.framingOk) st = FilmMaterials.ScreenGood;
-            else st = FilmMaterials.ScreenWeak;
+            else if (input.framingOk) st = FilmMaterials.ScreenCaptured;
+            else st = FilmMaterials.ScreenGood;
             if (screen != null && st != screenState) { screen.sharedMaterial = FilmMaterials.Screen(st); screenState = st; }
 
             // ---------------- storage bar

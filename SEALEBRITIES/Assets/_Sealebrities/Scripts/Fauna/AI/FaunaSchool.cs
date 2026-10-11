@@ -19,6 +19,10 @@ namespace Sealebrities
         public float scare;
         /// Clownfish currently charging the diver to defend their anemone.
         public bool defending;
+        /// Optional scripted leader (animal events: bait ball, big school passing); returns true when it moved the leader.
+        public IFaunaSchoolDirector director;
+        /// Members stay this tight (0.4 = bait ball) – 1 = species default.
+        public float spreadMul = 1f;
 
         Vector3 target;
         bool hasTarget;
@@ -35,6 +39,8 @@ namespace Sealebrities
             leashCenter = leashC;
             leashRadius = leashR;
             scare = 0f;
+            director = null;
+            spreadMul = 1f;
             defending = false;
             hasTarget = false;
             targetTimer = 0f;
@@ -75,8 +81,24 @@ namespace Sealebrities
             if (scare > 0f) scare -= dt;
             defending = false;
 
+            if (director != null && director.SteerLeader(this, dt)) return;
             if (anchored) TickAnchored(dt);
             else TickRoaming(dt);
+        }
+
+        /// Moves the virtual leader toward a point (directors), keeping it in water.
+        public void LeaderTo(Vector3 target, float speed, float dt)
+        {
+            Vector3 to = target - leaderPos;
+            Vector3 desired = to.sqrMagnitude > 1e-4f ? to.normalized * speed : Vector3.zero;
+            leaderVel = Vector3.MoveTowards(leaderVel, desired, (cruise * 2f + 0.5f) * dt);
+            Vector3 np = leaderPos + leaderVel * dt;
+            float g = FaunaNav.Ground(np);
+            if (g > FaunaNav.LandGuardY) { np.x = leaderPos.x; np.z = leaderPos.z; leaderVel *= -0.3f; g = FaunaNav.Ground(np); }
+            float top = Waves.HeightAt(np.x, np.z) - 1f - halfHeight;
+            float bot = g + clearance;
+            np.y = bot <= top ? Mathf.Clamp(np.y, bot, top) : Mathf.Max(g + halfHeight + 0.3f, top);
+            leaderPos = np;
         }
 
         void TickAnchored(float dt)

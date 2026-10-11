@@ -117,6 +117,40 @@ namespace Sealebrities
 
             PropReef.QuietShadows(batch);
             batch.Flush(decor, "DropOff", ShadowCastingMode.On, 220f);
+
+            // ---- L.3 shallow wall garden (5–25 m): sea fans, whips, sponges and soft corals on the steep upper faces of
+            // the drop-off, ~1 per 3 m² – the whips above start at 26 m, the wall top was bare rock. Own seed (the
+            // placement above stays unchanged), detail batch culled at 80 m.
+            var grng = new System.Random(6161);
+            var garden = new PropBatch(48f);
+            var gardenSmall = new PropBatch(48f);
+            int placed = 0;
+            const float gstep = 1.75f;
+            for (float x = -R; x <= R && placed < 1400; x += gstep)
+            {
+                for (float z = -R; z <= R && placed < 1400; z += gstep)
+                {
+                    if (x * x + z * z > R * R) continue;
+                    float wx = c.x + x + PropUtil.Range(grng, -0.6f, 0.6f), wz = c.z + z + PropUtil.Range(grng, -0.6f, 0.6f);
+                    float g = G(wx, wz);
+                    if (-g < 5f || -g > 25f) continue;
+                    if (PropGround.Slope(wx, wz, 1.5f) < 0.5f) continue;   // steep faces only
+                    Vector3 p = new Vector3(wx, g, wz);
+                    Vector3 n = PropGround.Normal(wx, wz, 1f);
+                    int k = grng.Next(100);
+                    bool ok;
+                    if (k < 30) ok = PropReef.Place(garden, grng, p, n, PropCoralType.Fan, PropUtil.Range(grng, 0.6f, 1.1f), -3f);
+                    else if (k < 52) ok = PropReef.Place(garden, grng, p, n, PropCoralType.Whip, PropUtil.Range(grng, 0.7f, 1.2f), -3f);
+                    else if (k < 72) ok = PropReef.Place(garden, grng, p, n, PropCoralType.Sponge, PropUtil.Range(grng, 0.4f, 0.8f), -3f);
+                    else ok = PropReefs.Colony(garden, gardenSmall, grng, k < 90 ? ReefColony.SoftPuff : ReefColony.Encrust, grng.Next(PropReefKit.Colors), p, n, PropUtil.Range(grng, 0.35f, 0.7f), -3f);
+                    if (ok) placed++;
+                }
+                if (PropRun.Due()) yield return null;
+            }
+            PropReef.QuietShadows(garden);
+            garden.Flush(decor, "DropOffWallGarden", ShadowCastingMode.Off, 80f);
+            gardenSmall.Flush(decor, "DropOffWallGardenDetail", ShadowCastingMode.Off, 30f);
+            Debug.Log("[Props] blue drop wall garden: " + placed + " corals at 5–25 m");
         }
 
         static void Formation(PropBatch batch, Transform cols, System.Random rng, Vector3 p)
@@ -274,6 +308,37 @@ namespace Sealebrities
                 Vector3 anchor = i == 0 ? best : (spirePos.Count > 0 ? spirePos[rng.Next(spirePos.Count)] : c);
                 float g = G(anchor.x, anchor.z);
                 PropFX.Specks(decor, new Vector3(anchor.x, g + 4f, anchor.z), 7f, 140, i % 2 == 0 ? new Color(0.3f, 0.85f, 1f) : new Color(0.45f, 1f, 0.55f));
+            }
+
+            // ---------------------------------------------------------------- L.3 sponge gardens on the terraces
+            // (flat ledges 35–85 m): clusters of deep-sea sponges with glowing tips – own seed, the layout above stays
+            var trng = new System.Random(9191);
+            int clusters = 0, ttries = 0;
+            while (clusters < 36 && ttries < 1200)
+            {
+                ttries++;
+                Vector2 o = PropUtil.InDisc(trng, R * 0.95f);
+                float x = c.x + o.x, z = c.z + o.y;
+                float g = G(x, z);
+                if (-g < 35f || -g > 85f || spacing.Blocked(x, z, -2f) || PropGround.Slope(x, z, 2f) > 0.35f) continue;
+                int n = 4 + trng.Next(5);
+                for (int k = 0; k < n; k++)
+                {
+                    Vector2 so = PropUtil.InDisc(trng, 2.4f);
+                    float sx = x + so.x, sz = z + so.y;
+                    Vector3 sp = new Vector3(sx, G(sx, sz), sz);
+                    float size = PropUtil.Range(trng, 0.45f, 1.0f);
+                    if (!PropReef.Place(batch, trng, sp, PropGround.Normal(sx, sz, 1f), PropCoralType.Sponge, size, -20f)) continue;
+                    // the glowing tips (bioluminescent rim on top of the sponge)
+                    int tips = 1 + trng.Next(3);
+                    for (int t = 0; t < tips; t++)
+                    {
+                        Vector3 tp = sp + new Vector3(PropUtil.Range(trng, -0.12f, 0.12f) * size, size * PropUtil.Range(trng, 0.7f, 1.0f), PropUtil.Range(trng, -0.12f, 0.12f) * size);
+                        glow.B(trng.NextDouble() < 0.6 ? PropMats.Bio : PropMats.BioGreen, tp).Octa(tp, PropUtil.Range(trng, 0.04f, 0.08f));
+                    }
+                }
+                clusters++;
+                if (PropRun.Due()) yield return null;
             }
 
             batch.Flush(decor, "Trench", ShadowCastingMode.On, 200f);

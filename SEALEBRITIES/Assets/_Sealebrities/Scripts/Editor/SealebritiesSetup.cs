@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 using UnityEditor;
 using UnityEditor.Build.Reporting;
+using UnityEditor.Callbacks;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -28,6 +29,11 @@ namespace Sealebrities.EditorTools
         public const string ThemePath = ResourcesFolder + "/SealebritiesTheme.tss";
         public const string PanelSettingsPath = ResourcesFolder + "/SealebritiesPanelSettings.asset";
         public const string BuildPath = "C:/Users/Administrator/Desktop/ll/Builds/SEALEBRITIES/SEALEBRITIES.exe";
+
+        /// Steam app id for co-op tests: Valve's public test app 480 ("Spacewar") – needs no publishing. Written to
+        /// steam_appid.txt in the project root (editor play mode) and next to every built exe (OnPostprocessBuild).
+        /// Replace with the real app id (and drop the file from release builds) once SEALEBRITIES has its own Steam page.
+        public const string SteamAppId = "480";
 
         /// Only the tiny built-in procedural skybox goes into "Always Included Shaders". The URP shaders must NOT:
         /// always-included shaders keep ALL keyword combinations (shader_feature too), i.e. hundreds of thousands of
@@ -87,6 +93,10 @@ namespace Sealebrities.EditorTools
             try
             {
                 RunSetup();
+                // every build gets its own version: co-op (Hello, Steam lobby sb_ver, LAN beacon) only connects windows of
+                // the SAME build – mixed builds had different species / command / GameState layouts but equal "0.1.0"
+                PlayerSettings.bundleVersion = "0.5." + DateTime.UtcNow.ToString("yyMMddHHmm", System.Globalization.CultureInfo.InvariantCulture);
+                Debug.Log("[Setup] bundleVersion " + PlayerSettings.bundleVersion);
                 AssetDatabase.SaveAssets();
                 Directory.CreateDirectory(Path.GetDirectoryName(BuildPath));
                 var options = new BuildPlayerOptions
@@ -150,8 +160,8 @@ namespace Sealebrities.EditorTools
             if (AddAlwaysIncludedShaders) Try("always included shaders", SetupAlwaysIncludedShaders);
             Try("URP asset", SetupRenderPipelineAssets);
             Try("PC URP asset (MSAA 4x, soft shadows, How to Fish shadows)", SetupPcPipelineAsset);
-            Try("PC renderer (screen space ambient occlusion)", SetupPcRendererSsao);
-            Try("PC renderer without SSAO (Low graphics tier)", SetupPcRendererNoAo);
+            Try("PC renderer: screen space ambient occlusion removed (Q3)", RemovePcRendererSsao);
+            Try("PC renderer without SSAO (second renderer slot)", SetupPcRendererNoAo);
             Try("post-processing variant guard (ACES, HQ bloom)", SetupPostVariantGuard);
             Try("fog shader variants", SetupFogVariants);
             Try("boot scene", SetupScene);
@@ -159,6 +169,7 @@ namespace Sealebrities.EditorTools
             {
                 EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
             });
+            Try("steam_appid.txt (project root, Steam test app " + SteamAppId + ")", () => WriteSteamAppId(Directory.GetCurrentDirectory()));
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
             if (!Application.isBatchMode)
@@ -166,6 +177,35 @@ namespace Sealebrities.EditorTools
                 var sceneAsset = AssetDatabase.LoadAssetAtPath<SceneAsset>(ScenePath);
                 if (sceneAsset != null) EditorSceneManager.playModeStartScene = sceneAsset;
             }
+        }
+
+        // ------------------------------------------------------------------ Steam
+        /// Every Windows / Linux build: steam_appid.txt (480) next to the exe, so SteamAPI_Init works when the game is
+        /// started straight from the build folder (the game never calls RestartAppIfNecessary).
+        [PostProcessBuild(100)]
+        public static void OnPostprocessBuild(BuildTarget target, string pathToBuiltProject)
+        {
+            if (target != BuildTarget.StandaloneWindows64 && target != BuildTarget.StandaloneWindows && target != BuildTarget.StandaloneLinux64) return;
+            try
+            {
+                string dir = Path.GetDirectoryName(pathToBuiltProject);
+                if (string.IsNullOrEmpty(dir)) return;
+                WriteSteamAppId(dir);
+            }
+            catch (Exception e)
+            {
+                Debug.LogError("SEALEBRITIES build: could not write steam_appid.txt next to the exe – Steam co-op will not start from that folder.");
+                Debug.LogException(e);
+            }
+        }
+
+        /// Writes steam_appid.txt (SteamAppId) into folder unless it already holds exactly that id.
+        public static void WriteSteamAppId(string folder)
+        {
+            string path = Path.Combine(folder, "steam_appid.txt");
+            if (File.Exists(path) && File.ReadAllText(path).Trim() == SteamAppId) return;
+            File.WriteAllText(path, SteamAppId);
+            Debug.Log("SEALEBRITIES: wrote " + path + " (Steam test app " + SteamAppId + ")");
         }
 
         static void Try(string what, Action a)
@@ -538,11 +578,8 @@ namespace Sealebrities.EditorTools
         const float Cascade2Split = 0.25f;
         const float ShadowDepthBias = 1.0f;
         const float ShadowNormalBias = 0.6f;
-        // Art bible: intensity 1.0, radius 0.30 m, direct lighting 0.25 – and 0.22 m if the view-model hands blotch.
-        // The hands are small now, but the earlier blotching with 0.3 m makes 0.24 m the safer middle.
-        const float SsaoIntensity = 1.0f;
-        const float SsaoRadius = 0.24f;
-        const float SsaoDirectLighting = 0.25f;
+        // Round 2 (Q3): no screen space ambient occlusion on any tier – it caused the grainy noise on the hut walls and in
+        // the boat cabin (Testversion 3). The setup removes the renderer feature, FXGraphics never switches it on.
 
         static RenderPipelineAsset PcPipelineAsset()
         {
@@ -617,100 +654,73 @@ namespace Sealebrities.EditorTools
             return null;
         }
 
-        /// Soft ambient occlusion in the creases of the chunky low-poly props (How to Fish look). The feature
-        /// class may be internal in some URP versions, so it is created by reflection and wired into the
-        /// renderer's feature list + feature map exactly like the URP renderer inspector does. Idempotent.
-        static void SetupPcRendererSsao()
+        /// Round 2 (Q3): SSAO off on every graphics tier. Every Screen Space Ambient Occlusion feature is removed from the
+        /// PC renderer – the sub-asset is deleted and the feature list + feature map are rebuilt exactly like the URP
+        /// renderer inspector's "Remove" does. Without an active SSAO feature URP keeps only the "SSAO off" shader variants.
+        /// Idempotent.
+        static void RemovePcRendererSsao()
         {
             var data = PcRendererData();
             if (data == null)
             {
-                Debug.LogWarning("SEALEBRITIES setup: PC renderer data not found (" + PcRendererPath + "): SSAO skipped.");
+                Debug.LogWarning("SEALEBRITIES setup: PC renderer data not found (" + PcRendererPath + "): SSAO removal skipped.");
                 return;
             }
-            Type ssaoType = FindType(SsaoAssemblyQualifiedName, SsaoTypeName);
-            if (ssaoType == null || ssaoType.IsAbstract || !typeof(ScriptableObject).IsAssignableFrom(ssaoType))
-            {
-                Debug.LogWarning("SEALEBRITIES setup: URP type " + SsaoTypeName + " not found: SSAO skipped.");
-                return;
-            }
+            int removed = RemoveSsaoFeatures(data);
+            if (removed > 0) Debug.Log("SEALEBRITIES setup: removed " + removed + " Screen Space Ambient Occlusion feature(s) from " + data.name + " (Q3: no grainy walls).");
+            else Debug.Log("SEALEBRITIES setup: " + data.name + " has no Screen Space Ambient Occlusion.");
+        }
 
+        /// Removes every SSAO renderer feature of a renderer data asset. Returns how many were removed.
+        static int RemoveSsaoFeatures(ScriptableObject data)
+        {
+            if (data == null) return 0;
+            Type ssaoType = FindType(SsaoAssemblyQualifiedName, SsaoTypeName);
+            if (ssaoType == null) return 0;
             var so = new SerializedObject(data);
             var features = so.FindProperty("m_RendererFeatures");
             var map = so.FindProperty("m_RendererFeatureMap");
-            if (features == null || !features.isArray)
-            {
-                Debug.LogWarning("SEALEBRITIES setup: m_RendererFeatures not found on " + data.name + ": SSAO skipped.");
-                return;
-            }
+            if (features == null || !features.isArray) return 0;
+            bool hasMap = map != null && map.isArray;
 
-            ScriptableObject ssao = null;
+            var keep = new List<UnityEngine.Object>();
+            var keepIds = new List<long>();
+            var drop = new List<UnityEngine.Object>();
             for (int i = 0; i < features.arraySize; i++)
             {
                 var o = features.GetArrayElementAtIndex(i).objectReferenceValue;
-                if (o != null && ssaoType.IsInstanceOfType(o)) { ssao = (ScriptableObject)o; break; }
+                long id = hasMap && i < map.arraySize ? map.GetArrayElementAtIndex(i).longValue : 0;
+                if (o != null && ssaoType.IsInstanceOfType(o)) { drop.Add(o); continue; }
+                keep.Add(o);
+                keepIds.Add(id);
             }
+            if (drop.Count == 0) return 0;
 
-            bool created = false;
-            if (ssao == null)
+            features.arraySize = keep.Count;
+            for (int i = 0; i < keep.Count; i++) features.GetArrayElementAtIndex(i).objectReferenceValue = keep[i];
+            if (hasMap)
             {
-                ssao = ScriptableObject.CreateInstance(ssaoType);
-                if (ssao == null)
-                {
-                    Debug.LogWarning("SEALEBRITIES setup: could not create " + SsaoTypeName + ": SSAO skipped.");
-                    return;
-                }
-                ssao.name = ssaoType.Name;
-                AssetDatabase.AddObjectToAsset(ssao, data);
-
-                int n = features.arraySize;
-                int oldMapSize = map != null && map.isArray ? map.arraySize : 0;
-                features.arraySize = n + 1;
-                features.GetArrayElementAtIndex(n).objectReferenceValue = ssao;
-                if (map != null && map.isArray)
-                {
-                    // the map holds the local file id of every feature sub-asset (URP uses it to re-link features)
-                    map.arraySize = features.arraySize;
-                    for (int i = oldMapSize; i < features.arraySize; i++)
-                    {
-                        var o = features.GetArrayElementAtIndex(i).objectReferenceValue;
-                        long id = 0;
-                        if (o != null && AssetDatabase.TryGetGUIDAndLocalFileIdentifier(o, out string _, out long localId)) id = localId;
-                        map.GetArrayElementAtIndex(i).longValue = id;
-                    }
-                }
-                so.ApplyModifiedPropertiesWithoutUndo();
-                created = true;
+                map.arraySize = keepIds.Count;
+                for (int i = 0; i < keepIds.Count; i++) map.GetArrayElementAtIndex(i).longValue = keepIds[i];
             }
-
-            var fso = new SerializedObject(ssao);
-            bool changed = false;
-            changed |= SetBool(fso, "m_Active", true);
-            changed |= SetFloatLogged(fso, "m_Settings.Intensity", SsaoIntensity, data.name);
-            changed |= SetFloatLogged(fso, "m_Settings.Radius", SsaoRadius, data.name);
-            changed |= SetFloatLogged(fso, "m_Settings.DirectLightingStrength", SsaoDirectLighting, data.name);
-            changed |= SetInt(fso, "m_Settings.Samples", 1);        // AOSampleOption.Medium
-            changed |= SetBool(fso, "m_Settings.Downsample", false);   // full resolution on High (FX halves it on Medium)
-            changed |= SetInt(fso, "m_Settings.BlurQuality", 0);    // bilateral (High)
-            changed |= SetBool(fso, "m_Settings.AfterOpaque", false);   // AO only on ambient light, under the fog
-            if (changed) fso.ApplyModifiedPropertiesWithoutUndo();
-
-            if (created || changed)
+            so.ApplyModifiedPropertiesWithoutUndo();
+            for (int i = 0; i < drop.Count; i++)
             {
-                EditorUtility.SetDirty(ssao);
-                EditorUtility.SetDirty(data);
-                if (data is UnityEngine.Rendering.Universal.ScriptableRendererData rd) rd.SetDirty();
-                AssetDatabase.SaveAssets();
-                Debug.Log("SEALEBRITIES setup: " + (created ? "added" : "updated") + " Screen Space Ambient Occlusion on " + data.name +
-                          " (intensity " + SsaoIntensity + ", radius " + SsaoRadius + ").");
+                var o = drop[i];
+                if (o == null) continue;
+                // the feature lives as a sub-asset of the renderer data: detach it, then destroy it
+                if (AssetDatabase.IsSubAsset(o)) AssetDatabase.RemoveObjectFromAsset(o);
+                UnityEngine.Object.DestroyImmediate(o, true);
             }
-            else Debug.Log("SEALEBRITIES setup: Screen Space Ambient Occlusion already configured on " + data.name + ".");
+            EditorUtility.SetDirty(data);
+            if (data is ScriptableRendererData rd) rd.SetDirty();
+            AssetDatabase.SaveAssets();
+            return drop.Count;
         }
 
-        /// Low graphics tier: SSAO off. URP strips the "SSAO off" shader variants as soon as EVERY renderer of the
-        /// pipeline has SSAO, so simply disabling the feature at runtime would hit missing variants in a build. A copy
-        /// of the PC renderer with its SSAO inactive is added as renderer #1: both variants stay in the build and the
-        /// FX module switches the camera to this renderer on Low. Idempotent.
+        /// Second renderer of the PC pipeline (PC_Renderer_NoAO): a copy of the PC renderer, also without SSAO. It used to
+        /// serve the Low tier while High/Medium had SSAO; it stays registered so older references (the view-model overlay
+        /// camera picks "a renderer without SSAO") keep working. Idempotent.
         static void SetupPcRendererNoAo()
         {
             var asset = PcPipelineAsset();
@@ -736,31 +746,8 @@ namespace Sealebrities.EditorTools
                 noAo.name = Path.GetFileNameWithoutExtension(PcRendererNoAoPath);
             }
 
-            // every SSAO feature of the copy inactive
-            Type ssaoType = FindType(SsaoAssemblyQualifiedName, SsaoTypeName);
-            var so = new SerializedObject(noAo);
-            var features = so.FindProperty("m_RendererFeatures");
-            bool featureChanged = false;
-            if (features != null && features.isArray)
-            {
-                for (int i = 0; i < features.arraySize; i++)
-                {
-                    var o = features.GetArrayElementAtIndex(i).objectReferenceValue;
-                    if (o == null || ssaoType == null || !ssaoType.IsInstanceOfType(o)) continue;
-                    var fso = new SerializedObject(o);
-                    if (SetBool(fso, "m_Active", false))
-                    {
-                        fso.ApplyModifiedPropertiesWithoutUndo();
-                        EditorUtility.SetDirty(o);
-                        featureChanged = true;
-                    }
-                }
-            }
-            if (featureChanged)
-            {
-                EditorUtility.SetDirty(noAo);
-                if (noAo is ScriptableRendererData rd) rd.SetDirty();
-            }
+            // an older copy may still carry an (inactive) SSAO feature
+            bool featureChanged = RemoveSsaoFeatures(noAo) > 0;
 
             // renderer list of the PC pipeline asset: [0] PC_Renderer (default), [1] PC_Renderer_NoAO
             var aso = new SerializedObject(asset);
@@ -784,7 +771,7 @@ namespace Sealebrities.EditorTools
             if (!present || featureChanged)
             {
                 AssetDatabase.SaveAssets();
-                Debug.Log("SEALEBRITIES setup: " + PcRendererNoAoPath + " (SSAO off) registered on " + asset.name + " for the Low graphics tier.");
+                Debug.Log("SEALEBRITIES setup: " + PcRendererNoAoPath + " (no SSAO) registered on " + asset.name + ".");
             }
         }
 

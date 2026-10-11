@@ -20,6 +20,12 @@ namespace Sealebrities
         public Color LureColor;
         public Bounds LocalBounds;
         public bool CastShadows;
+        // round 2: extra rig roles (CreatureRigExtra) – indices into Bones, −1 = none
+        public CreatureGait Gait;
+        public bool HasExtra;
+        public int[] Legs, Knees, Wings, WingTips, Claws, Fingers, EyeStalks, TailChain, Ears;
+        public int Jaw = -1, Head = -1, BodyBone = -1;
+        public bool LandSpecies;
         public readonly List<UnityEngine.Object> Owned = new List<UnityEngine.Object>();
 
         public bool Valid
@@ -108,13 +114,32 @@ namespace Sealebrities
             rig.bell = kit.Bell >= 0 ? bones[kit.Bell] : null;
             rig.renderers = new Renderer[] { smr };
             rig.bodyLength = 1f;
+
+            if (kit.HasExtra)
+            {
+                var ex = root.AddComponent<CreatureRigExtra>();
+                ex.gait = kit.Gait;
+                ex.legs = Map(kit.Legs, bones);
+                ex.knees = Map(kit.Knees, bones);
+                ex.wings = Map(kit.Wings, bones);
+                ex.wingTips = Map(kit.WingTips, bones);
+                ex.claws = Map(kit.Claws, bones);
+                ex.fingers = Map(kit.Fingers, bones);
+                ex.eyeStalks = Map(kit.EyeStalks, bones);
+                ex.tail = Map(kit.TailChain, bones);
+                ex.ears = Map(kit.Ears, bones);
+                ex.jaw = kit.Jaw >= 0 ? bones[kit.Jaw] : null;
+                ex.head = kit.Head >= 0 ? bones[kit.Head] : null;
+                ex.body = kit.BodyBone >= 0 ? bones[kit.BodyBone] : null;
+            }
             return root;
         }
 
         static Transform[] Map(int[] idx, Transform[] bones)
         {
+            if (idx == null) return new Transform[0];
             var r = new Transform[idx.Length];
-            for (int i = 0; i < idx.Length; i++) r[i] = bones[idx[i]];
+            for (int i = 0; i < idx.Length; i++) r[i] = idx[i] >= 0 && idx[i] < bones.Length ? bones[idx[i]] : null;
             return r;
         }
 
@@ -160,6 +185,14 @@ namespace Sealebrities
                 LurePos = ctx.LurePos,
                 LureColor = ctx.LureColor,
                 CastShadows = ctx.CastShadows,
+                Gait = ctx.Gait,
+                HasExtra = ctx.HasExtraRig,
+                Legs = ctx.Legs.ToArray(), Knees = ctx.LegKnees.ToArray(),
+                Wings = ctx.Wings.ToArray(), WingTips = ctx.WingTips.ToArray(),
+                Claws = ctx.Claws.ToArray(), Fingers = ctx.ClawFingers.ToArray(),
+                EyeStalks = ctx.EyeStalks.ToArray(), TailChain = ctx.TailChain.ToArray(), Ears = ctx.Ears.ToArray(),
+                Jaw = ctx.Jaw, Head = ctx.Head, BodyBone = ctx.BodyBone,
+                LandSpecies = s.land,
             };
 
             var mesh = new Mesh { name = "SB_Creature_" + s.id };
@@ -189,6 +222,11 @@ namespace Sealebrities
             if (s.plan == BodyPlan.Ray) pad.y += 0.35f;
             if (s.plan == BodyPlan.Jelly || s.plan == BodyPlan.Octopus || s.plan == BodyPlan.VampireSquid || s.plan == BodyPlan.Squid) pad += Vector3.one * 0.12f * len;
             if (s.plan == BodyPlan.Turtle || s.plan == BodyPlan.SeaLion) pad.y += 0.15f;
+            // wings flap / fold, legs swing, jaws shoot out, mouth pouches balloon
+            if (s.plan == BodyPlan.Bird || s.plan == BodyPlan.Bat) pad += new Vector3(0.05f, 0.45f, 0.35f) * len;
+            if (s.plan == BodyPlan.Crab || s.plan == BodyPlan.Lizard || s.plan == BodyPlan.Quadruped || s.plan == BodyPlan.Primate) pad += new Vector3(0.08f, 0.1f, 0.12f) * len;
+            if (s.plan == BodyPlan.Dolphin || s.plan == BodyPlan.Whale) pad.y += 0.12f * len;
+            if (ctx.Jaw >= 0) pad += new Vector3(0.1f, 0.15f, 0.12f) * len;
             kit.LocalBounds = new Bounds(mb.center, size + pad * 2f);
             return kit;
         }

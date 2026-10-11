@@ -140,6 +140,14 @@ namespace Sealebrities
         };
 
         readonly Color[,] lin;            // pre-compensated linear colours of the table
+        // Q41 warm main-menu golden hour: the horizon away from the sun turns peach, the 30° band a soft lilac-peach
+        static readonly Color WarmAwayScreen = SkyGrade.Hex("#E7B98A"), WarmMidScreen = SkyGrade.Hex("#B4B0CC");
+        readonly Color warmAway, warmMid;
+        float lastWarm = -1f, lastHaze = -1f;
+        Color lastFogLinear;
+
+        bool FogDiffers(Color c) =>
+            Mathf.Abs(c.r - lastFogLinear.r) + Mathf.Abs(c.g - lastFogLinear.g) + Mathf.Abs(c.b - lastFogLinear.b) > 0.01f;
         readonly Mesh mesh, sunMesh;
         readonly Vector3[] dirs;
         readonly Color[] cols;
@@ -168,6 +176,8 @@ namespace Sealebrities
             for (int k = 0; k < keys; k++)
                 for (int c = 0; c < 4; c++)
                     lin[k, c] = SkyGrade.InverseLinear(SkyGrade.AcesHueFix(SkyGrade.Hex(Table[k, c])));
+            warmAway = SkyGrade.InverseLinear(SkyGrade.AcesHueFix(WarmAwayScreen));
+            warmMid = SkyGrade.InverseLinear(SkyGrade.AcesHueFix(WarmMidScreen));
             if (vertexColorShader == null) return;
 
             // ---- dome
@@ -285,12 +295,17 @@ namespace Sealebrities
         }
 
         /// On-screen-calibrated linear sky colour for a direction (sun elevation/direction given).
-        Color Eval(Vector3 d, int k, float f, Vector3 sun, float sunElev)
+        Color Eval(Vector3 d, int k, float f, Vector3 sun, float sunElev, float warm)
         {
             Color zen = Color.Lerp(lin[k, 0], lin[k + 1, 0], f);
             Color mid = Color.Lerp(lin[k, 1], lin[k + 1, 1], f);
             Color away = Color.Lerp(lin[k, 2], lin[k + 1, 2], f);
             Color toward = Color.Lerp(lin[k, 3], lin[k + 1, 3], f);
+            if (warm > 0f)
+            {
+                away = Color.Lerp(away, warmAway, warm);
+                mid = Color.Lerp(mid, warmMid, 0.55f * warm);
+            }
 
             // how much this direction faces the sun's azimuth (wider glow when the sun is low)
             float hx = d.x, hz = d.z, hl = Mathf.Sqrt(hx * hx + hz * hz);
@@ -324,12 +339,21 @@ namespace Sealebrities
 
         /// Recolours the dome when the sun moved (≥ 0.25° elevation or 1° azimuth) or the fog near the dome changed.
         /// recolor = false (camera under water, dome hidden) only refreshes the fog/reflection colours.
-        public void Update(Vector3 sun, float sunElev, float sunAzimuth, float fogVisAtDome, Color fogLinear, bool force, bool recolor = true)
+        /// warm (0..1, Q41 main menu): the golden-hour horizon away from the sun and the haze turn warm peach.
+        public void Update(Vector3 sun, float sunElev, float sunAzimuth, float fogVisAtDome, Color fogLinear, bool force, bool recolor = true, float warm = 0f, float haze = 0f)
         {
+            haze = Mathf.Clamp01(haze);
             int k = Segment(sunElev, out float f);
             Color away = Color.Lerp(lin[k, 2], lin[k + 1, 2], f);
             Color mid = Color.Lerp(lin[k, 1], lin[k + 1, 1], f);
             Color awayScreen = Color.Lerp(SkyGrade.Hex(Table[k, 2]), SkyGrade.Hex(Table[k + 1, 2]), f);
+            warm = Mathf.Clamp01(warm);
+            if (warm > 0f)
+            {
+                away = Color.Lerp(away, warmAway, warm);
+                mid = Color.Lerp(mid, warmMid, 0.55f * warm);
+                awayScreen = Color.Lerp(awayScreen, WarmAwayScreen, warm);
+            }
             HorizonScreen = awayScreen;
             // × 0.93 (bible: 0.94; 0.90 turned the far sea band darker than the near sea)
             Color fogScreen = new Color(awayScreen.r * 0.93f, awayScreen.g * 0.93f, awayScreen.b * 0.93f, 1f);
@@ -340,14 +364,17 @@ namespace Sealebrities
 
             if (mat == null || (!recolor && !force)) return;
             bool changed = force || Mathf.Abs(sunElev - lastElev) > 0.25f || Mathf.Abs(Mathf.DeltaAngle(sunAzimuth, lastAz)) > 1f
-                           || Mathf.Abs(fogVisAtDome - lastFogVis) > 0.004f;
+                           || Mathf.Abs(fogVisAtDome - lastFogVis) > 0.004f || Mathf.Abs(warm - lastWarm) > 0.01f
+                           || Mathf.Abs(haze - lastHaze) > 0.01f || (haze > 0.01f && FogDiffers(fogLinear));
             if (!changed) return;
-            lastElev = sunElev; lastAz = sunAzimuth; lastFogVis = fogVisAtDome;
+            lastElev = sunElev; lastAz = sunAzimuth; lastFogVis = fogVisAtDome; lastWarm = warm; lastHaze = haze; lastFogLinear = fogLinear;
 
             float vis = Mathf.Clamp(fogVisAtDome, 0.05f, 1f);
             for (int i = 0; i < dirs.Length; i++)
             {
-                Color c = Eval(dirs[i], k, f, sun, sunElev);
+                Color c = Eval(dirs[i], k, f, sun, sunElev, warm);
+                // inside a fog bank the sky drowns in the fog colour (fully at the horizon, a little less overhead)
+                if (haze > 0f) c = Color.Lerp(c, fogLinear, haze * (1f - 0.35f * Mathf.Clamp01(dirs[i].y)));
                 // the particles shader still fogs the (5 m) dome a little: pre-compensate so the sky stays exact
                 if (vis < 0.999f)
                 {
@@ -361,7 +388,7 @@ namespace Sealebrities
             mesh.SetColors(cols);
 
             // sun disc: warm white HDR core, halo fading out; dims into the horizon
-            float lowK = Mathf.Clamp01((sunElev + 1.5f) / 6f);
+            float lowK = Mathf.Clamp01((sunElev + 1.5f) / 6f) * (1f - 0.85f * haze);
             Color core = Color.Lerp(new Color(2.4f, 1.35f, 0.75f), new Color(3.0f, 2.95f, 2.7f), Mathf.Clamp01(sunElev / 25f)) * lowK;
             Color haloC = Color.Lerp(new Color(1.2f, 0.75f, 0.45f), new Color(1.05f, 1.05f, 0.98f), Mathf.Clamp01(sunElev / 25f));
             int ds = (sunCols.Length - 1) / 3;

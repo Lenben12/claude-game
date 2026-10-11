@@ -58,7 +58,34 @@ namespace Sealebrities
         internal float extraRoll;        // persistent: sunfish basking etc.
         internal float bellPulse;        // persistent: jelly pulse 0..1
         internal float cloak;            // persistent: vampire squid flare 0..1
-        internal float lureMul = 1f;     // persistent: lure brightness multiplier
+        internal float lureMul = 1f;     // persistent: lure brightness multiplier / round-2 action channel (1 rest … 3 full)
+
+        // ------------------------------------------------------------------ round 2: locomotion modes, directors
+        /// Swim (fish …), Ground (crabs, starfish, walking cuttlefish, land animals) or Fly (birds, bats).
+        internal FaunaMode mode;
+        /// Reset every tick: the swimmer may leave the water (dolphin jumps, whale breach, flying-fish glides).
+        internal bool allowAir;
+        /// Persistent: flyer sits on perchPos (feet), ground animal clings to a wall / trunk at heightOverride.
+        internal bool perched;
+        internal Vector3 perchPos;
+        internal bool hasHeightOverride;
+        internal float heightOverride;
+        /// Ground mode: float at the surface when the water is deeper than the legs (pig "Truffle" swims).
+        internal bool floatsInWater;
+        /// Spawned by LandFauna (island / shore animals): not part of the underwater zone population.
+        internal bool landSpawned;
+        /// Optional scripted control (animal events, bow riding, mischief): returns true when it steered this tick.
+        internal IFaunaDirector director;
+        /// Height of solid props (dock, rocks, hut floor) above the terrain at the current spot (ground mode).
+        float propLift;
+        int propCountdown;
+        /// Persistent (set by the behavior): skip the obstacle probes (wall climbers move along walls on purpose).
+        internal bool ignoreObstacles;
+        /// Reset every tick: explicit body rotation (geckos on walls, perched birds facing out).
+        internal bool hasRotOverride;
+        internal Quaternion rotOverride;
+        /// Land animals: home spot data handed out by LandFauna (perch, wall, pen …).
+        internal FaunaLandSpot landSpot;
 
         // ------------------------------------------------------------------ bookkeeping (spawner)
         internal FaunaSpawner spawner;
@@ -154,6 +181,14 @@ namespace Sealebrities
             lureMul = 1f;
             bank = 0f;
             yawRate = 0f;
+            allowAir = false;
+            perched = false;
+            hasHeightOverride = false;
+            landSpawned = false;
+            director = null;
+            ignoreObstacles = false;
+            propLift = 0f;
+            propCountdown = 0;
 
             ComputeBodyFacts();
 
@@ -230,6 +265,8 @@ namespace Sealebrities
                 case BodyPlan.Turtle: maxPitch = 30f; maxBank = 18f; break;
                 case BodyPlan.Sunfish: maxPitch = 18f; maxBank = 10f; break;
                 case BodyPlan.Eel: maxPitch = 35f; maxBank = 6f; break;
+                case BodyPlan.Dolphin: maxPitch = 45f; maxBank = 30f; break;
+                case BodyPlan.Whale: maxPitch = 22f; maxBank = 8f; break;
                 case BodyPlan.Octopus: case BodyPlan.Squid: case BodyPlan.Cuttlefish: case BodyPlan.VampireSquid:
                     maxPitch = 25f; maxBank = 8f; break;
                 default: maxPitch = 35f; maxBank = 12f; break;
@@ -238,6 +275,35 @@ namespace Sealebrities
 
             float glowBoost = s.glows ? 1.6f : 1f;
             cullDistance = Mathf.Clamp(lengthM * 140f * glowBoost, 32f, 165f);
+
+            // ---- round 2 locomotion
+            mode = FaunaModes.Of(s);
+            floatsInWater = s.land && s.plan == BodyPlan.Quadruped;
+            switch (mode)
+            {
+                case FaunaMode.Ground:
+                    halfHeight = Mathf.Max(0.02f, h * lengthM * 0.5f);
+                    clearance = halfHeight;
+                    hardClearance = halfHeight * 0.9f;
+                    cruise = Mathf.Clamp(s.speed * lengthM, 0.015f, 1.6f);
+                    uprightOnly = false;
+                    swimsForward = false;
+                    maxPitch = 30f; maxBank = 8f;
+                    turnRate = Mathf.Clamp(260f / (0.5f + lengthM), 40f, 360f);
+                    if (s.land) cullDistance = Mathf.Clamp(lengthM * 90f, 45f, 90f);
+                    break;
+                case FaunaMode.Fly:
+                    halfHeight = Mathf.Max(0.03f, h * lengthM * 0.5f);
+                    clearance = halfHeight + 0.3f;
+                    hardClearance = halfHeight;
+                    cruise = Mathf.Clamp(s.speed * lengthM * 4f, 1.6f, 7f);   // birds fly a lot faster than they swim
+                    uprightOnly = false;
+                    swimsForward = true;
+                    maxPitch = 35f; maxBank = 38f;
+                    turnRate = 140f;
+                    cullDistance = 150f;
+                    break;
+            }
         }
 
         void OnEnable()
@@ -270,6 +336,16 @@ namespace Sealebrities
         /// Behaviors call this to remove themselves (handled safely after the update loop).
         internal void RequestDespawn() { pendingDespawn = true; }
 
+        /// LandFauna: hands the animal its home spot and restarts the behavior there.
+        internal void SetLandSpot(FaunaLandSpot spot)
+        {
+            landSpot = spot;
+            landSpawned = true;
+            home = spot.pos;
+            leashCenter = spot.pos;
+            if (behavior != null) behavior.Reset();
+        }
+
         // ================================================================== update
 
         internal void Tick(float dt, bool nearLod)
@@ -283,12 +359,19 @@ namespace Sealebrities
             hasFaceDir = false;
             relaxBand = false;
             freePitch = false;
+            allowAir = false;
+            hasRotOverride = false;
+            hasHeightOverride = false;
             accelMul = 1f;
             turnMul = 1f;
             activityTarget = 0.2f;
 
-            behavior.Tick(dt);
+            bool directed = director != null && director.Steer(this, dt);
+            if (!directed) behavior.Tick(dt);
             if (pendingDespawn) return;
+
+            if (mode == FaunaMode.Ground) { TickGround(dt, nearLod); Finish(dt, nearLod); return; }
+            if (mode == FaunaMode.Fly) { TickFly(dt, nearLod); Finish(dt, nearLod); return; }
 
             Vector3 desired = desiredVel;
             Steer(ref desired, dt, nearLod);
@@ -314,11 +397,27 @@ namespace Sealebrities
             }
             float top = surfaceY - (hallucination ? 0.7f : 1f) - halfHeight;
             float bottom = gN + hardClearance;
-            if (np.y > top) { np.y = top; if (velocity.y > 0f) velocity.y = 0f; }
+            if (allowAir)
+            {
+                // jumps / breaches / glides: free above the surface, ballistic once out of the water
+                if (np.y > surfaceY) velocity.y -= 9.81f * dt * (species.plan == BodyPlan.Fish ? 0.35f : 1f);
+            }
+            else if (np.y > top)
+            {
+                // back under after an air moment: sink smoothly instead of snapping
+                if (np.y > top + 0.4f) np.y = Mathf.MoveTowards(pos.y, top, Mathf.Max(2f, -velocity.y) * dt);
+                else np.y = top;
+                if (velocity.y > 0f) velocity.y = 0f;
+            }
             if (np.y < bottom) { np.y = bottom; if (velocity.y < 0f) velocity.y = 0f; }
             pos = np;
             tr.position = pos;
+            Finish(dt, nearLod);
+        }
 
+        /// Shared tail of every tick: rotation, activity, culling, animation, bounds.
+        void Finish(float dt, bool nearLod)
+        {
             UpdateRotation(dt);
 
             // ---- activity: behaviors set targets; raw speed adds a little
@@ -330,9 +429,11 @@ namespace Sealebrities
             // ---- distance culling (renderers + lure light). Seen from above the water (dock, beach, boat) animals are
             // hidden by the nearly opaque sea: cull them beyond 35 m, and deeper than 5 m beyond the 12 m scan range.
             bool above = !FXVisibility.Underwater;
-            float lim = above ? Mathf.Min(cullDistance, 35f) : cullDistance;
+            // island / shore animals and flyers are seen through the air; breaching whales and jumping dolphins too
+            bool inAir = (mode != FaunaMode.Swim && pos.y > surfaceY - 0.3f) || (allowAir && pos.y > surfaceY - 1.5f);
+            float lim = inAir ? (above ? cullDistance : Mathf.Min(cullDistance, 25f)) : (above ? Mathf.Min(cullDistance, 35f) : cullDistance);
             bool shouldCull = culled ? distLocal > lim - 5f : distLocal > lim + 5f;
-            if (above && pos.y < surfaceY - 5f && distLocal > FilmShotEvaluator.MaxScanRange) shouldCull = true;
+            if (above && !inAir && pos.y < surfaceY - 5f && distLocal > FilmShotEvaluator.MaxScanRange) shouldCull = true;
             if (hallucination) shouldCull = false;
             if (shouldCull != culled) SetCulled(shouldCull);
             if (anim != null)
@@ -349,6 +450,118 @@ namespace Sealebrities
                 boundsCountdown = nearLod ? 4 : 1;
                 UpdateBounds();
             }
+        }
+
+        // ================================================================== round 2: ground and flight
+
+        /// Walkers (crabs, starfish, the flamboyant cuttlefish, island animals): follow the terrain and solid props,
+        /// stay inside their depth / height band (beach crabs on the sand, reef crawlers under water), pigs swim.
+        void TickGround(float dt, bool nearLod)
+        {
+            Vector3 desired = desiredVel;
+            desired.y = 0f;
+            Vector3 mv = velocity.sqrMagnitude > 1e-4f ? velocity : tr.forward;
+            mv.y = 0f;
+            float hspd = Mathf.Sqrt(velocity.x * velocity.x + velocity.z * velocity.z);
+            if (!ignoreObstacles && distLocal < 70f && --rayCountdown <= 0)
+            {
+                rayCountdown = nearLod ? 4 : 2;
+                ProbeObstacles(mv, hspd);
+            }
+            if (avoidTimer > 0f)
+            {
+                avoidTimer -= dt;
+                desired += new Vector3(avoidVec.x, 0f, avoidVec.z);
+            }
+            float accel = Mathf.Max(0.3f, cruise * 3f) * accelMul;
+            Vector3 hv = Vector3.MoveTowards(new Vector3(velocity.x, 0f, velocity.z), desired, accel * dt);
+            Vector3 np = pos + hv * dt;
+            float g = WorldInfo.GroundHeight(np);
+            if (!GroundOk(g))
+            {
+                np.x = pos.x; np.z = pos.z;
+                hv *= -0.3f;
+                g = groundY;
+            }
+            if (--propCountdown <= 0)
+            {
+                propCountdown = nearLod ? 5 : 2;
+                propLift = PropLift(np, g);
+            }
+            float floor = g + propLift;
+            // a wall of props in front (hut, big rock): stop and let the obstacle probe turn us
+            if (!hasHeightOverride && floor - (pos.y - halfHeight) > Mathf.Max(0.5f, lengthM * 1.5f))
+            {
+                np.x = pos.x; np.z = pos.z;
+                hv *= -0.2f;
+                floor = groundY + propLift;
+            }
+            float targetY = floor + halfHeight;
+            if (hasHeightOverride) targetY = heightOverride;
+            else if (floatsInWater && floor < surfaceY - halfHeight * 1.6f) targetY = surfaceY - halfHeight * 0.45f;   // swimming
+            float ny = Mathf.Lerp(pos.y, targetY, Mathf.Clamp01(dt * 14f));
+            np.y = ny;
+            velocity = new Vector3(hv.x, (ny - pos.y) / Mathf.Max(dt, 1e-4f) * 0.25f, hv.z);
+            pos = np;
+            tr.position = pos;
+        }
+
+        /// Ground heights this walker may stand on: its depth band (positive = below sea level) with a small margin.
+        internal bool GroundOk(float groundY)
+        {
+            var s = species;
+            float depth = Waves.SeaLevel - groundY;
+            return depth <= s.maxDepth + 0.6f && depth >= s.minDepth - 0.4f;
+        }
+
+        float PropLift(Vector3 at, float g)
+        {
+            float start = Mathf.Max(g, pos.y - halfHeight) + 0.6f;
+            if (Physics.Raycast(new Vector3(at.x, start, at.z), Vector3.down, out RaycastHit hit, 1.4f, FaunaContext.ObstacleMask, QueryTriggerInteraction.Ignore)
+                && !FaunaContext.IsPlayerCollider(hit.collider) && hit.point.y > g + 0.04f)
+                return hit.point.y - g;
+            return 0f;
+        }
+
+        /// Birds and bats: free flight above ground and water; perched birds sit on perchPos.
+        void TickFly(float dt, bool nearLod)
+        {
+            if (perched)
+            {
+                Vector3 target = perchPos + Vector3.up * (halfHeight * 0.9f);
+                Vector3 np0 = Vector3.Lerp(pos, target, Mathf.Clamp01(dt * 8f));
+                velocity = (np0 - pos) / Mathf.Max(dt, 1e-4f) * 0.2f;
+                pos = np0;
+                tr.position = pos;
+                return;
+            }
+            Vector3 desired = desiredVel;
+            Vector3 mv = velocity.sqrMagnitude > 1e-4f ? velocity : tr.forward;
+            float spd = velocity.magnitude;
+            if (!ignoreObstacles && distLocal < 90f && --rayCountdown <= 0)
+            {
+                rayCountdown = nearLod ? 4 : 2;
+                ProbeObstacles(mv, spd);
+            }
+            if (avoidTimer > 0f)
+            {
+                avoidTimer -= dt;
+                desired += avoidVec;
+            }
+            float accel = Mathf.Max(1.5f, cruise * 1.2f) * accelMul;
+            velocity = Vector3.MoveTowards(velocity, desired, accel * dt);
+            if (!hasFaceDir)
+            {
+                float sp = velocity.magnitude;
+                if (sp > cruise * 0.3f) velocity = Vector3.Lerp(velocity, tr.forward * sp, Mathf.Clamp01(dt * 2f));
+            }
+            Vector3 np = pos + velocity * dt;
+            float g = WorldInfo.GroundHeight(np);
+            float floor = Mathf.Max(g, surfaceY) + halfHeight + 0.2f;
+            if (np.y < floor) { np.y = floor; if (velocity.y < 0f) velocity.y = 0f; }
+            if (np.y > 140f) { np.y = 140f; if (velocity.y > 0f) velocity.y = 0f; }
+            pos = np;
+            tr.position = pos;
         }
 
         void Steer(ref Vector3 desired, float dt, bool nearLod)
@@ -478,7 +691,11 @@ namespace Sealebrities
             Vector3 curF = tr.forward;
             float curYaw = Mathf.Atan2(curF.x, curF.z) * Mathf.Rad2Deg;
             Quaternion target;
-            if (freePitch && !uprightOnly)
+            if (hasRotOverride)
+            {
+                target = rotOverride;
+            }
+            else if (freePitch && !uprightOnly)
             {
                 Vector3 up = tr.up;
                 if (Mathf.Abs(Vector3.Dot(dir.normalized, up)) > 0.98f) up = Vector3.up;
@@ -495,7 +712,7 @@ namespace Sealebrities
                 target = Quaternion.Euler(-pitch, yaw, bank);
             }
             // slow hoverers turn lazily (no jitter from tiny velocity changes); explicit facing turns at full rate
-            float spdFactor = hasFaceDir || freePitch ? 1f : Mathf.Clamp(velocity.magnitude / Mathf.Max(0.05f, cruise * 0.5f), 0.2f, 1f);
+            float spdFactor = hasFaceDir || freePitch || hasRotOverride ? 1f : Mathf.Clamp(velocity.magnitude / Mathf.Max(0.05f, cruise * 0.5f), 0.2f, 1f);
             tr.rotation = Quaternion.RotateTowards(tr.rotation, target, turnRate * turnMul * spdFactor * dt);
 
             Vector3 nf = tr.forward;

@@ -31,16 +31,18 @@ namespace Sealebrities
             var head = UIKit.Row();
             head.Add(UIKit.Text(Loc.Tr("Mausempfindlichkeit", "Mouse sensitivity"), fontSize, UIPalette.InkSoft, true));
             head.Add(UIKit.Flex());
-            float current = Settings.Data.mouseSensitivity;
-            var value = UIKit.Text(UIKit.Mult(current), fontSize, UIPalette.Ink, true);
+            const float Min = 0.2f, Max = 3f;
+            float current = UIFormat.Clamp(Settings.Data.mouseSensitivity, Min, Max, Settings.DefaultSensitivity);
+            var value = UIKit.Text(UIFormat.Multiplier(Mathf.Round(current * 20f) / 20f, Min, Max), fontSize, UIPalette.Ink, true);
             head.Add(value);
             col.Add(head);
-            var slider = new UISlider(0.2f, 3f, current, v =>
+            var slider = new UISlider(Min, Max, current, v =>
             {
-                v = Mathf.Round(v * 20f) / 20f;
+                if (float.IsNaN(v) || float.IsInfinity(v)) return;
+                v = Mathf.Clamp(Mathf.Round(v * 20f) / 20f, Min, Max);
                 Settings.Data.mouseSensitivity = v;
                 Settings.MarkDirty();
-                value.text = UIKit.Mult(v);
+                value.text = UIFormat.Multiplier(v, Min, Max);
             }, UIPalette.Turquoise, _ => Settings.Save(), fontSize * 2f);
             slider.style.marginTop = 6f;
             col.Add(slider);
@@ -55,14 +57,16 @@ namespace Sealebrities
             {
                 new ControlEntry { keys = new[] { L(GameAction.Forward), L(GameAction.Left), L(GameAction.Back), L(GameAction.Right) }, action = Loc.Tr("Laufen / Schwimmen", "Walk / swim") },
                 new ControlEntry { keys = new[] { L(GameAction.Jump) }, action = Loc.Tr("Springen / Auftauchen", "Jump / swim up") },
-                new ControlEntry { keys = new[] { L(GameAction.Down) }, action = Loc.Tr("Abtauchen", "Dive down") },
+                new ControlEntry { keys = new[] { L(GameAction.Down) }, action = Loc.Tr("Abtauchen / Ducken (halten)", "Dive down / crouch (hold)") },
+                new ControlEntry { keys = new[] { L(GameAction.Forward), L(GameAction.Back) }, action = Loc.Tr("Leiter hoch / runter · E loslassen", "Ladder up / down · E let go") },
                 new ControlEntry { keys = new[] { L(GameAction.Sprint) }, action = Loc.Tr("Sprinten", "Sprint") },
                 new ControlEntry { keys = new[] { L(GameAction.Interact) }, action = Loc.Tr("Benutzen", "Interact") },
                 new ControlEntry { keys = new[] { L(GameAction.RightSlot1), L(GameAction.RightSlot2), L(GameAction.RightSlot3) }, action = Loc.Tr("Rechte Hand", "Right hand") },
                 new ControlEntry { keys = new[] { L(GameAction.LeftSlot1), L(GameAction.LeftSlot2), L(GameAction.LeftSlot3) }, action = Loc.Tr("Linke Hand", "Left hand") },
                 new ControlEntry { keys = new[] { L(GameAction.Use) }, action = Loc.Tr("Aufnehmen / Auswerfen", "Record / cast") },
                 new ControlEntry { keys = new[] { L(GameAction.Aim) }, action = Loc.Tr("Zielen", "Aim") },
-                new ControlEntry { keys = new[] { L(GameAction.Photo) }, action = Loc.Tr("Foto", "Photo") },
+                new ControlEntry { keys = new[] { L(GameAction.Photo) }, action = Loc.Tr("Foto fürs Sealog", "Photo for the Sealog") },
+                new ControlEntry { keys = new[] { L(GameAction.Selfie) }, action = Loc.Tr("Selfie-Ansicht", "Selfie view") },
                 new ControlEntry { keys = new[] { L(GameAction.LightToggle) }, action = Loc.Tr("Lampe an/aus", "Lamp on/off") },
                 new ControlEntry { keys = new[] { L(GameAction.Phone) }, action = Loc.Tr("Handy", "Phone") },
                 new ControlEntry { keys = new[] { L(GameAction.Inventory) }, action = Loc.Tr("Inventar", "Inventory") },

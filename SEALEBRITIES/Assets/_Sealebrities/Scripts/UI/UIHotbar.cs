@@ -146,10 +146,16 @@ namespace Sealebrities
             s.box.style.scale = new Scale(active ? new Vector2(1.1f, 1.1f) : Vector2.one);
         }
 
+        float lastChange;
+
+        /// Seconds since the hotbar last changed (Q39 idle fade).
+        public float IdleSeconds => Time.unscaledTime - lastChange;
+
         public void Tick()
         {
             if (!dirty) return;
             dirty = false;
+            lastChange = Time.unscaledTime;
             Refresh(Hand.Left, left, leftName);
             Refresh(Hand.Right, right, rightName);
             bool rod = Hands.IsTwoHanded(Hands.Active(Hand.Right)) || Hands.IsTwoHanded(Hands.Active(Hand.Left));

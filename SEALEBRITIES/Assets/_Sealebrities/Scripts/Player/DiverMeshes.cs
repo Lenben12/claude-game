@@ -115,6 +115,64 @@ namespace Sealebrities
                 return LatheY(p.ToArray(), segs);
             });
 
+        /// L.13 smooth capsule along +Y from y = 0 to y = length: `segs` radial segments and `capRings` rings per round
+        /// cap (the old Capsule has 3) – used for the limbs (16 × 8 rings) so bends and silhouettes never show facets.
+        public static Mesh SmoothCapsule(float radius, float length, int segs = 16, int capRings = 5, int bodyRings = 2) =>
+            Cached("scaps" + radius.ToString("0.####") + "_" + length.ToString("0.####") + "_" + segs + "_" + capRings + "_" + bodyRings, () =>
+            {
+                float r = Mathf.Min(radius, length * 0.5f);
+                var p = new List<Vector2>(capRings * 2 + bodyRings + 2);
+                for (int i = 0; i <= capRings; i++)
+                {
+                    float a = Mathf.PI * 0.5f * i / capRings;
+                    p.Add(new Vector2(i == 0 ? 0f : r * Mathf.Sin(a), r - r * Mathf.Cos(a)));
+                }
+                // straight part split into a few rings (smooth bending under per-vertex lighting)
+                for (int i = 1; i < bodyRings; i++)
+                    p.Add(new Vector2(r, Mathf.Lerp(r, length - r, i / (float)bodyRings)));
+                for (int i = 0; i <= capRings; i++)
+                {
+                    float a = Mathf.PI * 0.5f * i / capRings;
+                    p.Add(new Vector2(i == capRings ? 0f : r * Mathf.Cos(a), length - r + r * Mathf.Sin(a)));
+                }
+                return LatheY(p.ToArray(), segs);
+            });
+
+        /// L.13: resamples a lathe profile (bottom → top) to `rings` points along a centripetal Catmull-Rom spline, so a
+        /// hand-tuned 9–13 point profile becomes a round 18–24 ring silhouette. End points (radius 0 poles) are kept.
+        public static Vector2[] Resample(Vector2[] prof, int rings)
+        {
+            int n = prof.Length;
+            if (n < 3 || rings <= n) return prof;
+            // arc length of the polyline
+            var acc = new float[n];
+            for (int i = 1; i < n; i++) acc[i] = acc[i - 1] + Vector2.Distance(prof[i], prof[i - 1]);
+            float total = acc[n - 1];
+            if (total <= 1e-6f) return prof;
+            var outp = new Vector2[rings];
+            int seg = 0;
+            for (int k = 0; k < rings; k++)
+            {
+                float s = total * k / (rings - 1);
+                while (seg < n - 2 && acc[seg + 1] < s) seg++;
+                float len = Mathf.Max(1e-6f, acc[seg + 1] - acc[seg]);
+                float t = Mathf.Clamp01((s - acc[seg]) / len);
+                Vector2 p0 = prof[Mathf.Max(0, seg - 1)], p1 = prof[seg], p2 = prof[seg + 1], p3 = prof[Mathf.Min(n - 1, seg + 2)];
+                Vector2 v = CatmullRom(p0, p1, p2, p3, t);
+                v.x = Mathf.Max(0f, v.x);
+                outp[k] = v;
+            }
+            outp[0] = prof[0];
+            outp[rings - 1] = prof[n - 1];
+            return outp;
+        }
+
+        static Vector2 CatmullRom(Vector2 p0, Vector2 p1, Vector2 p2, Vector2 p3, float t)
+        {
+            float t2 = t * t, t3 = t2 * t;
+            return 0.5f * (2f * p1 + (-p0 + p2) * t + (2f * p0 - 5f * p1 + 4f * p2 - p3) * t2 + (-p0 + 3f * p1 - 3f * p2 + p3) * t3);
+        }
+
         /// Tapered tube along +Y (y = 0 radius r0 → y = 1 radius r1, flat caps). Scale Y for the length.
         public static Mesh Taper(float r0, float r1, int segs = 10, bool caps = true) =>
             Cached("taper" + r0.ToString("0.####") + "_" + r1.ToString("0.####") + "_" + segs + (caps ? "c" : ""), () =>
@@ -384,7 +442,8 @@ namespace Sealebrities
         /// A limb segment: capsule of the given radius from the parent's origin downward (−Y) over length.
         public static MeshRenderer Limb(Transform parent, string name, float radius, float length, Material mat, bool shadows = true)
         {
-            return Part(parent, name, Capsule(radius, length + radius * 0.4f), mat,
+            // L.13 LOD0 budget: 12 radial × 6 rings (2-ring caps + 2 body rings) – smooth normals keep the tubes round
+            return Part(parent, name, SmoothCapsule(radius, length + radius * 0.4f, 12, 2, 2), mat,
                         new Vector3(0f, -length - radius * 0.2f, 0f), Vector3.one, default, shadows);
         }
     }

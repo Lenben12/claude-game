@@ -501,10 +501,40 @@ namespace Sealebrities
             }
             PropNearLight.Attach(PropUtil.AddPointLight(root, W(new Vector3(0f, 2.4f, 6f)), new Color(0.6f, 1f, 0.55f), 10f, 1.0f, "CaveGlow"), 45f);
 
-            // ---- Onkel Gus' film corner in the chamber (the secret)
+            // ---- L.6 #1: a rock partition across the back of the chamber with a 0.95 × 1.25 m squeeze behind a curtain
+            // of roots; Onkel Gus' film corner sits in the dark side grotto behind it (no light – bring the lamp)
             Vector3 g0 = new Vector3(0f, 0f, chamberS);
             float Floor(Vector3 local) => G(W(local)) - WorldFeatures.CaveFloorY;
-            Vector3 pp = g0 + new Vector3(0f, 0f, 4.4f);
+            const float partZ = 1.8f, gapX0 = 2.2f, gapX1 = 3.15f, gapH = 1.25f;
+            {
+                float partZw = chamberS + partZ;
+                float fy = Floor(new Vector3((gapX0 + gapX1) * 0.5f, 0f, partZw));
+                // exact invisible walls (left of the gap, right of the gap, the lintel above it)
+                PropCol.Box(cols, W(new Vector3((-8.4f + gapX0) * 0.5f, fy + 3.5f, partZw)), new Vector3(gapX0 + 8.4f, 9f, 0.9f), R, "Partition");
+                PropCol.Box(cols, W(new Vector3((gapX1 + 8.4f) * 0.5f, fy + 3.5f, partZw)), new Vector3(8.4f - gapX1, 9f, 0.9f), R, "Partition");
+                PropCol.Box(cols, W(new Vector3((gapX0 + gapX1) * 0.5f, fy + gapH + 4f, partZw)), new Vector3(gapX1 - gapX0 + 0.1f, 8f, 0.9f), R, "PartitionLintel");
+                // visual rocks up to the ceiling (built without colliders; the boxes above are exact)
+                for (float x = gapX0 - 0.95f; x > -8f; x -= 1.8f)
+                    PropRocks.BuildSplit(batch, W(new Vector3(x, fy + 2.8f, partZw)), W(new Vector3(x, fy + 2.8f, partZw)), new Vector3(0.9f, 3.2f, 0.6f), R * Quaternion.Euler(0f, x * 13f, 0f), 7300 + (int)(x * 10f), 1, 0.08f, PropMats.CaveFloor, null, PropMats.Crevice);
+                for (float x = gapX1 + 0.95f; x < 8f; x += 1.8f)
+                    PropRocks.BuildSplit(batch, W(new Vector3(x, fy + 2.8f, partZw)), W(new Vector3(x, fy + 2.8f, partZw)), new Vector3(0.9f, 3.2f, 0.6f), R * Quaternion.Euler(0f, x * 17f, 0f), 7400 + (int)(x * 10f), 1, 0.08f, PropMats.CaveFloor, null, PropMats.Crevice);
+                Vector3 lint = W(new Vector3((gapX0 + gapX1) * 0.5f, fy + gapH + 2.2f, partZw));
+                PropRocks.BuildSplit(batch, lint, lint, new Vector3(0.75f, 2.0f, 0.6f), R, 7500, 1, 0.06f, PropMats.CaveFloor, null, PropMats.Crevice);
+                // the root curtain hanging in front of the squeeze (no collider – the player pushes through)
+                var roots = batch.W(PropMats.Vine, W(g0));
+                for (int i = 0; i < 16; i++)
+                {
+                    float x = gapX0 - 0.5f + i * 0.13f;
+                    Vector3 top = W(new Vector3(x, fy + 4.6f, partZw - 0.65f));
+                    Vector3 mid = W(new Vector3(x + PropUtil.Range(rng, -0.12f, 0.12f), fy + 2.2f, partZw - 0.6f - PropUtil.Range(rng, 0f, 0.15f)));
+                    Vector3 low = W(new Vector3(x + PropUtil.Range(rng, -0.15f, 0.15f), fy + PropUtil.Range(rng, 0.25f, 0.6f), partZw - 0.55f));
+                    roots.Rod(top, mid, 0.03f, 0.025f, 3);
+                    roots.Rod(mid, low, 0.025f, 0.012f, 3);
+                }
+                PropInfo.SetSpot("grotto_squeeze", W(new Vector3((gapX0 + gapX1) * 0.5f, fy, partZw)));
+                PropInfo.SetSpot("root_curtain", W(new Vector3((gapX0 + gapX1) * 0.5f, fy, partZw - 0.7f)));
+            }
+            Vector3 pp = g0 + new Vector3(0f, 0f, 5.6f);
             pp.y = Floor(pp) + 1.2f;
             Quaternion pq = R * Quaternion.LookRotation(Vector3.back);
             var pb = batch.W(PropMats.WoodDark, W(pp));
@@ -513,13 +543,13 @@ namespace Sealebrities
             Vector3 pu = pq * Vector3.up * 0.6f, px = pq * Vector3.right * 0.44f;
             batch.W(PropMats.GusPoster, pc).QuadAuto(pc - px - pu, pc - px + pu, pc + px + pu, pc + px - pu,
                 new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(0f, 1f), new Vector2(0f, 0f), pq * Vector3.forward);
-            Vector3 camL = g0 + new Vector3(0.6f, 0f, 1.0f);
+            Vector3 camL = g0 + new Vector3(0.6f, 0f, 3.6f);
             camL.y = Floor(camL);
             FilmCamera(batch, cols, W(camL), R);
-            Vector3 chairL = g0 + new Vector3(-1.4f, 0f, -0.6f);
+            Vector3 chairL = g0 + new Vector3(-1.5f, 0f, 3.2f);
             chairL.y = Floor(chairL);
             DirectorChair(batch, cols, W(chairL), R);
-            Vector3 tableL = g0 + new Vector3(2.4f, 0f, 1.2f);
+            Vector3 tableL = g0 + new Vector3(2.6f, 0f, 4.4f);
             tableL.y = Floor(tableL);
             Vector3 tW = W(tableL);
             var tw = batch.W(PropMats.Wood2, tW);
@@ -529,19 +559,23 @@ namespace Sealebrities
             PropCol.Box(cols, tW + Vector3.up * 0.38f, new Vector3(0.9f, 0.76f, 0.6f), R, "Table");
             for (int i = 0; i < 4; i++)
                 batch.W(PropMats.Flat(PropPal.HullBlue), tW).Cylinder(tW + R * new Vector3(-0.2f + (i % 2) * 0.05f, 0.75f + (i / 2) * 0.05f + (i % 2) * 0.05f, -0.05f), Quaternion.identity, 0.17f, 0.17f, 0.045f, 10, true, true);
+            // the old lantern is out (L.6: darkness – the lamp is needed)
             Vector3 lantern = tW + R * new Vector3(0.25f, 0.75f, 0.1f);
             batch.W(PropMats.DarkMetal, lantern).Cylinder(lantern, Quaternion.identity, 0.09f, 0.09f, 0.03f, 6, true, true);
-            batch.W(PropMats.LanternGlow, lantern).Cylinder(lantern + Vector3.up * 0.03f, Quaternion.identity, 0.07f, 0.07f, 0.18f, 6, true, true);
+            batch.W(PropMats.Flat(LowPoly.Hex("#5E5A48")), lantern).Cylinder(lantern + Vector3.up * 0.03f, Quaternion.identity, 0.07f, 0.07f, 0.18f, 6, true, true);
             batch.W(PropMats.DarkMetal, lantern).Cylinder(lantern + Vector3.up * 0.21f, Quaternion.identity, 0.1f, 0f, 0.08f, 6, true, false);
-            PropNearLight.Attach(PropUtil.AddPointLight(root, lantern + Vector3.up * 0.25f, new Color(1f, 0.78f, 0.5f), 8f, 1.7f, "GrottoLantern"), 40f);
 
-            PropInfo.Grotto = W(g0);
+            PropInfo.Grotto = W(g0 + new Vector3(0f, 0f, 3.6f));
             PropInfo.GrottoTable = tW + Vector3.up * 0.78f;
             PropInfo.GrottoCamera = W(camL);
             PropInfo.CaveMouth = W(new Vector3(0f, 0f, -1.5f));
-            Vector3 cham = W(new Vector3(0.9f, 0f, 6.5f));
+            Vector3 cham = W(g0 + new Vector3(-1.6f, 0f, -1.8f));
             cham.y = G(cham) + 0.03f;
             PropInfo.CaveChamber = cham;
+            Vector3 shard = W(g0 + new Vector3(-2.4f, 0f, 4.8f));
+            shard.y = G(shard) + 0.05f;
+            PropSpots.Register("m3_shard2", shard);
+            PropInfo.SetSpot("lens_grotto", shard);
 
             // keep plants out of the passage, the chamber and the clearing in front of the mouth
             for (float z = -2f; z <= WorldFeatures.CaveLength + 2f; z += 2f)

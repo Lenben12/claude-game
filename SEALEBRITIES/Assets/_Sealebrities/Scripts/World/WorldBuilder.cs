@@ -16,8 +16,9 @@ namespace Sealebrities
         public static WorldCoast Coast { get; private set; }
         public static WorldDayNight DayNight { get; private set; }
 
-        static readonly Vector3 MenuCameraPosition = new Vector3(300f, 55f, -230f);
-        static readonly Vector3 MenuCameraLookAt = new Vector3(60f, 10f, 20f);
+        // L.5: the 0.62 island (Testversion 3: (300, 55, −230) → (60, 10, 20))
+        static readonly Vector3 MenuCameraPosition = new Vector3(186f, 34f, -143f);
+        static readonly Vector3 MenuCameraLookAt = new Vector3(37f, 6f, 12f);
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics() { Ground = null; Ocean = null; Coast = null; DayNight = null; }

@@ -1,0 +1,722 @@
+[
+  {
+    "question": "1/40 – Testversion 5 bekommt viele neue Dinge. Was ist euch am wichtigsten, falls die Zeit knapp wird?",
+    "header": "Prio TV5",
+    "options": [
+      {
+        "label": "Bugs und Spielgefühl zuerst (Empfohlen)",
+        "description": "Kollisionen, Leiter, Kamera, Boot und Nebenaufgaben. Erst muss sich alles gut anfühlen."
+      },
+      {
+        "label": "Neue Inhalte zuerst",
+        "description": "Waffen, Hunger und Durst, Einsiedler-Lager, Rucksack und Vulkaninsel."
+      },
+      {
+        "label": "Grafik zuerst",
+        "description": "Schönere Figuren und Hände, Wolken, Hütte innen und eine neu gestaltete Karte."
+      }
+    ]
+  },
+  {
+    "question": "2/40 – Hunger und Durst werden echte Bedürfnisse. Was passiert, wenn einer davon leer ist?",
+    "header": "Hunger",
+    "options": [
+      {
+        "label": "Langsamer + weniger Luft (Empfohlen)",
+        "description": "Du schwimmst langsamer und die Flasche reicht kürzer. Essen behebt es sofort. Keine Ohnmacht."
+      },
+      {
+        "label": "Ohnmacht wie bei leerer Luft",
+        "description": "Nach einer Warnzeit kippst du um und wachst in der Hütte auf, mit Gebühr."
+      },
+      {
+        "label": "Nur Warnung und Bildeffekt",
+        "description": "Das Bild wird blasser und der Magen knurrt. Sonst keine Folgen."
+      }
+    ]
+  },
+  {
+    "question": "3/40 – Wie oft muss man an einem Spieltag (40 Minuten) essen und trinken?",
+    "header": "Tempo",
+    "options": [
+      {
+        "label": "2× essen, 3× trinken (Empfohlen)",
+        "description": "Etwa Frühstück, Abendessen und zwischendurch etwas trinken. Spürbar, aber nicht nervig."
+      },
+      {
+        "label": "1× essen, 1× trinken",
+        "description": "Sehr entspannt. Hunger ist eher eine Nebensache."
+      },
+      {
+        "label": "Alle 10 Minuten etwas",
+        "description": "Echtes Überleben. Jeder Tauchgang wird ums Essen herum geplant."
+      }
+    ]
+  },
+  {
+    "question": "4/40 – Meerwasser wird zu Hause gefiltert. Wie soll das funktionieren?",
+    "header": "Trinkwasser",
+    "options": [
+      {
+        "label": "Filter an der Hütte, dauert (Empfohlen)",
+        "description": "Meerwasser einfüllen, nach ca. 1 Spielstunde sind 3 Flaschen fertig. Bessere Filter im Shop."
+      },
+      {
+        "label": "Sofort per Knopfdruck",
+        "description": "Am Filter E drücken, die Flasche ist sofort voll. Einfach, aber ohne Planung."
+      },
+      {
+        "label": "Filter + Wasser per Heli",
+        "description": "Filter an der Hütte, dazu teure Wasserflaschen im Chopper Shop als Abkürzung."
+      }
+    ]
+  },
+  {
+    "question": "5/40 – Gelten Hunger und Durst auch auf der Stufe „Entspannt“?",
+    "header": "Entspannt",
+    "options": [
+      {
+        "label": "Dort nur Bonus, keine Strafe (Empfohlen)",
+        "description": "Auf Entspannt bringt Essen nur Vorteile wie bisher. Auf Normal und Schwer zählt es wirklich."
+      },
+      {
+        "label": "Überall gleich",
+        "description": "Alle Stufen haben echten Hunger und Durst."
+      },
+      {
+        "label": "Auf Entspannt halb so schnell",
+        "description": "Es zählt überall, sinkt auf Entspannt aber nur halb so schnell."
+      }
+    ]
+  },
+  {
+    "question": "6/40 – Was passiert, wenn du einen Hai oder ein Monster mit dem Speer triffst?",
+    "header": "Speer",
+    "options": [
+      {
+        "label": "Tier erschrickt und flieht (Empfohlen)",
+        "description": "Es schwimmt weg und lässt dich eine Weile in Ruhe. Nicht tödlich, passt zum Comedy-Ton."
+      },
+      {
+        "label": "Tier ist kurz betäubt",
+        "description": "Es treibt ein paar Sekunden reglos. Guter Moment zum Filmen."
+      },
+      {
+        "label": "Tier kann sterben",
+        "description": "Mehr Spannung, aber härter im Ton. Die Zuschauer reagieren gemischt."
+      }
+    ]
+  },
+  {
+    "question": "7/40 – Wie benutzt man den Speer unter Wasser?",
+    "header": "Steuerung",
+    "options": [
+      {
+        "label": "Linksklick = zustoßen (Empfohlen)",
+        "description": "Der Speer liegt in der Hand wie Kamera oder Lampe. Kurz und direkt."
+      },
+      {
+        "label": "Harpune mit Schuss",
+        "description": "Zielen und abschießen, danach die Spitze wieder einsammeln."
+      },
+      {
+        "label": "Erst Speer, Harpune später",
+        "description": "Am Anfang ein Stoß-Speer, eine Harpune kann man später im Shop kaufen."
+      }
+    ]
+  },
+  {
+    "question": "8/40 – Wie reagieren die Zuschauer im Livestream, wenn du den Speer benutzt?",
+    "header": "Zuschauer",
+    "options": [
+      {
+        "label": "Abwehr Hype, grundlos Hater (Empfohlen)",
+        "description": "Einen angreifenden Hai abwehren bringt Jubel. Friedliche Tiere piksen bringt Hater."
+      },
+      {
+        "label": "Immer Hype",
+        "description": "Jeder Speer-Einsatz bringt Zuschauer und Spenden."
+      },
+      {
+        "label": "Kaum Reaktion",
+        "description": "Der Chat sagt kurz etwas, Zuschauer und Geld ändern sich nicht."
+      }
+    ]
+  },
+  {
+    "question": "9/40 – Speere werden mit der Zeit stumpf und am Schleifgerät mit Steinen wieder scharf. Wie soll das Schärfen ablaufen?",
+    "header": "Schleifen",
+    "options": [
+      {
+        "label": "Kurzes Takt-Minispiel (Empfohlen)",
+        "description": "Im richtigen Moment drücken, ca. 10 Sekunden. Gut gemacht = schärfer."
+      },
+      {
+        "label": "Automatisch nach Zeit",
+        "description": "Speer und Stein einlegen, nach einer Spielstunde ist er scharf."
+      },
+      {
+        "label": "Ein Knopfdruck pro Stein",
+        "description": "Jeder Stein macht den Speer sofort ein Stück schärfer."
+      }
+    ]
+  },
+  {
+    "question": "10/40 – Das versteckte Lager im Dschungel kennt man am Anfang nicht. Wie entdeckt man es?",
+    "header": "Lager",
+    "options": [
+      {
+        "label": "Spuren folgen (Empfohlen)",
+        "description": "Rauch am Abend, Fußspuren, ein verlorener Korb. Wer aufmerksam ist, findet den Weg."
+      },
+      {
+        "label": "Durch einen Story-Auftrag",
+        "description": "Gus oder Horst schicken dich nach ein paar Tagen gezielt dorthin."
+      },
+      {
+        "label": "Nur durch Zufall",
+        "description": "Kein Hinweis. Wer die ganze Insel absucht, stolpert irgendwann hinein."
+      }
+    ]
+  },
+  {
+    "question": "11/40 – Die Einsiedler sind mal friedlich, mal aggressiv. Wovon hängt ihre Stimmung ab?",
+    "header": "Stimmung",
+    "options": [
+      {
+        "label": "Geschenke und Verhalten (Empfohlen)",
+        "description": "Fisch, Kokosnüsse oder Fundstücke machen sie freundlich. Lärm oder Klauen macht sie wütend."
+      },
+      {
+        "label": "Von der Tageszeit",
+        "description": "Morgens friedlich, nachts gereizt. Man plant den Besuch."
+      },
+      {
+        "label": "Zufällig jeden Tag",
+        "description": "Jeden Morgen neu ausgewürfelt. Überraschend, aber kaum beeinflussbar."
+      }
+    ]
+  },
+  {
+    "question": "12/40 – Die Einsiedler greifen an und du verlierst den Stock-Kampf. Was passiert dann?",
+    "header": "Angriff",
+    "options": [
+      {
+        "label": "Du wachst am Strand auf (Empfohlen)",
+        "description": "Slapstick: kurz umgekippt, Vögel kreisen über dem Kopf, dann am Strand. Kein Verlust."
+      },
+      {
+        "label": "Sie nehmen dir etwas weg",
+        "description": "Ein Gegenstand aus dem Rucksack ist weg. Mit Geschenken bekommst du ihn zurück."
+      },
+      {
+        "label": "Du wirst nur weggeschubst",
+        "description": "Sie schubsen dich aus dem Lager. Du kannst es sofort wieder versuchen."
+      }
+    ]
+  },
+  {
+    "question": "13/40 – Mit den Einsiedlern redest du per Zeichensprache. Wie soll das bedient werden?",
+    "header": "Zeichen",
+    "options": [
+      {
+        "label": "Gesten-Rad mit 6 Zeichen (Empfohlen)",
+        "description": "Taste halten, Geste wählen (Hallo, Essen, Tauschen, Danke …). Sie antworten mit Gesten."
+      },
+      {
+        "label": "Automatisch im Gespräch",
+        "description": "Wie ein normales Gespräch, nur mit Bildsymbolen statt Text."
+      },
+      {
+        "label": "Pantomime-Rätsel",
+        "description": "Sie machen eine Geste vor, du wählst die Bedeutung aus drei Bildern."
+      }
+    ]
+  },
+  {
+    "question": "14/40 – Was bekommt man im Lager außer der Schleif-Technik?",
+    "header": "Tausch",
+    "options": [
+      {
+        "label": "Tausch + Story-Hinweise (Empfohlen)",
+        "description": "Fundstücke gegen seltene Dinge tauschen, dazu Hinweise auf Geheimnisse der Insel."
+      },
+      {
+        "label": "Nur Story-Hinweise",
+        "description": "Das Lager erzählt eine Geschichte, Handel gibt es nicht."
+      },
+      {
+        "label": "Eigene Nebenaufgaben",
+        "description": "Die Einsiedler vergeben Aufträge, so wie bisher die Dorfbewohner."
+      }
+    ]
+  },
+  {
+    "question": "15/40 – Die Dorf-Häuser kommen weg. Was passiert mit Ada, Juno, Lio, Mira und ihren Nebenaufgaben?",
+    "header": "Dorf",
+    "options": [
+      {
+        "label": "Sie wohnen woanders (Empfohlen)",
+        "description": "Kiosk am Strand, Hütte am Steg, Zelt am Leuchtturm. Ihre Aufgaben bleiben erhalten."
+      },
+      {
+        "label": "Kommen per Boot zu Besuch",
+        "description": "Sie leben auf einer Nachbarinsel und legen ab und zu am Steg an."
+      },
+      {
+        "label": "Fallen ganz weg",
+        "description": "Es bleiben Horst, Wanda, Toni, Dr. Fin, die Rivalen und die Einsiedler. Weniger Aufgaben."
+      }
+    ]
+  },
+  {
+    "question": "16/40 – Wie groß ist der Rucksack am Anfang?",
+    "header": "Rucksack",
+    "options": [
+      {
+        "label": "12 Plätze, größer im Shop (Empfohlen)",
+        "description": "Am Anfang wenig Platz, größere Rucksäcke kann man kaufen. Macht Funde spannender."
+      },
+      {
+        "label": "Immer 20 Plätze",
+        "description": "Immer gleich groß, kein Kauf nötig."
+      },
+      {
+        "label": "Unbegrenzt",
+        "description": "Alles passt rein. Kein Sortieren, aber auch kein Ziel."
+      }
+    ]
+  },
+  {
+    "question": "17/40 – Die Leiste wird ein großer Balken statt 3 + 3. Wie viele Plätze soll er haben?",
+    "header": "Leiste",
+    "options": [
+      {
+        "label": "8 Plätze, Tasten 1–8 (Empfohlen)",
+        "description": "Genug für Kamera, Lampe, Angel, Speer, Essen und mehr. Das Mausrad blättert durch."
+      },
+      {
+        "label": "6 Plätze, Tasten 1–6",
+        "description": "Übersichtlicher, dafür öfter in den Rucksack."
+      },
+      {
+        "label": "10 Plätze, Tasten 1–0",
+        "description": "Alles griffbereit, aber der Balken wird breit."
+      }
+    ]
+  },
+  {
+    "question": "18/40 – Die Zweithand (z. B. Lampe) legst du im Rucksack fest. Soll man sie im Spiel auch schnell wechseln können?",
+    "header": "Zweithand",
+    "options": [
+      {
+        "label": "Nur im Rucksack (Empfohlen)",
+        "description": "Meist liegt dort die Lampe. Im Spiel bleibt die Bedienung einfach."
+      },
+      {
+        "label": "Umschalt + Zahl",
+        "description": "Zahl = Ersthand, Umschalt + Zahl legt den Gegenstand in die Zweithand."
+      },
+      {
+        "label": "Keine Zweithand mehr",
+        "description": "Nur ein Gegenstand in der Hand. Die Lampe sitzt fest am Kopf."
+      }
+    ]
+  },
+  {
+    "question": "19/40 – Wie viele Kartenstücke sollen auf der Insel versteckt sein?",
+    "header": "Kartenstücke",
+    "options": [
+      {
+        "label": "8 Stücke (Empfohlen)",
+        "description": "Genug für eine echte Suche, ohne dass es Fleißarbeit wird."
+      },
+      {
+        "label": "5 Stücke",
+        "description": "Kurze Schatzsuche für zwischendurch."
+      },
+      {
+        "label": "12 Stücke",
+        "description": "Lange Suche über die ganze Insel und die Mini-Inseln."
+      }
+    ]
+  },
+  {
+    "question": "20/40 – Einige Kartenstücke sind vergraben. Wie findet und gräbt man sie?",
+    "header": "Graben",
+    "options": [
+      {
+        "label": "Schaufel + Hinweise (Empfohlen)",
+        "description": "Eine Schaufel kaufen. Lockerer Sand, Kreuze und Rätsel zeigen, wo man graben muss."
+      },
+      {
+        "label": "Metalldetektor",
+        "description": "Ein Piepen wird lauter, je näher man kommt. Dann graben."
+      },
+      {
+        "label": "Mit den Händen",
+        "description": "Keine Ausrüstung nötig. An markierten Stellen E halten."
+      }
+    ]
+  },
+  {
+    "question": "21/40 – Was öffnet sich, wenn die Karte vollständig ist?",
+    "header": "Belohnung",
+    "options": [
+      {
+        "label": "Gus' versteckte Höhle (Empfohlen)",
+        "description": "Mit Gus' Filmmaterial von 1987: ein Story-Hinweis aufs TV-Studio plus ein Kosmetik-Teil."
+      },
+      {
+        "label": "Ein Schatz mit viel Geld",
+        "description": "Eine Kiste mit Geld und Fundstücken. Schnelle Belohnung, wenig Story."
+      },
+      {
+        "label": "Eine weitere geheime Insel",
+        "description": "Eine neue kleine Insel mit eigenen Tieren, ähnlich wie die Nebelinsel."
+      }
+    ]
+  },
+  {
+    "question": "22/40 – Ab wann kann man zur Vulkaninsel mit den Urzeit-Tieren fahren?",
+    "header": "Vulkan",
+    "options": [
+      {
+        "label": "Ab dem Blauwasser (15.000) (Empfohlen)",
+        "description": "Zwischen Wrack und Tiefseegraben, als Highlight in der Mitte des Spiels."
+      },
+      {
+        "label": "Erst nach dem Finale",
+        "description": "Bonus-Gebiet für die Zeit nach 1 Million Followern."
+      },
+      {
+        "label": "Nur über die Kartenstücke",
+        "description": "Die vollständige Karte zeigt den Weg durch den Vulkanrauch."
+      }
+    ]
+  },
+  {
+    "question": "23/40 – Welche Urzeit-Tiere leben an der Vulkaninsel?",
+    "header": "Urzeit",
+    "options": [
+      {
+        "label": "Echte lebende Fossilien (Empfohlen)",
+        "description": "Quastenflosser, Nautilus, Pfeilschwanzkrebs, Koboldhai. Echt, aber selten zu sehen."
+      },
+      {
+        "label": "Dazu ausgestorbene Riesen",
+        "description": "Zusätzlich Schatten von Urzeit-Riesen wie dem Megalodon. Mehr Grusel."
+      },
+      {
+        "label": "Witzige Fantasie-Urtiere",
+        "description": "Erfundene Mischwesen mit Gag-Faktor, passend zum Comedy-Ton."
+      }
+    ]
+  },
+  {
+    "question": "24/40 – Jede Insel soll individuell aussehen. Wie stark sollen sich die Mini-Inseln unterscheiden?",
+    "header": "Mini-Inseln",
+    "options": [
+      {
+        "label": "Jede ein eigenes Thema (Empfohlen)",
+        "description": "Z. B. Vogelfelsen, Schiffsfriedhof, Vulkan, Mangroven, schwarzer Basalt – je mit eigenen Tieren."
+      },
+      {
+        "label": "Gleicher Stil, andere Formen",
+        "description": "Alle tropisch, aber jede mit eigener Form und einem Wahrzeichen."
+      },
+      {
+        "label": "Nur die Vulkaninsel anders",
+        "description": "Die anderen Mini-Inseln bleiben wie jetzt."
+      }
+    ]
+  },
+  {
+    "question": "25/40 – Im Meer soll es ein paar Memes geben. Welche Art?",
+    "header": "Memes",
+    "options": [
+      {
+        "label": "Eigene Gags im Meme-Stil (Empfohlen)",
+        "description": "Z. B. Fisch mit Sonnenbrille, Gummienten-Schwarm, ein Krake, der dich nachmacht."
+      },
+      {
+        "label": "Echte Internet-Memes",
+        "description": "Bekannte Memes nachgebaut. Lustig, aber rechtlich riskant für Steam."
+      },
+      {
+        "label": "Nur ganz selten",
+        "description": "Ein paar versteckte Easter Eggs, sonst bleibt das Meer ernst."
+      }
+    ]
+  },
+  {
+    "question": "26/40 – Tiere fliehen bald, wenn man sich nähert. Wie kommt man trotzdem nah ran?",
+    "header": "Scheue Tiere",
+    "options": [
+      {
+        "label": "Langsam schwimmen = bleiben (Empfohlen)",
+        "description": "Wer ruhig und langsam schwimmt, darf näher. Hektik und Lampe ins Gesicht vertreiben sie."
+      },
+      {
+        "label": "Tiere gewöhnen sich an dich",
+        "description": "Je öfter du ein Tier besuchst, desto zutraulicher wird es (wie bei Gerald)."
+      },
+      {
+        "label": "Gar nicht, Zoom benutzen",
+        "description": "Scheue Tiere bleiben auf Abstand. Mit dem Zoom-Objektiv kommt man trotzdem ran."
+      }
+    ]
+  },
+  {
+    "question": "27/40 – Welche neue Aktivität unter Wasser soll als Nächstes kommen?",
+    "header": "Unter Wasser",
+    "options": [
+      {
+        "label": "Tiere retten (Netze, Müll) (Empfohlen)",
+        "description": "Tiere aus Netzen schneiden, Plastik einsammeln. Bringt Fans und rührende Clips."
+      },
+      {
+        "label": "Schatzsuche mit Detektor",
+        "description": "Am Meeresboden piept es. Ausgraben bringt Geld und Sammelstücke."
+      },
+      {
+        "label": "Tauch-Rennen",
+        "description": "Durch Ringe und Strömungen tauchen, auf Zeit oder im Koop gegeneinander."
+      }
+    ]
+  },
+  {
+    "question": "28/40 – Die Aufnahme startet bald nur noch per Linksklick. Soll das Spiel erinnern, wenn du vergessen hast zu filmen?",
+    "header": "Aufnahme",
+    "options": [
+      {
+        "label": "Kleiner Hinweis nach 5 s (Empfohlen)",
+        "description": "Ist ein Tier im Bild und die Kamera aus, blinkt kurz „REC?“ am Bildrand."
+      },
+      {
+        "label": "Kein Hinweis",
+        "description": "Wer vergisst zu filmen, hat Pech. Das gehört zum Vlogger-Leben."
+      },
+      {
+        "label": "Leiser Piep-Ton",
+        "description": "Ein kurzer Ton statt eines Hinweises im Bild."
+      }
+    ]
+  },
+  {
+    "question": "29/40 – Der Sealog-Rahmen beim Zielen erscheint erst, wenn du nah genug am Tier bist. Wie nah?",
+    "header": "Foto-Rahmen",
+    "options": [
+      {
+        "label": "Je nach Tiergröße (Empfohlen)",
+        "description": "Kleine Tiere ab ca. 2 m, große ab ca. 6 m. Fühlt sich bei jedem Tier fair an."
+      },
+      {
+        "label": "Immer 3 m",
+        "description": "Eine feste Regel, leicht zu merken."
+      },
+      {
+        "label": "Immer 5 m",
+        "description": "Großzügiger, besonders bei scheuen Tieren."
+      }
+    ]
+  },
+  {
+    "question": "30/40 – Vorne am Boot kommt eine Sitzbank dazu. Was kann ein Mitspieler dort machen?",
+    "header": "Beifahrer",
+    "options": [
+      {
+        "label": "Sitzen, Karte, filmen (Empfohlen)",
+        "description": "Mitfahren ohne Rutschen, Karte öffnen, Ziele markieren und die Fahrt filmen."
+      },
+      {
+        "label": "Nur sitzen",
+        "description": "Einfach ein sicherer Platz während der Fahrt."
+      },
+      {
+        "label": "Dazu vom Boot angeln",
+        "description": "Wie oben, plus Angeln während der Fahrt."
+      }
+    ]
+  },
+  {
+    "question": "31/40 – Wie sieht der Fahrer während der Fahrt die Karte und die Markierungen?",
+    "header": "Seekarte",
+    "options": [
+      {
+        "label": "Mini-Karte am Steuer + M (Empfohlen)",
+        "description": "Am Steuer zeigt eine kleine Karte Boot und Ziele. M öffnet die große Karte, Lenken geht weiter."
+      },
+      {
+        "label": "Nur Taste M",
+        "description": "Die große Karte erscheint im Bild, das Boot fährt weiter."
+      },
+      {
+        "label": "Nur Karte am Steuer",
+        "description": "Eine kleine Karte am Armaturenbrett, sonst nichts."
+      }
+    ]
+  },
+  {
+    "question": "32/40 – Figuren sollen „realistischer“ werden: weder klotzig noch zu kugelig. Welche Richtung?",
+    "header": "Figuren",
+    "options": [
+      {
+        "label": "Cartoon-Mensch wie Safari-TV (Empfohlen)",
+        "description": "Eigener Kopf, Hals, Schultern, normale Arme und Beine. Taucherbrille und Comic-Gesicht bleiben."
+      },
+      {
+        "label": "Bohne mit Hals und Schultern",
+        "description": "Die Bohnen-Form bleibt erkennbar, bekommt aber menschlichere Arme, Beine und Schultern."
+      },
+      {
+        "label": "Fast realistisch",
+        "description": "Echte Proportionen und feinere Gesichter. Passt weniger zum Low-Poly-Stil."
+      }
+    ]
+  },
+  {
+    "question": "33/40 – Welche neuen Optionen beim Anpassen sind euch am wichtigsten?",
+    "header": "Aussehen",
+    "options": [
+      {
+        "label": "Frisuren, Bärte, Körperbau (Empfohlen)",
+        "description": "Haare unter der Maske, Bärte, groß oder klein, schmal oder breit."
+      },
+      {
+        "label": "Mehr Hüte und Anzüge",
+        "description": "Noch mehr Kosmetik zum Freispielen, z. B. über Sponsoren und Nebenaufgaben."
+      },
+      {
+        "label": "Aufnäher und Sticker",
+        "description": "Eigene Logos auf Anzug und Boot, Sticker auf der Kamera."
+      }
+    ]
+  },
+  {
+    "question": "34/40 – Die Hütte wird schöner und lässt sich einrichten. Woher kommen die Möbel?",
+    "header": "Hütte",
+    "options": [
+      {
+        "label": "Shop + Funde aus dem Meer (Empfohlen)",
+        "description": "Möbel im Chopper Shop kaufen, Deko aus Wracks und Strandgut hochholen."
+      },
+      {
+        "label": "Nur aus dem Shop",
+        "description": "Ein Möbel-Katalog im Handy, alles kommt per Heli."
+      },
+      {
+        "label": "Nur Funde und Trophäen",
+        "description": "Die Hütte zeigt, was du erlebt hast: nur gefundene Dinge und Trophäen."
+      }
+    ]
+  },
+  {
+    "question": "35/40 – Das FinTube-Studio bekommt mehr Funktionen. Was soll zuerst kommen?",
+    "header": "FinTube",
+    "options": [
+      {
+        "label": "Kommentare lesen und liken (Empfohlen)",
+        "description": "Lustige Kommentare zu jedem Video, die besten anpinnen. Bringt kleine Follower-Boni."
+      },
+      {
+        "label": "Musik und Sticker im Video",
+        "description": "Hintergrundmusik und lustige Sticker wählen, je nach Stil mehr Aufrufe."
+      },
+      {
+        "label": "Video-Statistik",
+        "description": "Kurve mit Aufrufen, welche Tiere am besten liefen, Tipps fürs nächste Video."
+      }
+    ]
+  },
+  {
+    "question": "36/40 – Mit NPCs soll man mehr machen können. Was soll zuerst kommen?",
+    "header": "NPCs",
+    "options": [
+      {
+        "label": "Geschenke + Freundschaft (Empfohlen)",
+        "description": "Lieblingsgeschenke geben, Freundschaft steigt: neue Gespräche, Rabatte und Aufgaben."
+      },
+      {
+        "label": "Mit auf Tauchgang nehmen",
+        "description": "Horst oder Juno tauchen mit, zeigen Tiere und sorgen für lustige Clips."
+      },
+      {
+        "label": "Handeln und feilschen",
+        "description": "Bei Wanda, am Kiosk und bei den Einsiedlern Preise verhandeln."
+      }
+    ]
+  },
+  {
+    "question": "37/40 – Die Story soll mehr Sinn ergeben. Was hilft am meisten?",
+    "header": "Story",
+    "options": [
+      {
+        "label": "Ein klares Ziel ab Tag 1 (Empfohlen)",
+        "description": "Gus' verschwundene Tiefsee-Doku von 1987 finden. Jeder Auftrag führt ein Stück dorthin."
+      },
+      {
+        "label": "Weniger Figuren, mehr Tiefe",
+        "description": "Ein paar NPCs fallen weg, die übrigen bekommen echte Geschichten."
+      },
+      {
+        "label": "Story-Tagebuch im Handy",
+        "description": "Eine App fasst zusammen, was bisher passiert ist und was als Nächstes kommt."
+      }
+    ]
+  },
+  {
+    "question": "38/40 – Späte Nebenaufgaben zahlen jetzt mit dem Kanal mit (z. B. 14.370 $ bei 1 Mio. Followern). Passt das?",
+    "header": "Bezahlung",
+    "options": [
+      {
+        "label": "Ja, mitwachsen lassen (Empfohlen)",
+        "description": "Auch spät lohnt sich jede Aufgabe. Frühe Aufgaben zahlen weiter feste Beträge."
+      },
+      {
+        "label": "Lieber feste Beträge",
+        "description": "Planbar und einfach, spät aber kaum noch spürbar."
+      },
+      {
+        "label": "Statt Geld: Kosmetik",
+        "description": "Späte Aufgaben geben seltene Hüte, Anzüge oder Bootsflaggen."
+      }
+    ]
+  },
+  {
+    "question": "39/40 – Geld aus Mutproben im Livestream ist pro Stream auf etwa 1,5 Videos begrenzt. Okay so?",
+    "header": "Mutproben",
+    "options": [
+      {
+        "label": "Ja, so lassen (Empfohlen)",
+        "description": "Mutproben lohnen sich, aber Videos bleiben die wichtigste Einnahme."
+      },
+      {
+        "label": "Höher, etwa 3 Videos",
+        "description": "Risiko soll sich richtig lohnen. Streams werden die Haupteinnahme."
+      },
+      {
+        "label": "Keine Grenze",
+        "description": "Wer alles riskiert, wird richtig reich. Das kann das Spiel stark abkürzen."
+      }
+    ]
+  },
+  {
+    "question": "40/40 – Koop: Ein bewusstloser Taucher treibt langsam nach oben. Was, wenn ihn keiner abschleppt und er allein oben ankommt?",
+    "header": "Ohnmacht",
+    "options": [
+      {
+        "label": "Wacht auf, aber Clips weg (Empfohlen)",
+        "description": "So lohnt sich das Abschleppen: nur wer gerettet wird, behält seine Clips."
+      },
+      {
+        "label": "Nur gerettet wacht man auf",
+        "description": "Ohne Hilfe endet es wie eine normale Ohnmacht, mit Rettungsgebühr."
+      },
+      {
+        "label": "Wacht auf, behält alles",
+        "description": "So wie jetzt: oben mit 30 % Luft aufwachen und die Clips behalten."
+      }
+    ]
+  }
+]

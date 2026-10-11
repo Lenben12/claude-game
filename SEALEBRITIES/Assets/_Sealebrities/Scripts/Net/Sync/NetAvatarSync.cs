@@ -15,17 +15,29 @@ namespace Sealebrities
         public ushort flags;
         public HoldItem right, left;
         public float air01, depth;
+        // ---- round 2 (L.13 motion set, K.4 selfie, D.1 fishing)
+        public MotionState motion;
+        public float phase;      // 0..1 of the current motion cycle
+        public byte expression;  // SelfieExpression
+        public byte rod;         // FishingRodTool.RodState (FFishing)
+        public float tension;    // reel tension 0..1 (FFishing)
+        public Vector3 bobber;   // world position of the float (FBobber)
     }
 
     /// Co-op avatars: streams the local player's state (15 Hz, 20 Hz when fast; unreliable; the host relays it to the
     /// other clients) and keeps one NetAvatar per remote player (spawned on Net.PlayerJoined or the first state,
     /// removed on Net.PlayerLeft / session end). Also routes predator bumps from the host's fauna to the bumped client.
+    /// Round 2: the state also carries the L.13 motion state + cycle phase, the K.4 selfie expression (and the body
+    /// faces the selfie camera), carry / unconscious / tow / lying flags and – while the rod is out – the fishing rod
+    /// state, reel tension and float position (D.1 "fishing visuals of others"). 33–42 bytes per state.
     [DefaultExecutionOrder(200)]   // LateUpdate after the player camera moved (billboards, light cones)
     public sealed class NetAvatarSync : MonoBehaviour
     {
         // state flags
         public const ushort FUnderwater = 1, FInWater = 2, FSeated = 4, FFainting = 8, FPhone = 16, FLight = 32,
-                            FRecording = 64, FAiming = 128, FOnBoat = 256, FPaused = 512;
+                            FRecording = 64, FAiming = 128, FOnBoat = 256, FPaused = 512,
+                            // round 2
+                            FSelfie = 1024, FUnconscious = 2048, FCarry = 4096, FTowing = 8192, FFishing = 16384, FBobber = 32768;
 
         public const float SendInterval = 1f / 15f;
         public const float FastSendInterval = 1f / 20f;
@@ -68,8 +80,12 @@ namespace Sealebrities
             Net.PlayerJoined += OnPlayerJoined;
             Net.PlayerLeft += OnPlayerLeft;
             Net.SessionEnded += OnSessionEnded;
+            NetSession.PlayersChanged += OnPlayersChanged;
             FaunaContext.RemoteBump = SendBump;
         }
+
+        /// A name or look changed in the player list: refresh the avatars on the next frame (not once a second).
+        void OnPlayersChanged() => reconcileTimer = 0f;
 
         void OnDisable()
         {
@@ -82,6 +98,7 @@ namespace Sealebrities
             Net.PlayerJoined -= OnPlayerJoined;
             Net.PlayerLeft -= OnPlayerLeft;
             Net.SessionEnded -= OnSessionEnded;
+            NetSession.PlayersChanged -= OnPlayersChanged;
             if (FaunaContext.RemoteBump == (Action<int, float>)SendBump) FaunaContext.RemoteBump = null;
         }
 
@@ -249,6 +266,35 @@ namespace Sealebrities
                 if (hc.IsAiming) flags |= FAiming;
             }
 
+            // ---- round 2: motion set, selfie, carry, rescue, fishing
+            NetLocalAvatar.Resolve(p, out MotionState motion, out float phase);
+            if (SelfieState.Active)
+            {
+                flags |= FSelfie;
+                // K.4: the selfie camera looks back at the diver – everybody else sees the diver face that camera
+                if (NetLocalAvatar.SelfieFacing(p, out float sy, out float sp))
+                {
+                    yaw = sy;
+                    pitch = sp;
+                    eyeY = PlayerController.EyeHeight;
+                }
+            }
+            if (NetRescue.LocalUnconscious) flags |= FUnconscious;
+            if (NetRescue.LocalTowTarget >= 0) flags |= FTowing;
+            bool carrying = Carry.IsCarrying;
+            if (carrying) flags |= FCarry;
+            bool fishing = NetLocalAvatar.Fishing(out byte rod, out Vector3 bobber, out bool bobberValid, out float tension);
+            if (fishing) flags |= FFishing;
+            if (fishing && bobberValid) flags |= FBobber;
+            HoldItem right = Hands.Active(Hand.Right), left = Hands.Active(Hand.Left);
+            if (carrying)
+            {
+                // K.3 / L.7: a carried item fills both hands (the camera hangs on its chest strap)
+                right = HoldItem.QuestItem;
+                left = HoldItem.None;
+            }
+            else if (SelfieState.Active && right == HoldItem.None) right = HoldItem.Camera;
+
             // on the boat: send boat-local coordinates, so the avatar stays glued to the deck on every machine
             var boat = Refs.Boat;
             if (NetWorldSync.Alive(boat) && boat.Root != null && (boat.PlayerAboard || boat.PlayerDriving))
@@ -268,10 +314,20 @@ namespace Sealebrities
             writer.SByte((sbyte)Mathf.Clamp(Mathf.RoundToInt(pitch / 90f * 127f), -127, 127));
             writer.Vec3Short(p.Velocity, 0.01f);
             writer.Byte((byte)Mathf.Clamp(Mathf.RoundToInt(eyeY * 100f), 0, 255));
-            writer.Byte((byte)Hands.Active(Hand.Right));
-            writer.Byte((byte)Hands.Active(Hand.Left));
+            writer.Byte((byte)right);
+            writer.Byte((byte)left);
             writer.Byte(SyncQuant.To01(p.Air01));
             writer.Byte((byte)Mathf.Clamp(Mathf.RoundToInt(p.Depth), 0, 255));
+            // round 2 tail: motion state, cycle phase, selfie expression [, rod state, tension [, float position]]
+            writer.Byte((byte)motion);
+            writer.Byte(SyncQuant.To01(phase));
+            writer.Byte((byte)Mathf.Clamp(SelfieState.Expression, 0, 255));
+            if (fishing)
+            {
+                writer.Byte(rod);
+                writer.Byte(SyncQuant.To01(tension));
+                if (bobberValid) SyncQuant.WritePos(writer, bobber);
+            }
             NetBus.Send(NetSyncMsg.AvatarState, writer.ToArray(), NetBus.Everyone, false);
         }
 
@@ -300,13 +356,37 @@ namespace Sealebrities
             s.air01 = SyncQuant.From01(r.Byte());
             s.depth = r.Byte();
             if (r.Failed) return;
+            s.motion = MotionState.Idle;
+            s.phase = 0f;
+            s.expression = 0;
+            s.rod = 0;
+            s.tension = 0f;
+            s.bobber = Vector3.zero;
+            if (r.Remaining >= 3)
+            {
+                int m = r.Byte();
+                s.motion = m <= (int)MotionState.Crouch ? (MotionState)m : MotionState.Idle;
+                s.phase = SyncQuant.From01(r.Byte());
+                s.expression = r.Byte();
+                if ((s.flags & FFishing) != 0)
+                {
+                    s.rod = r.Byte();
+                    s.tension = SyncQuant.From01(r.Byte());
+                    if ((s.flags & FBobber) != 0) s.bobber = SyncQuant.ReadPos(ref r);
+                }
+                if (r.Failed)
+                {
+                    // a short tail: keep the base pose
+                    s.flags = (ushort)(s.flags & ~(FFishing | FBobber));
+                }
+            }
 
             SyncTimelines.Get(origin).Observe(ts);
             var a = Ensure(origin);
             if (a != null) a.Push(ts, s);
         }
 
-        static HoldItem ToItem(byte b) => b <= (byte)HoldItem.FishingRod ? (HoldItem)b : HoldItem.None;
+        static HoldItem ToItem(byte b) => b <= (byte)HoldItem.QuestItem ? (HoldItem)b : HoldItem.None;
 
         // ------------------------------------------------------------------ predator bumps (host fauna → client)
         void SendBump(int playerId, float airSeconds)

@@ -299,6 +299,17 @@ namespace Sealebrities
         /// Sign board with a pictogram (signposts, warning signs).
         public static Material SignIcon(PropIcon icon) => Get("icon_" + (int)icon, () => Textured(PropTex.Icon(icon)));
 
+        /// Painted text label ("|" = line break) on a board color (PropTex.Label).
+        public static Material Label(string text, Color board, Color ink) =>
+            Get("label:" + text + ColorUtility.ToHtmlStringRGB(board) + ColorUtility.ToHtmlStringRGB(ink), () => Textured(PropTex.Label(text, board, ink)));
+
+        /// Village cloth with a geometric wave pattern (L.8 palette).
+        public static Material WaveCloth(int variant) => Get("wave_" + variant, () => TwoSided(Textured(PropTex.WavePattern(variant)), "Prop_WaveCloth"));
+
+        /// Palm leaf thatch of the village roofs (#C9B48A) and its darker underside.
+        public static Material Thatch => Flat(LowPoly.Hex("#C9B48A"));
+        public static Material ThatchDark => Flat(LowPoly.Hex("#A8926A"));
+
         // animated emissive instances (one per light group)
         public static Material HutBulb => Get("bulb_hut", () => EmissiveInstance(new Color(1f, 0.92f, 0.75f), Color.black));
         public static Material DockBulb => Get("bulb_dock", () => EmissiveInstance(new Color(1f, 0.9f, 0.7f), Color.black));

@@ -79,7 +79,7 @@ namespace Sealebrities
                 for (int i = 0; i < rig.spine.Length; i++)
                     if (rig.spine[i] != null && rig.spine[i] != root) sp.Add(rig.spine[i]);
             spine = sp.ToArray();
-            spinePitch = plan == BodyPlan.SeaLion || plan == BodyPlan.Ray || plan == BodyPlan.Seahorse;
+            spinePitch = plan == BodyPlan.SeaLion || plan == BodyPlan.Ray || plan == BodyPlan.Seahorse || plan == BodyPlan.Dolphin || plan == BodyPlan.Whale;
             Vector3 spineRigAxis = spinePitch ? Vector3.right : Vector3.up;
             spineRest = new Quaternion[spine.Length];
             spineAxis = new Vector3[spine.Length];
@@ -234,7 +234,18 @@ namespace Sealebrities
             // ---- lure light
             lure = rig.lureLight;
             if (lure != null) lureBase = lure.intensity > 0f ? lure.intensity : 1.5f;
+
+            // ---- round 2: legs, wings, claws, jaws (crabs, birds, land animals, goblin shark, gulper)
+            var ex = rig.GetComponent<CreatureRigExtra>();
+            if (ex != null)
+            {
+                gaitAnim = new FaunaGaitAnimator();
+                gaitAnim.Setup(ex, s, root);
+                if (!gaitAnim.Valid) gaitAnim = null;
+            }
         }
+
+        FaunaGaitAnimator gaitAnim;
 
         static Transform NextChainBone(Transform t)
         {
@@ -317,6 +328,26 @@ namespace Sealebrities
                 case BodyPlan.Turtle:
                     freq = 0.45f; amp = 3f; k = 1.5f; headW = 1f;
                     break;
+                case BodyPlan.Dolphin:
+                    freq = Mathf.Lerp(0.6f, 2.2f, Mathf.Clamp01(speed01 * 0.5f)) * sizeF * 0.9f;
+                    amp = Mathf.Lerp(5f, 14f, move01) + activity * 4f;
+                    k = 2.6f; headW = 0.06f;
+                    break;
+                case BodyPlan.Whale:
+                    freq = Mathf.Lerp(0.18f, 0.6f, Mathf.Clamp01(speed01 * 0.5f));
+                    amp = Mathf.Lerp(4f, 9f, move01) + activity * 2f;
+                    k = 2.4f; headW = 0.04f;
+                    break;
+                case BodyPlan.Lizard:
+                    // walking S-curve of the body and tail
+                    freq = Mathf.Lerp(0.25f, 1.4f, Mathf.Clamp01(speed01 * 0.7f));
+                    amp = Mathf.Lerp(3f, 15f, move01);
+                    k = 2.2f; headW = 0.25f;
+                    break;
+                case BodyPlan.Crab: case BodyPlan.Starfish: case BodyPlan.Bird: case BodyPlan.Bat:
+                case BodyPlan.Quadruped: case BodyPlan.Primate:
+                    freq = 0.5f; amp = 0f; k = 1f; headW = 0f;
+                    break;
                 default:
                     freq = 0.6f; amp = 3f; k = 2f; headW = 0.3f;
                     break;
@@ -362,6 +393,7 @@ namespace Sealebrities
                 float fAmp = 8f + 22f * hover01 + 10f * activity;
                 if (plan == BodyPlan.Cuttlefish || plan == BodyPlan.Squid) { fFreq = (3.5f + 2f * activity) * Mathf.Clamp(sizeF, 0.3f, 1.5f); fAmp = 22f; }
                 else if (plan == BodyPlan.Shark) { fFreq *= 0.4f; fAmp *= 0.25f; }
+                else if (plan == BodyPlan.Dolphin || plan == BodyPlan.Whale) { fFreq *= 0.3f; fAmp *= 0.35f; }
                 else if (plan == BodyPlan.Seahorse) { fFreq = 7f; fAmp = 25f; }
                 finPhase += dt * fFreq * TwoPi;
                 if (finPhase > 1000f) finPhase -= TwoPi * 150f;
@@ -448,6 +480,7 @@ namespace Sealebrities
                     case BodyPlan.Squid: tFreq = 0.7f; tAmp = 6f; break;
                     case BodyPlan.Cuttlefish: tFreq = 0.6f; tAmp = 6f; break;
                     case BodyPlan.VampireSquid: tFreq = 0.4f; tAmp = 8f; break;
+                    case BodyPlan.Starfish: tFreq = 0.07f + 0.25f * Mathf.Clamp01(speed01); tAmp = 4f + 6f * Mathf.Clamp01(speed01); break;
                     default: tFreq = 0.6f; tAmp = 8f; break;
                 }
                 swayPhase += dt * tFreq * TwoPi;
@@ -492,6 +525,9 @@ namespace Sealebrities
                 if (Mathf.PerlinNoise(time * 0.37f, seed + 3.1f) > 0.74f) flicker *= 0.15f;   // brief blackout
                 lure.intensity = lureBase * flicker * (1f + activity * 0.6f) * lureMul;
             }
+
+            // ---- limbs: the action channel rides on lureMul (1 = rest … 3 = full action), see FaunaGaitAnimator
+            if (gaitAnim != null) gaitAnim.Animate(dt, speed01, activity, Mathf.Clamp01((lureMul - 1f) * 0.5f), time);
         }
 
         public void SetLureEnabled(bool on)

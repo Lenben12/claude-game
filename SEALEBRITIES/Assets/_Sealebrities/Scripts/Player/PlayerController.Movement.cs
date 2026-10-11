@@ -67,6 +67,13 @@ namespace Sealebrities
         void UpdateMovement(bool input, float dt)
         {
             if (cc == null || !cc.enabled) return;
+            if (unconscious)
+            {
+                // F.1: floats up or follows the friend who tows it (PlayerController.Rescue.cs)
+                MoveUnconscious(dt);
+                transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+                return;
+            }
             switch (mode)
             {
                 case PlayerMoveMode.Land: MoveLand(input, dt); break;
@@ -83,8 +90,12 @@ namespace Sealebrities
             if (!cc.enabled) return;   // platform teleported us
 
             Vector2 mv = input ? GameInput.Move : Vector2.zero;
-            bool sprint = input && GameInput.Sprint && mv.y > 0.1f;
-            float speed = sprint ? SprintSpeed : WalkSpeed;
+            // D.1: A/D counter-steer the fish during the reel fight – they must not strafe the diver
+            if (FishingReel.LockStrafe) mv.x = 0f;
+            // L.6 crouch (Down held on land): 1.2 m capsule, ×0.45 speed, stands up only where the head has room
+            float crouchF = UpdateCrouch(input, mv, dt);
+            bool sprint = input && GameInput.Sprint && mv.y > 0.1f && !crouching;
+            float speed = (sprint ? SprintSpeed : WalkSpeed) * crouchF * (selfie ? SelfieMoveFactor : 1f);
             Vector3 p = transform.position;
             // wading through shallow water slows you down
             float wade = Mathf.Clamp01((Waves.HeightAt(p.x, p.z) - p.y) / 0.6f);
@@ -98,10 +109,14 @@ namespace Sealebrities
             else if (mv.sqrMagnitude > 0.01f) planar = Vector3.MoveTowards(planar, wish, 6f * dt);
 
             jumpedThisFrame = false;
+            // L.13: Space at the foot of a ladder (facing it) grabs it instead of jumping; W or Space held climbs, letting
+            // go stops (no auto-climb – GDD §19 „Am Steg klettert man selbst hoch“ was reported as a bug)
+            if (input && GameInput.JumpPressed && ladCandidate >= 0 && !ladCandidateTop && !selfie && TryClimbLadder(false)) return;
             if (grounded)
             {
                 if (vel.y < 0f) vel.y = -2f;
-                if (input && GameInput.JumpPressed && HeadRoom(0.35f) > 0.3f)
+                if (input && GameInput.JumpPressed && crouching && CanStandUp()) SetCrouch(false);
+                if (input && GameInput.JumpPressed && !crouching && HeadRoom(0.35f) > 0.3f)
                 {
                     vel.y = Mathf.Sqrt(2f * Gravity * JumpHeight);
                     jumpedThisFrame = true;
@@ -112,22 +127,25 @@ namespace Sealebrities
             vel.z = planar.z;
 
             float preVy = vel.y;
-            Vector3 move = vel * dt + carry;
-            if (move.y > 0f)
+            // the head-room checks see only our OWN upward motion: a deck's carry (also its rise on a swell) moves the
+            // wheelhouse roof along with us – clamping it pushed passengers off a moving boat at low frame rates
+            Vector3 own = vel * dt;
+            if (own.y > 0f)
             {
                 // never move the head into a roof (thin / one-sided colliders are not always caught by the sweep)
-                float room = HeadRoom(move.y + 0.05f);
-                if (room < move.y)
+                float room = HeadRoom(own.y + 0.05f);
+                if (room < own.y)
                 {
-                    move.y = Mathf.Max(0f, room);
+                    own.y = Mathf.Max(0f, room);
                     if (vel.y > 0f) vel.y = 0f;
                 }
             }
+            Vector3 move = own + carry;
             CollisionFlags flags = cc.Move(move);
             if ((flags & CollisionFlags.Above) != 0 && vel.y > 0f) vel.y = 0f;
-            if (move.y > 0.0001f && HeadOverlaps())
+            if (own.y > 0.0001f && HeadOverlaps())
             {
-                cc.Move(Vector3.down * move.y);
+                cc.Move(Vector3.down * own.y);
                 if (vel.y > 0f) vel.y = 0f;
             }
 
@@ -145,6 +163,7 @@ namespace Sealebrities
             {
                 landDip = Mathf.Min(0.14f, -preVy * 0.012f);
                 if (preVy < -11f) trauma = Mathf.Max(trauma, 0.3f);
+                landFlash = 0.15f;   // L.13 Land motion state (avatar squash)
             }
 
             float hs = planar.magnitude;
@@ -155,7 +174,7 @@ namespace Sealebrities
         /// Free distance above the head (up to max).
         float HeadRoom(float max)
         {
-            Vector3 top = transform.position + Vector3.up * (Height - Radius);
+            Vector3 top = transform.position + Vector3.up * (CurHeight - Radius);
             float skin = cc != null ? cc.skinWidth : 0.05f;
             if (Physics.SphereCast(top, Radius * 0.9f, Vector3.up, out RaycastHit hit, max + skin, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
                 return Mathf.Max(0f, hit.distance - skin);
@@ -164,7 +183,7 @@ namespace Sealebrities
 
         bool HeadOverlaps()
         {
-            Vector3 top = transform.position + Vector3.up * (Height - Radius);
+            Vector3 top = transform.position + Vector3.up * (CurHeight - Radius);
             return Physics.CheckSphere(top, Radius * 0.82f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
         }
 
@@ -334,7 +353,7 @@ namespace Sealebrities
         {
             Vector2 mv = input ? GameInput.Move : Vector2.zero;
             bool sprint = input && GameInput.Sprint && mv.sqrMagnitude > 0.01f;
-            float speed = SurfaceSwimSpeed * Mathf.Max(0.5f, gear.swimSpeed) * (sprint ? 1.35f : 1f);
+            float speed = SurfaceSwimSpeed * Mathf.Max(0.5f, gear.swimSpeed) * (sprint ? 1.35f : 1f) * SwimFactor * (selfie ? SelfieMoveFactor : 1f);
             Vector3 fwd = YawForward();
             Vector3 right = new Vector3(fwd.z, 0f, -fwd.x);
             Vector3 wish = (fwd * mv.y + right * mv.x) * speed;
@@ -352,9 +371,12 @@ namespace Sealebrities
             vel.y = Mathf.Lerp(vel.y, wantVy, 1f - Mathf.Exp(-5f * dt));
             vel.x = planar.x;
             vel.z = planar.z;
-            if (IsFainting) vel.y = Mathf.Min(vel.y, -0.3f);
+            if (fainting) vel.y = Mathf.Min(vel.y, -0.3f);
 
-            cc.Move(vel * dt);
+            // K.3 currents push the swimmer along (horizontal part at the surface)
+            Vector3 cur = CurrentPush();
+            cur.y = 0f;
+            cc.Move((vel + cur) * dt);
             ProbeGround();
             platform = null;
             platformRb = null;
@@ -389,12 +411,12 @@ namespace Sealebrities
             float vert = input ? (GameInput.Ascend ? 1f : 0f) - (GameInput.Descend ? 1f : 0f) : 0f;
             bool moving = mv.sqrMagnitude > 0.01f || vert != 0f;
             sprintingUnderwater = input && GameInput.Sprint && moving;
-            float speed = DiveSpeed * Mathf.Max(0.5f, gear.swimSpeed) * (sprintingUnderwater ? 1.5f : 1f);
+            float speed = DiveSpeed * Mathf.Max(0.5f, gear.swimSpeed) * (sprintingUnderwater ? 1.5f : 1f) * SwimFactor * (selfie ? SelfieMoveFactor : 1f);
 
             Vector3 wish = head.forward * mv.y + transform.right * mv.x + Vector3.up * vert;
             if (wish.sqrMagnitude > 1f) wish.Normalize();
             wish *= speed;
-            if (IsFainting) wish = new Vector3(0f, -0.35f, 0f);
+            if (fainting) wish = new Vector3(0f, -0.35f, 0f);
             float rate = moving ? 2.2f : 0.85f;     // slow decay = a little glide/drift
             vel = Vector3.Lerp(vel, wish, 1f - Mathf.Exp(-rate * dt));
 
@@ -419,7 +441,8 @@ namespace Sealebrities
                 if (drift.y > 0f) drift.y = 0f;
             }
 
-            cc.Move((vel + drift) * dt);
+            // K.3 currents (reef channel, kelp surge, wreck hull, blue-drop drift, Fog Isle channel, caves)
+            cc.Move((vel + drift + CurrentPush()) * dt);
             ProbeGround();
             platform = null;
             platformRb = null;
@@ -449,7 +472,9 @@ namespace Sealebrities
             depth = Mathf.Max(0f, hEye - eye.y);
 
             bool inWater = isInWater;
-            if (seated || ladderClimbing) inWater = ladderClimbing ? isInWater && ladderT < 0.35f : false;
+            if (seated) inWater = false;
+            else if (ladderClimbing && genLadder) inWater = p.y < h - 0.9f;    // L.13: the body is in the water below the waist
+            else if (ladderClimbing) inWater = isInWater && ladderT < 0.35f;
             else if (!isInWater)
             {
                 if (p.y < h - 1f) inWater = true;
@@ -482,8 +507,13 @@ namespace Sealebrities
                     platformRb = null;
                     lastWaveValid = false;
                     outOfWaterTimer = 0f;
+                    if (crouching) SetCrouch(false);
                     // the two-handed rod does not go swimming
                     if (Hands.TryGetHeld(HoldItem.FishingRod, out Hand rodHand)) Hands.Stow(rodHand);
+                    // Q20: the camera jumps into its (empty) hand (not while both hands hold a ladder)
+                    if (!ladderClimbing) AutoEquipCameraOnEntry();
+                    // Q9: a short camera dip when jumping in (0.12 m, gone in ~0.25 s; camera-shake toggle)
+                    if (!grounded && vel.y < -2.5f) landDip = Mathf.Max(landDip, Mathf.Min(0.12f, -vel.y * 0.022f));
                     if (GameInput.Descend && !UIState.BlocksGameplay && !grounded) StartDive();
                     else mode = PlayerMoveMode.Surface;
                 }
@@ -650,6 +680,9 @@ namespace Sealebrities
         {
             if (vaulting || ladderClimbing || seated || IsFainting || rescueActive || cc == null || !cc.enabled) return false;
             if (!isInWater || (mode == PlayerMoveMode.Dive && depth > 3f)) return false;
+            // L.13: every published ladder (incl. the dock ladder) is climbed with the generic climb – W / Space held climbs
+            // (L.13), releasing stops; nothing climbs by itself
+            if (TryClimbLadder(false)) return true;
             if (!LadderInReach(out Vector3 bottom, out Vector3 top)) return false;
             if (mode == PlayerMoveMode.Dive)
             {
@@ -714,7 +747,7 @@ namespace Sealebrities
             vaultHintTimer -= dt;
             if (vaultHintTimer > 0f) return;
             vaultHintTimer = 0.2f;
-            canLadderHint = LadderInReach(out _, out _);
+            canLadderHint = LadderInReach(out _, out _) || (ladCandidate >= 0 && !ladCandidateTop);
             canVaultHint = !canLadderHint && mode == PlayerMoveMode.Surface && CheckVault(out _, out _);
         }
 
@@ -724,6 +757,9 @@ namespace Sealebrities
             if (seatTransform == null || !initialized) return;
             if (vaulting) { vaulting = false; vaultRef = null; }
             ladderClimbing = false;
+            CancelGenericLadder();
+            if (selfie) ExitSelfie();
+            if (crouching) SetCrouch(false);
             Hands.StowAll();
             seat = seatTransform;
             seated = true;
@@ -777,7 +813,9 @@ namespace Sealebrities
             if (!initialized) return;
             if (seated) { seated = false; seat = null; seatYaw = 0f; }
             if (vaulting) { vaulting = false; vaultRef = null; }
+            if (ladderClimbing && genLadder) RestoreLadderHands();
             ladderClimbing = false;
+            CancelGenericLadder();
             PlaceAt(position + Vector3.up * 0.02f, yawDegrees);
         }
 

@@ -32,6 +32,27 @@ namespace Sealebrities
             return false;
         }
 
+        /// The beach campfire in front of the hut (E.1 grill #1 – PropInfo.Campfire): on the sand between the hut and
+        /// the water, north of the dock boardwalk.
+        public static Vector3 CampfireSpot => new Vector3(WorldLayout.Hut.x + 17f, 0f, WorldLayout.Hut.z + 6f);
+
+        /// First land point (ground in [minG, maxG]) walking inward along an angle from far out at sea (main island).
+        public static bool ShorePoint(float angRad, float minG, float maxG, out Vector3 pos, float rFrom = -1f)
+        {
+            if (rFrom <= 0f) rFrom = WorldLayout.IslandRadius + 70f;
+            Vector3 d = new Vector3(Mathf.Cos(angRad), 0f, Mathf.Sin(angRad));
+            for (float r = rFrom; r > 30f; r -= 0.75f)
+            {
+                float x = d.x * r, z = d.z * r;
+                float g = G(x, z);
+                if (g < minG || g > maxG) continue;
+                pos = new Vector3(x, g, z);
+                return true;
+            }
+            pos = Vector3.zero;
+            return false;
+        }
+
         // ================================================================== beach props
         public static IEnumerator Build(Transform island, PropExclusion excl)
         {
@@ -40,9 +61,11 @@ namespace Sealebrities
             cols.SetParent(root, false);
             var batch = new PropBatch(0f);
             var rng = new System.Random(909);
+            Vector3 hut = WorldLayout.Hut;
 
-            // two loungers with a parasol and a towel, facing the sea (east)
-            if (FindLand(new Vector3(146f, 0f, 24f), 0.35f, 8f, excl, out var l1))
+            // L.5: the hut beach at the 0.62 layout – everything relative to the hut / dock, not TV3 map literals.
+            // two loungers with a parasol and a towel, facing the sea (east), north of the campfire
+            if (FindLand(new Vector3(hut.x + 24f, 0f, hut.z + 9f), 0.35f, 8f, excl, out var l1, 8f))
             {
                 Lounger(batch, cols, l1, -90f + PropUtil.Range(rng, -8f, 8f), PropMats.CushionA);
                 excl.Add(l1.x, l1.z, 2f);
@@ -60,8 +83,8 @@ namespace Sealebrities
                 Towel(batch, tw, PropUtil.Range(rng, 0f, 360f));
             }
 
-            // surfboard stuck in the sand
-            if (FindLand(new Vector3(140f, 0f, 12.5f), 0.3f, 8f, excl, out var sp))
+            // surfboard stuck in the sand south of the boardwalk
+            if (FindLand(new Vector3(hut.x + 18f, 0f, hut.z - 9f), 0.3f, 8f, excl, out var sp, 6f))
             {
                 Quaternion r = Quaternion.Euler(0f, 30f, 0f) * Quaternion.Euler(-74f, 0f, 0f);
                 Vector3 c = sp + Vector3.up * 0.8f;
@@ -70,8 +93,8 @@ namespace Sealebrities
                 excl.Add(sp.x, sp.z, 1.2f);
             }
 
-            // oil drums beside the hut
-            if (FindLand(new Vector3(WorldLayout.Hut.x + 3f, 0f, WorldLayout.Hut.z - 8.2f), 0.2f, 20f, excl, out var dp))
+            // oil drums behind the hut (west)
+            if (FindLand(new Vector3(hut.x - 7.4f, 0f, hut.z - 4.5f), 0.2f, 20f, excl, out var dp, 5f))
             {
                 Drum(batch, cols, dp, PropMats.DrumBlue, false, 0f);
                 Drum(batch, cols, dp + new Vector3(0.65f, 0f, 0.2f), PropMats.DrumRed, false, 0f);
@@ -79,39 +102,40 @@ namespace Sealebrities
                 excl.Add(dp.x, dp.z, 2.5f);
             }
 
-            // tire swing
-            if (FindLand(new Vector3(136f, 0f, 33f), 0.4f, 12f, excl, out var tp))
+            // tire swing on the beach north-east of the hut
+            if (FindLand(new Vector3(hut.x + 13f, 0f, hut.z + 17f), 0.4f, 12f, excl, out var tp, 6f))
             {
                 TireSwing(root, batch, cols, tp, 15f);
                 excl.Add(tp.x, tp.z, 3f);
             }
 
-            // campfire with log benches
-            if (FindLand(new Vector3(151f, 0f, 14f), 0.4f, 8f, excl, out var fp))
+            // campfire with log benches (the hut grill – E „Fisch grillen“)
+            if (FindLand(CampfireSpot, 0.4f, 8f, excl, out var fp, 5f))
             {
                 Campfire(root, batch, cols, fp, rng);
                 excl.Add(fp.x, fp.z, 4f);
                 PropInfo.Campfire = fp;
+                PropInfo.SetSpot("grill_hut", fp);
             }
 
             // fuel cans near the dock start and the porch
             Vector3 dockStart = WorldLayout.DockStart;
-            if (FindLand(new Vector3(dockStart.x - 4f, 0f, dockStart.z - 4.5f), 0.3f, 8f, excl, out var fc))
+            if (FindLand(new Vector3(dockStart.x - 6f, 0f, dockStart.z - 4.5f), 0.3f, 8f, excl, out var fc, 5f))
             {
                 FuelCan(batch, fc, 20f, PropMats.DrumRed);
                 FuelCan(batch, fc + new Vector3(0.3f, 0f, 0.35f), -15f, PropMats.DrumRed);
                 FuelCan(batch, fc + new Vector3(-0.35f, 0f, 0.25f), 75f, PropMats.DrumYellow);
                 excl.Add(fc.x, fc.z, 1.5f);
             }
-            if (FindLand(new Vector3(WorldLayout.Hut.x + 8.5f, 0f, WorldLayout.Hut.z - 3f), 0.2f, 20f, excl, out var fc2, 6f))
+            if (FindLand(new Vector3(hut.x + 9.5f, 0f, hut.z - 5.6f), 0.2f, 20f, excl, out var fc2, 4f))
                 FuelCan(batch, fc2, 50f, PropMats.DrumRed);
 
-            // driftwood logs along the shore
-            for (int i = 0; i < 7; i++)
+            // driftwood logs along the east / south-east shore
+            for (int i = 0; i < 9; i++)
             {
-                float a = PropUtil.Range(rng, -0.6f, 0.9f);
-                Vector3 d = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * PropUtil.Range(rng, 150f, 175f);
-                if (!FindLand(d, 0.25f, 1.6f, excl, out var lp, 10f)) continue;
+                float a = PropUtil.Range(rng, -0.75f, 0.95f);
+                if (!ShorePoint(a, 0.3f, 1.4f, out var lp)) continue;
+                if (excl.Blocked(lp.x, lp.z)) continue;
                 float yaw = PropUtil.Range(rng, 0f, 360f);
                 Quaternion r = Quaternion.Euler(0f, yaw, 90f + PropUtil.Range(rng, -6f, 6f));
                 float len = PropUtil.Range(rng, 1.6f, 3.4f);
@@ -121,11 +145,10 @@ namespace Sealebrities
             }
 
             // starfish on the wet sand
-            for (int i = 0; i < 6; i++)
+            for (int i = 0; i < 8; i++)
             {
-                float a = PropUtil.Range(rng, -0.7f, 0.9f);
-                Vector3 d = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * PropUtil.Range(rng, 150f, 180f);
-                if (!FindLand(d, 0.05f, 0.9f, excl, out var sf, 12f)) continue;
+                float a = PropUtil.Range(rng, -0.8f, 1.0f);
+                if (!ShorePoint(a, 0.05f, 0.6f, out var sf)) continue;
                 Starfish(batch, sf, PropUtil.Range(rng, 0f, 360f), PropUtil.Range(rng, 0.12f, 0.2f), i % 2 == 0 ? PropMats.Orange : PropMats.FlowerPink);
             }
 
@@ -193,7 +216,9 @@ namespace Sealebrities
             var outline = new Vector3[2 * n - 2];
             for (int i = 0; i < n; i++) outline[i] = new Vector3(half[i].x, 0f, half[i].y);
             for (int i = n - 2, k = n; i >= 1; i--, k++) outline[k] = new Vector3(-half[i].x, 0f, half[i].y);
-            var b = batch.B(mat);
+            // world-space geometry: W resets the builder matrix (PropHut / PropPOI2 leave their local frame on the shared
+            // builders – B kept it and drew the rack boards in the sky) and picks the cull cell of the board
+            var b = batch.W(mat, c);
             const float th = 0.035f;
             Vector3 up = r * Vector3.up;
             for (int i = 0; i < outline.Length; i++)
@@ -205,9 +230,9 @@ namespace Sealebrities
                 Vector3 mid = (outline[i] + outline[(i + 1) % outline.Length]) * 0.5f;
                 b.QuadAuto(a, bb, b2, a2, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, r * mid);
             }
-            batch.B(PropMats.White).Box(c + r * new Vector3(0f, th + 0.004f, 0f), new Vector3(0.06f, 0.008f, 1.7f), r);
-            batch.B(PropMats.Ink).Face3(c + r * new Vector3(0f, -th, -0.6f), c + r * new Vector3(0f, -th, -0.9f), c + r * new Vector3(0f, -th - 0.16f, -0.85f), r * Vector3.right);
-            batch.B(PropMats.Ink).Face3(c + r * new Vector3(0f, -th, -0.6f), c + r * new Vector3(0f, -th, -0.9f), c + r * new Vector3(0f, -th - 0.16f, -0.85f), r * Vector3.left);
+            batch.W(PropMats.White, c).Box(c + r * new Vector3(0f, th + 0.004f, 0f), new Vector3(0.06f, 0.008f, 1.7f), r);
+            batch.W(PropMats.Ink, c).Face3(c + r * new Vector3(0f, -th, -0.6f), c + r * new Vector3(0f, -th, -0.9f), c + r * new Vector3(0f, -th - 0.16f, -0.85f), r * Vector3.right);
+            batch.W(PropMats.Ink, c).Face3(c + r * new Vector3(0f, -th, -0.6f), c + r * new Vector3(0f, -th, -0.9f), c + r * new Vector3(0f, -th - 0.16f, -0.85f), r * Vector3.left);
         }
 
         static void Drum(PropBatch batch, Transform cols, Vector3 p, Material mat, bool lying, float yaw)
@@ -357,6 +382,32 @@ namespace Sealebrities
             var nl = PropNightLight.Attach(fireGo, light, PropMats.FireGlow, new Color(2.5f, 0.75f, 0.18f), 0.1f, 0.35f, true);
             nl.flickerAmount = 0.35f;
             nl.particles = fire;
+            GrillGrate(root, batch, p);
+        }
+
+        /// E.1: a grill grate on two stones over a fire pit + the grill interactable („E – Fisch grillen“, 6 s, smoke).
+        public static void GrillGrate(Transform root, PropBatch batch, Vector3 p)
+        {
+            var grate = batch.W(PropMats.DarkMetal, p);
+            for (int i = -3; i <= 3; i++) grate.Box(p + new Vector3(i * 0.09f, 0.44f, 0f), new Vector3(0.022f, 0.022f, 0.66f));
+            grate.Box(p + new Vector3(0f, 0.44f, 0.33f), new Vector3(0.62f, 0.03f, 0.03f));
+            grate.Box(p + new Vector3(0f, 0.44f, -0.33f), new Vector3(0.62f, 0.03f, 0.03f));
+            for (int s = -1; s <= 1; s += 2)
+            {
+                Vector3 st = p + new Vector3(s * 0.4f, 0.17f, 0f);
+                PropRocks.Build(batch.W(PropMats.RockDark, st), st, new Vector3(0.16f, 0.26f, 0.32f), Quaternion.identity, 77 + s, 0, 0.12f);
+            }
+            var embers = PropMats.EmissiveInstance(new Color(0.35f, 0.12f, 0.05f), Color.black);
+            batch.W(embers, p).Disk(p + Vector3.up * 0.06f, 0.34f, 7, Quaternion.identity, true);
+            var go = new GameObject("Grill");
+            go.transform.SetParent(root, false);
+            go.transform.position = p + Vector3.up * 0.5f;
+            var bc = go.AddComponent<BoxCollider>();
+            bc.isTrigger = true;
+            bc.size = new Vector3(1.4f, 0.9f, 1.4f);
+            var g = go.AddComponent<PropGrill>();
+            g.smoke = PropFX.GrillSmoke(root, p + Vector3.up * 0.55f);
+            g.glow = embers;
         }
 
         // ================================================================== torches

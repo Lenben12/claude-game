@@ -20,7 +20,7 @@ namespace Sealebrities
     /// the results go to <folder>/playtest_report.md and <folder>/playtest.json (written after every step).
     /// Never touches the player's data for good: saving is disabled, settings.json and the save are backed up and
     /// restored, and the gallery photos taken by the test are deleted at the end.
-    public sealed class AutoPlaytest : MonoBehaviour
+    public sealed partial class AutoPlaytest : MonoBehaviour
     {
         const float BootTimeout = 900f;
         /// Real seconds of testing after which the remaining steps are skipped (the caller waits up to 25 min).
@@ -145,6 +145,7 @@ namespace Sealebrities
             GameEvents.MilestoneReached += OnMilestone;
             GameEvents.SiteUnlocked += OnSiteUnlocked;
             GameEvents.SponsorUnlocked += OnSponsor;
+            SubscribeRound2();
         }
 
         void OnDisable()
@@ -154,6 +155,7 @@ namespace Sealebrities
             GameEvents.MilestoneReached -= OnMilestone;
             GameEvents.SiteUnlocked -= OnSiteUnlocked;
             GameEvents.SponsorUnlocked -= OnSponsor;
+            UnsubscribeRound2();
         }
 
         void OnPhotoAdded(PhotoEntry e) { if (e != null && !string.IsNullOrEmpty(e.file)) testPhotos.Add(e.file); }
@@ -214,6 +216,18 @@ namespace Sealebrities
             report.version = Application.version + " (Unity " + Application.unityVersion + ")";
             Note("boot ready after " + BootState.BootSeconds.ToString("0.0", Inv) + " s" + (BootState.HadErrors ? " (boot had errors)" : ""));
 
+            // ---------------- -r2only: a fresh late game + only the round-2 integration steps (fits one test slot)
+            if (Round2Only)
+            {
+                yield return RunStep("01 Main menu (crew on the dock, 3 difficulties)", StepMenu);
+                yield return RunStep("20 Late game: new game, tutorial done", StepLateNewGame);
+                yield return RunStep("20b Open-world spawning census (L.1): fish everywhere, depth bands, locked sites", StepR2Census, 150f);
+                yield return RunRound2Steps();
+                yield return RunStep("28 Quit to the main menu", StepReturnToMenu);
+                Finish(report.failed == 0 ? 0 : 1);
+                yield break;
+            }
+
             // ---------------- the tutorial loop (Normal)
             yield return RunStep("01 Main menu (crew on the dock, 3 difficulties)", StepMenu);
             yield return RunStep("02 New game (Normal): wake up in the hut", StepNewGame);
@@ -226,8 +240,8 @@ namespace Sealebrities
             yield return RunStep("09 Boat: wheel only from the seat, drive, get up", StepBoat);
             yield return RunStep("10 Dock ladder: out of the water onto the dock", StepLadder);
             yield return RunStep("11 House reef dive: entry brightness, visibility, air", StepDive);
-            yield return RunStep("12 Camera: scan rules (aim/frame/distance), filming 3 species, photo", StepCamera, 240f);
-            yield return RunStep("13 Back on the boat: footage banked, air refills by resting", StepBoatReturn);
+            yield return RunStep("12 Camera (K.2): auto-record, auto-detection, ≥ 5 clips without aiming, smart tape, sightings, Sealog photos", StepCamera, 240f);
+            yield return RunStep("13 Back on the boat: footage banked, E.4 refill only with the boat compressor", StepBoatReturn);
             yield return RunStep("14 FinTube upload + sleep: views / followers / money", StepUploadSleep);
             yield return RunStep("15 Collectible pickup (E)", StepCollectible);
             yield return RunStep("16 Settings: volumes, quality, FPS cap, voice, key rebinding", StepSettings);
@@ -237,13 +251,16 @@ namespace Sealebrities
 
             // ---------------- late game smoke test
             yield return RunStep("20 Late game: new game, tutorial done", StepLateNewGame);
-            for (int i = 0; i < DiveSites.All.Count; i++)
+            yield return RunStep("20b Open-world spawning census (L.1): fish everywhere, depth bands, locked sites", StepR2Census, 150f);
+            for (int i = 0; i < ProgressionSites; i++)
             {
                 int k = i;
                 yield return RunStep("2" + (k + 1) + " Site " + DiveSites.All[k].id + ": unlock, boat, mini island, dive, film, journal page", () => StepSite(k), 200f);
             }
             yield return RunStep("26 Finale: 1,000,000 followers", StepFinale);
             yield return RunStep("27 Buy every item (helicopter crates) + equip the best gear", StepBuyAll, 240f);
+            yield return RunStep("27b Core round-2 contracts: settings NaN, economy K.1, Sealog photo/sightings, deals, Fog Isle, food, finds, quests", StepCoreContracts);
+            yield return RunRound2Steps();
             yield return RunStep("28 Quit to the main menu", StepReturnToMenu);
 
             Finish(report.failed == 0 ? 0 : 1);
@@ -272,10 +289,12 @@ namespace Sealebrities
             GameInput.SimClear();
             // leave the player in a usable state for the next step
             if (pc != null && !pc.enabled) pc.enabled = true;
+            // stop through the API, not with a simulated LMB: a manual stop under water suppresses the K.2 auto-record
+            // until the next dive (correct for players), which made step 12 start without auto-recording
             var hc = Refs.HandCamera as FilmHandCamera;
             if (hc != null && hc.IsRecording)
             {
-                GameInput.SimTap(GameAction.Use);
+                hc.StopRecording();
                 yield return null;
                 yield return null;
             }
@@ -601,7 +620,8 @@ namespace Sealebrities
             Metric("fishing.secondsPerFish", caught > 0 ? F(total / caught, "0") : "-");
             if (caught > 0) { fishSecondsPerFish = total / caught; fishAvgValue = valueSum / (float)caught; }
             Metric("fishing.avgBiteWait", caught > 0 ? F(biteSum / caught, "0.0") + " s" : "-");
-            Metric("fishing.fishFor130", caught > 0 && valueSum > 0 ? F(130f / (valueSum / (float)caught), "0.0") + " fish ≈ " + F(130f / (valueSum / (float)caught) * total / caught / 60f, "0.0") + " min for the first tank" : "-");
+            float tankPrice = Shop.Price(GearDatabase.Get("tank_t1"), false);
+            Metric("fishing.fishForTank", caught > 0 && valueSum > 0 ? F(tankPrice / (valueSum / (float)caught), "0.0") + " fish ≈ " + F(tankPrice / (valueSum / (float)caught) * total / caught / 60f, "0.0") + " min for the first tank (" + tankPrice + " $)" : "-");
             Info("tutorial step " + S.questIndex + ": '" + TutorialQuests.Current.title + "'");
         }
 
@@ -643,7 +663,7 @@ namespace Sealebrities
             {
                 long add = price - S.money;
                 gm.AddMoney(add);
-                Info("test top-up +" + add + " $ (the 5 tutorial fish do not pay for the 130 $ tank on their own – keep fishing)");
+                Info("test top-up +" + add + " $ (the 5 tutorial fish do not pay for the " + price + " $ tank on their own – keep fishing)");
             }
             // realistic first-tank timeline without the test top-up: a human fishes ~1.3× slower than the bot and needs
             // ~4 real minutes for walking, two market rounds and the shop; the tutorial tank flies with the express timing
@@ -691,10 +711,12 @@ namespace Sealebrities
             {
                 crate = FindCrate("tank_t1", true);
                 if (crate != null) break;
-                if (!shotHeli && Time.realtimeSinceStartup - tw > 14f && Object.FindFirstObjectByType<HeliChopper>() != null)
+                var chopper = Object.FindFirstObjectByType<HeliChopper>();
+                if (!shotHeli && Time.realtimeSinceStartup - tw > 14f && chopper != null)
                 {
                     shotHeli = true;
-                    yield return AimAt(pad + Vector3.up * 22f);
+                    // aim at the chopper itself (a fixed point 22 m above the pad showed only sky and palm leaves)
+                    yield return AimAt(chopper.transform.position);
                     yield return Shot("07b_helicopter");
                 }
                 yield return Wait(0.5f);
@@ -844,7 +866,23 @@ namespace Sealebrities
             Check(pc.CanLadderHint, "ladder hint shown ('" + InteractionPrompt.Text + "')");
             yield return Shot("10_ladder_from_water");
             GameInput.SimTap(GameAction.Jump);
-            yield return Wait(2.6f);
+            // L.13: the generic climb – Space grabs the ladder; W / Space HELD climbs (0.65 m/s, eased per rung, mantle).
+            // No auto-climb any more (GDD §19): one tap only grabs it.
+            yield return Wait(1.3f);
+            bool held = false;
+            if (pc.OnGenericLadder)
+            {
+                float y0 = pc.LadderRootY;
+                yield return Wait(0.8f);
+                Check(pc.OnGenericLadder && pc.LadderRootY - y0 < 0.05f, "Space grabbed the dock ladder and waits for input (rung " + F(pc.LadderRootY, "0.00") + " m, moved " + F(pc.LadderRootY - y0, "0.00") + " m without input)");
+                GameInput.SimPress(GameAction.Jump);   // holding Space climbs
+                held = true;
+                yield return Wait(0.8f);
+                yield return Shot("10a_ladder_hands");
+            }
+            else Info("dock ladder climbed by the scripted fallback (not in PropInfo.Ladders)");
+            yield return WaitUntil(() => !pc.IsBusy && !pc.IsInWater && pc.Root.position.y > Waves.SeaLevel + 0.6f, 12f);
+            if (held) GameInput.SimRelease(GameAction.Jump);
             float dTop = FlatDist(pc.Root.position, top);
             Check(!pc.IsInWater && pc.Root.position.y > Waves.SeaLevel + 0.6f && dTop < 1.8f,
                   "Space climbs the ladder onto the dock (feet y " + F(pc.Root.position.y, "0.00") + ", " + F(dTop) + " m from the top)");
@@ -920,56 +958,89 @@ namespace Sealebrities
             pc.enabled = false;
             Vector3 eye = cam.transform.position;
             Vector3 fwd = Flat(cam.transform.forward);
-            ClearCrowd();
-            var turtle = SpawnAt("green_turtle", KeepInWater(eye + fwd * 4f, 1.5f, 1.5f), SizeTier.Large);
-            Check(turtle != null, "spawned a green turtle in front of the camera");
-            if (turtle == null) yield break;
+            Vector3 right = Vector3.Cross(Vector3.up, fwd).normalized;
             int clips0 = Footage.DiveCount;
 
-            // (a) holding the camera without aiming / recording: nothing is scanned
-            yield return FollowFor(turtle, 1.2f, 3f, 0f, false, false);
-            Check(!filmTargeted && !Journal.IsDiscovered("green_turtle"), "camera in hand, not aiming/recording: no scan (hint " + filmLastHint + ")");
-            // (b) aimed + recording, but 20 m away
-            yield return FollowFor(turtle, 2.6f, 20f, 0f, true, true);
-            yield return StopFilming();
-            // (wild animals may swim past the camera and be filmed legitimately: only the turtle's lock counts here)
-            Check(!filmTargeted && !Journal.IsDiscovered("green_turtle"), "20 m away: the turtle is not scanned (hints " + filmHints + ")");
-            // (c) aimed + recording, close but at the frame edge
-            yield return FollowFor(turtle, 2.6f, 3.2f, 45f, true, true);
-            yield return StopFilming();
-            Check(!filmTargeted && !Journal.IsDiscovered("green_turtle"), "not framed (45° off-center): the turtle is not scanned (hints " + filmHints + ")");
-            // (d) recording from the hip (not aiming): a clip, but no Sealog entry
-            yield return FollowFor(turtle, 2.8f, 3f, 0f, false, true);
-            yield return StopFilming();
-            Check(filmClips >= 1 && !Journal.IsDiscovered("green_turtle"), "hip recording: " + filmClips + " clip(s), not logged in the Sealog (hints " + filmHints + ")");
-            // (e) aimed and framed: logged
-            yield return FollowFor(turtle, 3.5f, 3f, 0f, true, true, "12_viewfinder_turtle");
-            Check(filmRegistered, "aimed + framed: green turtle logged after " + F(filmRegisterTime) + " s (hints " + filmHints + ")");
-            // photo while aiming
-            int photos0 = Gallery.Count;
-            GameInput.SimTap(GameAction.Photo);
-            yield return FollowFor(turtle, 1.0f, 3f, 0f, true, true);
-            yield return StopFilming();
-            var lastPhoto = Gallery.Count > 0 ? Gallery.Photos[Gallery.Count - 1] : null;
-            Check(Gallery.Count > photos0 && lastPhoto != null && Gallery.Exists(lastPhoto), "P while aiming: photo in the gallery (" + Gallery.Count + " photos, last '" + (lastPhoto != null ? lastPhoto.file + "' species " + lastPhoto.speciesId : "-") + ")");
+            // ---- K.2 (a): under water the camera records by itself – no aiming, no button
+            yield return WaitUntil(() => hc.IsRecording, 3f);
+            Check(hc.IsRecording && hc.AutoRecording, "auto-record under water with the camera in hand (" + hc.DebugSummary() + ")");
 
-            // two more species for the tutorial
-            foreach (var id in new[] { "parrotfish", "octopus" })
+            // ---- (b) smart tape: nothing in frame → the tape does not run
+            var spawner = FaunaModule.Spawner;
+            if (spawner != null) spawner.DespawnAll();
+            Pose(eye, eye + Vector3.up * 12f + fwd * 2f);
+            yield return Wait(0.6f);
+            float tape0 = hc.TapeSecondsLeft;
+            yield return Wait(2f);
+            float tape1 = hc.TapeSecondsLeft;
+            if (hc.DetectedCount == 0) Check(Mathf.Abs(tape1 - tape0) < 0.1f, "smart tape: no animal in frame → tape stays (" + F(tape0) + " → " + F(tape1) + " s)");
+            else Info("smart tape check skipped: " + hc.DetectedCount + " wild animals swam into the frame");
+
+            // ---- (c) every animal in frame is detected automatically: 5 individuals → ≥ 5 clips, no aiming
+            Pose(eye, eye + fwd * 10f);
+            string[] crowdIds = { "blue_tang", "blue_tang", "clownfish", "lionfish", "moon_jelly", "cleaner_wrasse" };
+            var crowd = new List<ICreature>();
+            for (int i = 0; i < crowdIds.Length; i++)
+            {
+                float x = (i - (crowdIds.Length - 1) * 0.5f) * 0.55f;
+                Vector3 p = KeepInWater(eye + fwd * (3.2f + (i % 2) * 0.8f) + right * x + Vector3.up * ((i % 3) - 1) * 0.25f, 1f, 1.2f);
+                var c = SpawnAt(crowdIds[i], p, SizeTier.Large);
+                if (c != null) crowd.Add(c);
+            }
+            Check(crowd.Count >= 5, crowd.Count + " animals spawned in front of the lens");
+            int maxDetected = 0;
+            float tt = 0f;
+            bool shot = false;
+            while (tt < 3.2f)
+            {
+                Pose(eye, eye + fwd * 10f);
+                maxDetected = Mathf.Max(maxDetected, hc.DetectedCount);
+                if (!shot && tt > 1.6f) { shot = true; yield return Shot("12_auto_detect_brackets"); }
+                yield return null;
+                tt += Time.deltaTime;
+            }
+            int newClips = Footage.DiveCount - clips0;
+            Check(maxDetected >= 4, "detected automatically: up to " + maxDetected + " animals in frame at once (brackets " + ViewfinderInfo.BracketCount + ")");
+            Check(newClips >= 5, newClips + " clips without aiming (≥ 5 expected) – " + hc.DebugSummary());
+            int crowdMax = 0;
+            for (int i = 0; i < S.diveFootage.Count; i++) crowdMax = Mathf.Max(crowdMax, S.diveFootage[i].crowd);
+            Check(crowdMax >= 2, "crowd bonus data: up to " + crowdMax + " animals in one clip");
+            Check(!Journal.IsDiscovered("blue_tang") && !Journal.IsDiscovered("lionfish"), "filming alone does not fill the Sealog (it needs a photo)");
+            // L.2 sightings: counted per individual and depth (flushed in batches)
+            yield return WaitUntil(() => { var be = Journal.Find("blue_tang"); return be != null && be.sightings > 0; }, 12f);
+            var tang = Journal.Find("blue_tang");
+            Check(tang != null && tang.sightings > 0, "sightings counted: blue tang " + (tang != null ? tang.sightings + "× at " + F(tang.minDepthSeen, "0") + "–" + F(tang.maxDepthSeen, "0") + " m" : "none"));
+            foreach (var c in crowd) if (c != null && c.IsAlive && Refs.Spawner != null) Refs.Spawner.Despawn(c);
+
+            // ---- (d) a far photo does not register
+            // a fist-sized fish (lionfish ≤ 38 cm): at 12 m it fills far less than the 10 % Sealog minimum. A big octopus
+            // (arms spread up to ~1.5 m) may legitimately count from 12 m, so it is not used here.
+            var far = SpawnAt("lionfish", KeepInWater(eye + fwd * 12f, 1.2f, 1.5f), SizeTier.Normal);
+            if (far != null)
+            {
+                yield return PhotoOf(far, 12f, null);
+                Check(!Journal.IsDiscovered("lionfish"), "a photo from 12 m does not count for the Sealog (" + photoNote + ")");
+                if (far.IsAlive && Refs.Spawner != null) Refs.Spawner.Despawn(far);
+            }
+
+            // ---- (e) Sealog = photo: zoom in on an animal (aim) and take a quick photo – 3 species for the tutorial
+            int photos0 = Gallery.Count;
+            foreach (var id in new[] { "green_turtle", "parrotfish", "octopus" })
             {
                 eye = cam.transform.position;
                 var c = SpawnAt(id, KeepInWater(eye + fwd * 3.5f + Vector3.up * 0.3f, 1.2f, 1.5f), SizeTier.Large);
                 if (c == null) { Check(false, "could not spawn " + id); continue; }
-                yield return FollowFor(c, 4f, FilmDistance(c), 0f, true, true);
-                yield return StopFilming();
-                Check(filmRegistered || Journal.IsDiscovered(id), id + " filmed and logged (" + (filmRegistered ? F(filmRegisterTime) + " s" : "not registered") + ", hints " + filmHints + ")");
+                yield return PhotoOf(c, FilmDistance(c), id == "parrotfish" ? "12_sealog_photo_parrotfish" : null);
+                var je = Journal.Find(id);
+                Check(Journal.IsDiscovered(id) && je != null && je.photos >= 1, id + " photographed → Sealog entry (" + photoNote + ")");
+                if (c.IsAlive && Refs.Spawner != null) Refs.Spawner.Despawn(c);
             }
+            var lastPhoto = Gallery.Count > 0 ? Gallery.Photos[Gallery.Count - 1] : null;
+            Check(Gallery.Count > photos0 && lastPhoto != null && Gallery.Exists(lastPhoto), "photos in the gallery (" + Gallery.Count + ", last '" + (lastPhoto != null ? lastPhoto.file + "' species " + lastPhoto.speciesId : "-") + ")");
             Info("clips this dive: " + Footage.DiveCount + " (+" + (Footage.DiveCount - clips0) + ")");
             yield return Wait(0.6f);
-            Check(S.questIndex >= 7, "tutorial: 3 species filmed (step " + S.questIndex + ": '" + TutorialQuests.Current.title + "')");
-            UIModule.DebugOpenPhone("sealog");
-            yield return Wait(1.2f);
-            yield return Shot("12b_sealog");
-            UIModule.DebugOpenPhone("close");
+            Check(S.questIndex >= 7, "tutorial: 3 species photographed for the Sealog (step " + S.questIndex + ": '" + TutorialQuests.Current.title + "')");
+            // the Sealog screenshot is taken on the boat (step 13): under water the phone stays dry
             yield return Frames(2);
             pc.enabled = true;
         }
@@ -1021,12 +1092,37 @@ namespace Sealebrities
             Check(boat.PlayerAboard && !pc.IsInWater, "climbed aboard");
             Check(Footage.DiveCount == 0 && Footage.BankedCount >= dive, "footage banked (banked " + Footage.BankedCount + ")");
             Check(airBefore < 0.98f, "air was used on the dive (" + F(airBefore * 100f, "0") + " %)");
+            // E.4 (Q27): on the boat the tank refills only with the crew's boat compressor (600 $, 250 followers)
+            bool hadCompressor = BoatAirStation.Owned;
+            if (!hadCompressor)
+            {
+                float a0 = pc.Air01;
+                yield return Wait(2f);
+                Check(!pc.RefillingAir && pc.Air01 <= a0 + 0.001f && !pc.AtAirStation, "E.4: no refill on deck without the boat compressor (air " + F(pc.Air01 * 100f, "0") + " %)");
+                S.ownedItems.Add("boat_compressor");
+                GameEvents.RaiseGearChanged();
+                yield return Frames(3);
+                Check(BoatAirStation.Owned, "boat compressor owned (crew equipment)");
+            }
             yield return WaitUntil(() => pc.RefillingAir || pc.Air01 >= 0.999f, 2f);
-            Check(pc.RefillingAir || pc.Air01 >= 0.999f, "the tank refills while resting on deck");
+            Check(pc.RefillingAir || pc.Air01 >= 0.999f, "with the compressor the tank refills on deck");
             float tr = Time.realtimeSinceStartup;
             yield return WaitUntil(() => pc.Air01 >= 0.999f, 9f);
-            Check(pc.Air01 >= 0.999f, "tank full after " + F(Time.realtimeSinceStartup - tr) + " s on deck");
+            Check(pc.Air01 >= 0.999f, "tank full after " + F(Time.realtimeSinceStartup - tr) + " s on deck (E.4: 6 s from empty)");
             yield return Shot("13_boat_deck");
+            // L.2 Sealog with the three photographed species (counters, depth chips) – the phone works on deck
+            UIModule.DebugOpenPhone("sealog");
+            yield return Wait(1.2f);
+            Check(UIState.PhoneOpen, "Sealog app opens on deck");
+            yield return Shot("12b_sealog");
+            UIModule.DebugOpenPhone("close");
+            yield return Frames(2);
+            if (!hadCompressor)
+            {
+                // keep the tutorial economy unchanged for the next steps
+                S.ownedItems.Remove("boat_compressor");
+                GameEvents.RaiseGearChanged();
+            }
         }
 
         // ================================================================== 14 upload + sleep
@@ -1076,6 +1172,7 @@ namespace Sealebrities
                 var v = S.videos[S.videos.Count - 1];
                 Check(v.views > 0 && S.followers > f0, "video: " + v.views + " views, +" + v.followersGained + " followers, +" + v.money + " $ (now " + S.followers + " followers, " + S.money + " $)");
                 Metric("upload.first", v.views + " views → +" + v.followersGained + " followers, +" + v.money + " $ (" + v.clipCount + " clips)");
+                MetricEarlyEconomy(v.money, S.followers);
             }
             yield return Wait(2.5f);
             Check(S.questIndex >= TutorialQuests.Finished, "tutorial finished (step " + S.questIndex + ")");
@@ -1083,34 +1180,70 @@ namespace Sealebrities
             yield return Shot("14b_morning");
         }
 
+        /// K.1 check of the second player message: real minutes to the first 100 $ from videos and to the first camera
+        /// upgrade. Projection from the measured first video + the measured bot fishing rate: one upload per in-game day
+        /// (Progression.ExpectedUploadMoney/Followers) + 6 real minutes of shore fishing per day; one day = 40 real min.
+        void MetricEarlyEconomy(long firstVideoMoney, long followersNow)
+        {
+            var cam1 = GearDatabase.Get("cam_t1");
+            if (cam1 == null) return;
+            float dayMin = GameManager.DayLengthSeconds / 60f;
+            float fishPerDay = fishSecondsPerFish > 0f ? 6f * 60f / fishSecondsPerFish : 0f;
+            float fishMoneyPerDay = fishPerDay * fishAvgValue;
+            long videoMoney = firstVideoMoney, f = followersNow, money = videoMoney;   // VideoRecord.money includes the starter bonus
+            int day100 = videoMoney >= 100 ? 1 : -1, dayCam = -1;
+            for (int d = 2; d <= 30 && (day100 < 0 || dayCam < 0); d++)
+            {
+                long m = Progression.ExpectedUploadMoney(f);
+                videoMoney += m;
+                money += m + (long)fishMoneyPerDay;
+                f += Progression.ExpectedUploadFollowers(f);
+                if (day100 < 0 && videoMoney >= 100) day100 = d;
+                if (dayCam < 0 && f >= cam1.followersNeeded && money >= cam1.price) dayCam = d;
+            }
+            Metric("economy.first100FromVideos", day100 > 0 ? "day " + day100 + " (≈ " + F(day100 * dayMin, "0") + " real min; first video " + firstVideoMoney + " $ incl. " + Progression.StarterBonus + " $ starter bonus)" : "> 30 days");
+            Metric("economy.firstCameraUpgrade", dayCam > 0 ? "day " + dayCam + " (≈ " + F(dayCam * dayMin / 60f, "0.0") + " real h) for " + cam1.price + " $ / " + cam1.followersNeeded + " F – projection: 1 upload/day + 6 min fishing/day (" + F(fishMoneyPerDay, "0") + " $)" : "> 30 days");
+        }
+
         // ================================================================== 15 collectible
         IEnumerator StepCollectible()
         {
-            PropPickup pick = null;
-            float best = float.MaxValue;
+            // L.6 hides many pages behind climbs, in dark corners or inside buildings: take the nearest island shell /
+            // page that has a free standing spot with a clear line of sight (an easy one, like a player would)
+            var cands = new List<PropPickup>();
             foreach (var p in Object.FindObjectsByType<PropPickup>(FindObjectsSortMode.None))
             {
                 if (p == null || !p.Available()) continue;
                 if (p.kind != CollectibleKind.GoldenShell && p.kind != CollectibleKind.LogbookPage) continue;
                 Vector3 pp = p.transform.position;
                 if (FlatDist(pp, WorldLayout.IslandCenter) > 230f || pp.y < Waves.SeaLevel + 0.2f) continue;
-                float d = (pp - pc.Root.position).sqrMagnitude;
-                if (d < best) { best = d; pick = p; }
+                cands.Add(p);
             }
-            Check(pick != null, "a golden shell / logbook page on the island");
-            if (pick == null) yield break;
-            Vector3 target = pick.trigger != null ? pick.trigger.bounds.center : pick.transform.position;
-            Vector3 feet = Vector3.zero;
-            for (int k = 0; k < 12 && feet == Vector3.zero; k++)
+            Vector3 from = pc.Root.position;
+            cands.Sort((x, y) => (x.transform.position - from).sqrMagnitude.CompareTo((y.transform.position - from).sqrMagnitude));
+            PropPickup pick = null;
+            Vector3 target = Vector3.zero, feet = Vector3.zero;
+            for (int ci = 0; ci < cands.Count && pick == null; ci++)
             {
-                float a = k * 30f * Mathf.Deg2Rad;
-                Vector3 c = target + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * 1.5f;
-                Vector3 f = SnapDown(c + Vector3.up * 2f, 2f, 6f);
-                if (f.y < Waves.SeaLevel + 0.1f || Mathf.Abs(f.y - target.y) > 1.6f) continue;
-                if (Physics.CheckCapsule(f + Vector3.up * 0.4f, f + Vector3.up * 1.5f, 0.3f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)) continue;
-                feet = f;
+                var p = cands[ci];
+                Vector3 t = p.trigger != null ? p.trigger.bounds.center : p.transform.position;
+                for (int k = 0; k < 24; k++)
+                {
+                    float a = k * 30f * Mathf.Deg2Rad;
+                    float r = k < 12 ? 1.4f : 1.9f;
+                    Vector3 c = t + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * r;
+                    Vector3 f = SnapDown(c + Vector3.up * 2f, 2f, 6f);
+                    if (f.y < Waves.SeaLevel + 0.1f || Mathf.Abs(f.y - t.y) > 1.6f) continue;
+                    if (Physics.CheckCapsule(f + Vector3.up * 0.4f, f + Vector3.up * 1.5f, 0.3f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)) continue;
+                    Vector3 eye = f + Vector3.up * PlayerController.EyeHeight;
+                    Vector3 to = t - eye;
+                    if (Physics.Raycast(eye, to.normalized, to.magnitude - 0.15f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)) continue;
+                    pick = p; target = t; feet = f;
+                    break;
+                }
             }
-            if (feet == Vector3.zero) feet = SnapDown(target + Vector3.up * 1.5f);
+            Check(pick != null, "a reachable golden shell / logbook page on the island (" + cands.Count + " on the island)");
+            if (pick == null) yield break;
             yield return Stand(feet, YawTo(feet, target));
             yield return AimAt(target);
             Info(pick.kind + " '" + pick.id + "' prompt: '" + InteractionPrompt.Text + "'");
@@ -1326,10 +1459,22 @@ namespace Sealebrities
             sponsorEvents = 0;
             Check(gm.InGame && S.followers == 0 && S.unlockedSites.Count == 1, "fresh game: only the house reef unlocked");
             foreach (var site in DiveSites.All)
-                if (site.prevSiteId != null) Check(!S.unlockedSites.Contains(site.id), site.id + " still locked (" + site.followersNeeded + " followers + " + F(site.prevCompletionNeeded * 100f, "0") + " % of " + site.prevSiteId + ")");
+                if (site.prevSiteId != null || site.IsStorySite) Check(!S.unlockedSites.Contains(site.id), site.id + " still locked (" + site.followersNeeded + " followers + " + F(site.prevCompletionNeeded * 100f, "0") + " % of " + site.prevSiteId + ")");
         }
 
         // ================================================================== 21-25 dive sites
+        /// The five progression sites (Sealog/follower unlocks). Story sites (the Fog Isle, K.8 – unlocked by Toni's map)
+        /// are appended after them in DiveSites.All and are not part of this tour.
+        static int ProgressionSites
+        {
+            get
+            {
+                int n = 0;
+                for (int i = 0; i < DiveSites.All.Count; i++) if (!DiveSites.All[i].IsStorySite) n++;
+                return n;
+            }
+        }
+
         static readonly string[][] SitePicks =
         {
             new[] { "green_turtle", "parrotfish" },
@@ -1429,14 +1574,22 @@ namespace Sealebrities
             Metric("site." + site.id, "eye depth " + F(Waves.SeaLevel - eye.y, "0") + " m, visibility " + F(vis, "0") + " m, scan range " + F(FilmShotEvaluator.ScanRange(), "0.0") + " m");
             yield return Wait(2.5f);
             int natural = 0, all = 0;
-            var reg = CreatureRegistry.Active;
-            for (int i = 0; i < reg.Count; i++)
+            // the spawner rolls species at random (open-water species share every site): give the site's own animals
+            // up to 6 s more to show up before calling the site empty
+            for (int round = 0; round < 4; round++)
             {
-                var c = reg[i];
-                if (c == null || (c is Object o && o == null) || !c.IsAlive || c.IsHallucination || c.Species == null) continue;
-                if ((c.Position - eye).sqrMagnitude > 90f * 90f) continue;
-                all++;
-                if (c.Species.siteId == site.id && !mySpawns.Contains(c)) natural++;
+                natural = 0; all = 0;
+                var reg = CreatureRegistry.Active;
+                for (int i = 0; i < reg.Count; i++)
+                {
+                    var c = reg[i];
+                    if (c == null || (c is Object o && o == null) || !c.IsAlive || c.IsHallucination || c.Species == null) continue;
+                    if ((c.Position - eye).sqrMagnitude > 90f * 90f) continue;
+                    all++;
+                    if (c.Species.siteId == site.id && !mySpawns.Contains(c)) natural++;
+                }
+                if (natural > 0) break;
+                yield return Wait(2f);
             }
             if (site.id == "kelp_forest")
             {
@@ -1461,18 +1614,31 @@ namespace Sealebrities
             {
                 string id = picks[k];
                 Vector3 e2 = cam.transform.position;
-                var c = SpawnAt(id, KeepInWater(e2 + fwd * 5f + Vector3.up * 0.3f, 1.5f, 1.5f), SiteTiers[index][k]);
+                var c = SpawnAt(id, OpenWaterSpot(e2, KeepInWater(e2 + fwd * 5f + Vector3.up * 0.3f, 1.5f, 1.5f)), SiteTiers[index][k]);
                 if (c == null) { Check(false, "could not spawn " + id); continue; }
+                int clipsBefore = Footage.DiveCount;
                 yield return FollowFor(c, 5f, FilmDistance(c), 0f, true, true, k == 0 ? "2" + (index + 1) + "d_" + site.id + "_filming" : null);
                 yield return StopFilming();
-                Check(filmRegistered || Journal.IsDiscovered(id), "filmed + logged " + id + " (" + F(c.SizeCm, "0") + " cm, " + (filmRegistered ? F(filmRegisterTime) + " s" : "not registered") + ", hints " + filmHints + ")");
+                // K.2: filming makes clips; the Sealog entry needs a photo (LMB while aiming)
+                bool clipped = Footage.DiveCount > clipsBefore;
+                // big animals: ≤ 4.5 m (at 7 m in 12 m deep-water visibility the manta photo did not register); one
+                // retry like a player would take a second shot. The frame belongs to the test animal: passing schools
+                // (open-water species are no longer site-gated) took the Sealog subject away from the barracuda.
+                ClearAround(c, cam.transform.position, 9f);
+                if (c.IsAlive && !Journal.IsDiscovered(id)) yield return PhotoOf(c, Mathf.Min(FilmDistance(c), 4.5f), null);
+                if (c.IsAlive && !Journal.IsDiscovered(id)) { ClearAround(c, cam.transform.position, 9f); yield return Wait(0.7f); yield return PhotoOf(c, Mathf.Min(FilmDistance(c), 3.5f), null); }
+                // a fast swimmer (barracuda) can leave the follow frame; the aimed photo pass records a clip of it too
+                // (auto-record while aiming) – that is filming with the real camera as well
+                if (!clipped && Footage.DiveCount > clipsBefore) Info(id + ": the clip came from the aimed photo pass, not the 5 s follow");
+                clipped = clipped || Footage.DiveCount > clipsBefore;
+                Check(clipped && Journal.IsDiscovered(id), "filmed (" + (Footage.DiveCount - clipsBefore) + " clip(s)) + photographed into the Sealog: " + id + " (" + F(c.SizeCm, "0") + " cm, " + photoNote + ", hints " + filmHints + ")");
                 // the next species gets the frame to itself (the scan-priority case is covered in step 12)
                 if (c.IsAlive && Refs.Spawner != null) Refs.Spawner.Despawn(c);
             }
             if (lamp != null) lamp.SetOn(false);
 
             // complete the journal page (the remaining species via the journal API) → sponsor
-            foreach (var s in SpeciesDatabase.BySite(site.id))
+            foreach (var s in SpeciesDatabase.ByPage(site.id))
             {
                 if (Journal.IsDiscovered(s.id)) continue;
                 float cm = Progression.RollSizeCm(s, SizeTier.Normal, rng);
@@ -1484,7 +1650,7 @@ namespace Sealebrities
             pc.RefillAir();
 
             // followers for the next site
-            if (index + 1 < DiveSites.All.Count)
+            if (index + 1 < ProgressionSites)
             {
                 var next = DiveSites.All[index + 1];
                 int ev0 = milestoneEvents;
@@ -1521,8 +1687,8 @@ namespace Sealebrities
             yield return Wait(1.0f);
             yield return Shot("26_finale");
             Check(S.reachedMilestones.Count == Progression.Milestones.Count, "all " + S.reachedMilestones.Count + "/" + Progression.Milestones.Count + " milestones reached (" + milestoneEvents + " events this game)");
-            Check(S.unlockedSites.Count == DiveSites.All.Count, "all " + S.unlockedSites.Count + " dive sites unlocked");
-            Check(S.sponsorSites.Count == DiveSites.All.Count, "all " + S.sponsorSites.Count + " journal pages complete");
+            Check(S.unlockedSites.Count == ProgressionSites, "all " + S.unlockedSites.Count + " progression dive sites unlocked (the Fog Isle needs Toni's map)");
+            Check(S.sponsorSites.Count == ProgressionSites, "all " + S.sponsorSites.Count + " dive-site journal pages complete");
             if (ui != null && ui.Finale.IsOpen) ui.Finale.Close();
             yield return Wait(0.6f);
             Check(!UIState.PauseOpen, "keep playing after the finale");
@@ -1535,7 +1701,7 @@ namespace Sealebrities
             pc.enabled = true;
             SetTime(0.4f);
             long need = 0;
-            foreach (var g in GearDatabase.All) if (!g.comingSoon && !S.ownedItems.Contains(g.id)) need += Shop.Price(g, false);
+            foreach (var g in GearDatabase.All) if (!g.comingSoon && Shop.IsListed(g) && !S.ownedItems.Contains(g.id)) need += Shop.Price(g, false);
             if (S.money < need) gm.AddMoney(need - S.money + 1000);
             int bought = 0;
             float latest = 0f;
@@ -1543,7 +1709,7 @@ namespace Sealebrities
             var sb = new StringBuilder();
             foreach (var g in GearDatabase.All)
             {
-                if (g.comingSoon || S.ownedItems.Contains(g.id) || Shop.IsOrdered(g)) continue;
+                if (g.comingSoon || !Shop.IsListed(g) || S.ownedItems.Contains(g.id) || Shop.IsOrdered(g)) continue;
                 bool ok = Shop.Buy(g, false);
                 if (!ok) { Check(false, "could not buy " + g.id); continue; }
                 bought++;
@@ -1595,7 +1761,7 @@ namespace Sealebrities
             }
             if (direct > 0) Info(direct + " deliveries still in the air after 150 s were received directly (one flight carries up to 4 crates)");
             int missing = 0;
-            foreach (var g in GearDatabase.All) if (!g.comingSoon && !S.ownedItems.Contains(g.id)) missing++;
+            foreach (var g in GearDatabase.All) if (!g.comingSoon && Shop.IsListed(g) && !S.ownedItems.Contains(g.id)) missing++;
             Check(missing == 0, "every buyable item owned (" + missing + " missing)");
             foreach (var id in new[] { "tank_t5", "fins_t3", "lamp_t3", "cam_t4", "boat_t2", "rod_t2" }) Gear.Equip(id);
             Check(Mathf.Abs(pc.Gear.airSeconds - 220f) < 1f && Mathf.Abs(pc.Gear.maxDepth - 100f) < 0.5f && pc.Gear.swimSpeed > 2f,
@@ -1603,8 +1769,117 @@ namespace Sealebrities
             Metric("economy.allGearPrice", need + " $");
         }
 
+        // ================================================================== 27b core round-2 contracts
+        /// Exercises the core facades of Design_Runde2 J.3/J.3b directly (no UI): the other modules' integration steps
+        /// build on these rules.
+        IEnumerator StepCoreContracts()
+        {
+            var gm = GameManager.I;
+            var s = S;
+
+            // (e) every slider value is repaired: NaN / ∞ / 1e9 / −5 → default or clamped
+            var d = new SettingsData { master = float.NaN, music = 1e9f, sfx = -5f, voice = float.PositiveInfinity, mouseSensitivity = float.NaN, fov = 1e9f, voiceGateDb = float.NaN };
+            Settings.Validate(d);
+            Check(d.master == 1f && d.music == 1f && d.sfx == 0f && d.voice == 1f && d.mouseSensitivity == 1f && d.fov == Settings.MaxFov && d.voiceGateDb == Settings.DefaultVoiceGateDb,
+                  "Settings.Validate: NaN/∞/1e9/−5 → master " + d.master + ", music " + d.music + ", sfx " + d.sfx + ", voice " + d.voice + ", sens " + d.mouseSensitivity + ", fov " + d.fov);
+            Check(!string.IsNullOrEmpty(Settings.PlayerKey), "player key exists (F.3)");
+
+            // K.1 economy
+            Check(Mathf.Abs(Progression.StarterBoost(0) - 2.5f) < 0.001f && Mathf.Abs(Progression.StarterBoost(5000) - 1f) < 0.001f,
+                  "starter boost ×" + F(Progression.StarterBoost(0)) + " at 0 → ×" + F(Progression.StarterBoost(5000)) + " at 5,000 followers");
+            Check(GearDatabase.Get("tank_t1").price == 100 && Progression.MonetizationFollowers == 0, "first tank 100 $, FinTube pays from video 1");
+            Metric("economy.expectedUpload", "1k: " + Progression.ExpectedUploadMoney(1000) + " $ / " + Progression.ExpectedUploadFollowers(1000) + " F; 100k: "
+                   + Progression.ExpectedUploadMoney(100000) + " $ / " + Progression.ExpectedUploadFollowers(100000) + " F");
+            Check(Progression.RankIndex(0) == 0 && Progression.RankIndex(1000000) == Progression.Ranks.Length - 1, "ranks Plankton → " + Progression.RankName(Progression.Ranks.Length - 1));
+
+            // L.1 / L.2 data + Sealog photo and sightings (K.2)
+            int[] pageCounts = new int[SealogPages.All.Length];
+            var pageList = new List<SpeciesDef>();
+            for (int i = 0; i < SealogPages.All.Length; i++) { SpeciesDatabase.ByPage(SealogPages.All[i].id, pageList); pageCounts[i] = pageList.Count; }
+            Check(SpeciesDatabase.Count == 55 && pageCounts[0] == 16, "Sealog 55 species, pages " + string.Join("/", pageCounts));
+            var wrasse = SpeciesDatabase.Get("cleaner_wrasse");
+            var e0 = Journal.Find(wrasse.id);
+            int ph0 = e0 != null ? e0.photos : 0, si0 = e0 != null ? e0.sightings : 0;
+            Journal.RegisterPhoto(wrasse, 10f, SizeTier.Normal, 0.8f, "autoplaytest_photo", 6f, Zones.Bit(Zones.HouseReef));
+            Journal.AddSightings(wrasse.id, 3, 4f, 9f, Zones.Bit(Zones.Lagoon));
+            var e = Journal.Find(wrasse.id);
+            Check(e != null && e.discovered && e.photos == ph0 + 1 && e.sightings == si0 + 4 && e.minDepthSeen <= 4.01f && e.maxDepthSeen >= 8.99f
+                  && (e.zoneMask & Zones.Bit(Zones.Lagoon)) != 0 && e.bestPhotoId == "autoplaytest_photo",
+                  "Sealog photo + sightings: photos " + (e != null ? e.photos : -1) + ", sightings " + (e != null ? e.sightings : -1) + ", depth " + (e != null ? F(e.minDepthSeen, "0") + "–" + F(e.maxDepthSeen, "0") : "-"));
+            Check(wrasse.DepthWeight(8f, false) > 0.99f && wrasse.DepthWeight(1f, false) < 0.4f && wrasse.DepthWeight(60f, false) == 0f, "depth band weights 1.0 at pref, 0.35 at the edge, 0 outside");
+
+            // K.7 sponsor deals: max 2, no topic overlap, cancel → sulk
+            s.sponsor.offers.Clear();
+            s.sponsor.active.Clear();
+            var a = new DealState { dealId = "t_shark", sponsorId = "t_s1", tags = new[] { "shark" }, reward = 100, days = 2 };
+            var b = new DealState { dealId = "t_noshark", sponsorId = "t_s2", tags = new[] { "turtle", "shark" }, reward = 500, days = 2 };
+            var c = new DealState { dealId = "t_ray", sponsorId = "t_s3", tags = new[] { "ray" }, reward = 80, days = 2 };
+            Deals.AddOffer(a); Deals.AddOffer(b); Deals.AddOffer(c);
+            bool acceptA = Deals.Accept(a.id);
+            Deals.CanAccept(b, out string why, out var conflict, out string tag);
+            bool acceptB = Deals.Accept(b.id);
+            bool acceptC = Deals.Accept(c.id);
+            Check(acceptA && !acceptB && acceptC && conflict == a && tag == "shark", "deals: shark accepted, overlapping offer refused (" + why + "), ray accepted");
+            long m0 = s.money;
+            Deals.Complete(c.id);
+            Check(s.money == m0 + 80, "deal done pays +80 $");
+            Check(Deals.Cancel(a.id) && Deals.IsSulking("t_s1") && Deals.Active.Count == 0, "cancel → sponsor sulks " + Deals.SulkDays + " days");
+            s.sponsor.offers.Clear();
+
+            // K.8 Fog Isle stays locked until Toni's map
+            var fog = DiveSites.Get("fog_isle");
+            Check(fog != null && !Progression.IsSiteUnlocked(fog), "Fog Isle locked without the map");
+            StoryFlags.Set(StoryKeys.FogMap);
+            Check(Progression.IsSiteUnlocked(fog) && Progression.IsGateOpen(SpeciesDatabase.Get("coelacanth")), "fog_map → Fog Isle unlocked, its species gate open");
+
+            // L.4 title rules
+            Check(Progression.SanitizeTitle(new string('x', 80) + "\n\t").Length == Progression.MaxTitleLength, "titles cut to " + Progression.MaxTitleLength + " characters");
+
+            // E food + buffs
+            Pantry.Add("krill_bar", 3);
+            bool ate = Pantry.TryEat("krill_bar");
+            Check(ate && Pantry.Count("krill_bar") == 2 && Buffs.Multiplier(BuffType.SwimSpeed) > 1.19f, "pantry: ate a krill bar → swim ×" + F(Buffs.Multiplier(BuffType.SwimSpeed)));
+            Buffs.Clear();
+
+            // K.3 finds
+            var finds = new List<FindSpawn>();
+            Finds.Today("wreck", finds);
+            Check(finds.Count == 7, "wreck finds today: " + finds.Count + " (5 small + 2 heavy)");
+            if (finds.Count > 0)
+            {
+                bool took = Finds.Take(finds[0].id);
+                long sold = Finds.SellAll();
+                Check(took && sold == finds[0].value && Finds.IsTaken(finds[0].id), "find " + (finds[0].def != null ? finds[0].def.id : "?") + " dug up and sold for " + sold + " $");
+            }
+
+            // K.3 challenges + L.7 quest limit
+            Check(Challenges.Today.Count == ChallengeDatabase.PerDay, "today's photo challenges: " + string.Join(", ", Challenges.Today));
+            Quests.Start("t_q1"); Quests.Start("t_q2"); Quests.Start("t_q3");
+            Check(!Quests.Start("t_q4") && Quests.Start(Quests.ToniChain), "max 3 side quests (+ Toni's chain)");
+            // free the three slots again (step 39 starts a real side quest)
+            Quests.Drop("t_q1"); Quests.Drop("t_q2"); Quests.Drop("t_q3");   // (Toni's chain is a story chain: it stays)
+            yield return null;
+            gm.Save();
+        }
+
         // ================================================================== filming helpers
         float FilmDistance(ICreature c) => Mathf.Clamp(c.SizeCm / 100f * 2.2f, 1.4f, 7f);
+
+        /// Moves a spawn point up (in 0.75 m steps, ≤ 6 m) until it is free of geometry and visible from the eye –
+        /// at the wreck the test animals were spawned inside the hull and could never be photographed.
+        static Vector3 OpenWaterSpot(Vector3 eye, Vector3 p)
+        {
+            for (int i = 0; i < 9; i++)
+            {
+                Vector3 q = p + Vector3.up * (0.75f * i);
+                if (q.y > Waves.SeaLevel - 1.2f) break;
+                Vector3 to = q - eye;
+                bool blocked = Physics.CheckSphere(q, 1.0f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)
+                               || Physics.Raycast(eye, to.normalized, Mathf.Max(0f, to.magnitude - 1.0f), Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+                if (!blocked) return q;
+            }
+            return p;
+        }
 
         /// Keeps the (frozen) player's camera at `dist` from the animal (fixed approach direction, yaw offset in
         /// degrees), with Aim held / recording as requested, for `seconds`. Results in film* fields.
@@ -1623,9 +1898,18 @@ namespace Sealebrities
             bool disc0 = Journal.IsDiscovered(id);
             int clips0 = Footage.DiveCount;
             Vector3 approach = Flat(c.Position - cam.transform.position);
+            // K.2: LMB while aiming takes a photo – toggle the recording first, then raise the viewfinder
+            if (hc.IsRecording != record)
+            {
+                GameInput.SimRelease(GameAction.Aim);
+                yield return null;
+                if (record) GameInput.SimTap(GameAction.Use);
+                else hc.StopRecording();
+                yield return null;
+                yield return null;
+            }
             if (aim) GameInput.SimPress(GameAction.Aim);
             else GameInput.SimRelease(GameAction.Aim);
-            if (hc.IsRecording != record) GameInput.SimTap(GameAction.Use);
             float t = 0f;
             bool shot = false;
             var seen = new HashSet<FilmHint>();
@@ -1653,8 +1937,9 @@ namespace Sealebrities
         IEnumerator StopFilming()
         {
             var hc = Refs.HandCamera as FilmHandCamera;
-            if (hc != null && hc.IsRecording) GameInput.SimTap(GameAction.Use);
             GameInput.SimRelease(GameAction.Aim);
+            // API stop: a simulated LMB under water would suppress the K.2 auto-record for the rest of the dive
+            if (hc != null && hc.IsRecording) hc.StopRecording();
             yield return null;
             yield return null;
             yield return null;
@@ -1668,6 +1953,22 @@ namespace Sealebrities
             if (d.sqrMagnitude < 1e-4f) d = approach;
             Quaternion r = Quaternion.LookRotation(d.normalized, Vector3.up) * Quaternion.Euler(0f, yawOff, 0f);
             cam.transform.SetPositionAndRotation(eye, r);
+        }
+
+        /// Despawns every other animal within r of p (test frames: the Sealog subject must be the test animal).
+        void ClearAround(ICreature keep, Vector3 p, float r)
+        {
+            var sp = Refs.Spawner;
+            if (sp == null) return;
+            var reg = CreatureRegistry.Active;
+            var drop = new List<ICreature>();
+            for (int i = 0; i < reg.Count; i++)
+            {
+                var c = reg[i];
+                if (c == null || (c is Object o && o == null) || ReferenceEquals(c, keep) || !c.IsAlive) continue;
+                if ((c.Position - p).sqrMagnitude < r * r) drop.Add(c);
+            }
+            for (int i = 0; i < drop.Count; i++) sp.Despawn(drop[i]);
         }
 
         ICreature SpawnAt(string id, Vector3 pos, SizeTier tier)
@@ -2094,6 +2395,7 @@ namespace Sealebrities
             RestoreSettings();
             RestoreSave();
             DeleteTestPhotos();
+            DeleteTestThumbs();
             report.finished = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", Inv);
             Note("done: " + report.passed + " passed, " + report.failed + " failed, " + report.skipped + " skipped, " + errorCount + " logged errors");
             WriteReport();

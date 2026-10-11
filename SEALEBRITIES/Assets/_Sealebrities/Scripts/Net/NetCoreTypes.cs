@@ -229,6 +229,10 @@ namespace Sealebrities
             {
                 var p = Net.Players[i];
                 sb.Append('\n').Append(p.IsLocal ? "* " : "  ").Append(p.id).Append(' ').Append(p.name).Append("  ").Append(p.pingMs).Append(" ms");
+                if (p.IsLocal) continue;
+                // F.5: how this player's voice reaches us right now (air 30 m / water 10 m / radio 200 m)
+                sb.Append("  voice ").Append(NetVoice.LinkOf(p.id)).Append(' ').Append((int)NetVoice.RangeOf(p.id)).Append(" m");
+                if (NetRescue.IsUnconscious(p.id)) sb.Append("  UNCONSCIOUS");
             }
             if (!string.IsNullOrEmpty(LastError)) sb.Append("\nlast error: ").Append(LastError);
             return sb.ToString();

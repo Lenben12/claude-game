@@ -69,7 +69,8 @@ namespace Sealebrities
         public float MaxSafeDepth => PlayerIntro.Playing ? 9999f : gear.maxDepth;
         public bool FlashlightOn => flashlight != null && flashlight.On;
         public bool IsSeated => seated;
-        public bool IsFainting { get; private set; }
+        /// Fainting (fade to the rescue point) or unconscious in co-op (F.1, PlayerController.Rescue.cs).
+        public bool IsFainting => fainting || unconscious;
         public float LookAngularSpeed => lookAngularSpeed;
 
         // ------------------------------------------------------------------ module-internal state (used by PlayerHands/Flashlight/Interactor/Narcosis/UI)
@@ -132,6 +133,9 @@ namespace Sealebrities
             GameEvents.DayStarted += OnDayStarted;
             GameEvents.GearChanged += OnGearChanged;
             GameEvents.PlayerBumped += OnBumped;
+            GameEvents.BuffsChanged += OnBuffsChanged;
+            GameEvents.Mischief += OnMischief;
+            CharacterScreen.LookSaved += OnSelfieLookSaved;
         }
 
         void OnDestroy()
@@ -143,8 +147,13 @@ namespace Sealebrities
                 GameEvents.DayStarted -= OnDayStarted;
                 GameEvents.GearChanged -= OnGearChanged;
                 GameEvents.PlayerBumped -= OnBumped;
+                GameEvents.BuffsChanged -= OnBuffsChanged;
+                GameEvents.Mischief -= OnMischief;
+                CharacterScreen.LookSaved -= OnSelfieLookSaved;
                 subscribed = false;
             }
+            if (selfie) ExitSelfie();
+            DestroySelfieModel();
             menuCam.End();
             Divers.Remove(transform);
             if (ReferenceEquals(Refs.Player, this)) Refs.Player = null;
@@ -167,6 +176,26 @@ namespace Sealebrities
             return p + Vector3.up * 0.05f;
         }
 
+        /// K.5: a brand-new game starts at the helipad next to Wanda's chopper (the npc module's prologue runs there);
+        /// automated runs keep the hut start unless -prologue is given, co-op clients spawn where the host's world says.
+        static bool UsePrologueSpawn()
+        {
+            var gm = GameManager.I;
+            if (gm == null || !gm.NeedsPrologue || Net.IsClient) return false;
+            if (GameManager.AutomatedRun && System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-prologue") < 0) return false;
+            return gm.State != null && gm.State.day <= 1 && gm.State.questIndex == 0;
+        }
+
+        static Vector3 ResolvePrologueSpawn(out float yawDeg)
+        {
+            Vector3 p = WorldLayout.NewGameSpawn;
+            yawDeg = WorldLayout.NewGameSpawnYaw;
+            float ground = Mathf.Max(WorldInfo.GroundHeight(p), Waves.SeaLevel + 0.5f);
+            if (Physics.Raycast(new Vector3(p.x, ground + 30f, p.z), Vector3.down, out RaycastHit hit, 60f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+                ground = hit.point.y;
+            return new Vector3(p.x, ground + 0.05f, p.z);
+        }
+
         // ------------------------------------------------------------------ events
         void OnGameStarted()
         {
@@ -175,7 +204,7 @@ namespace Sealebrities
             RefreshStats();
             ResetTransientState();
             pitch = 0f;
-            Vector3 p = ResolveSpawn(out float y);
+            Vector3 p = UsePrologueSpawn() ? ResolvePrologueSpawn(out float y) : ResolveSpawn(out y);
             TeleportTo(p, y);
             RefillAir();
             if (flashlight != null) flashlight.ForceOff();
@@ -223,7 +252,7 @@ namespace Sealebrities
                 gear = gm.Gear;
                 diff = gm.Difficulty;
             }
-            airCapacity = Mathf.Max(1f, gear.airSeconds);
+            airCapacity = BuffedAirSeconds;   // E.2: AirCapacity food buff
             if (airLeft > airCapacity) airLeft = airCapacity;
             if (flashlight != null) flashlight.Refresh(gear);
         }
@@ -233,7 +262,12 @@ namespace Sealebrities
             if (seated) { seated = false; seat = null; seatYaw = 0f; }
             if (vaulting) { vaulting = false; vaultRef = null; }
             ladderClimbing = false;
-            IsFainting = false;
+            CancelGenericLadder();
+            if (crouching) SetCrouch(false);
+            if (selfie) ExitSelfie();
+            lyingCam = false;
+            fainting = false;
+            ResetRescue();
             rescueActive = false;
             pendingFade = null;
             trauma = 0f;
@@ -291,7 +325,7 @@ namespace Sealebrities
                 camT.SetParent(head, false);
                 camT.localPosition = Vector3.zero;
                 camT.localRotation = Quaternion.identity;
-                cam.fieldOfView = DefaultFov;
+                cam.fieldOfView = GameplayFov;
             }
             if (cc != null && !seated) cc.enabled = true;
             if (hands != null) hands.SetVisible(true);
@@ -333,18 +367,30 @@ namespace Sealebrities
             dt = Mathf.Min(dt, 0.1f);
 
             bool input = !UIState.BlocksGameplay && !IsFainting && !rescueActive && !vaulting && !ladderClimbing;
-            if (input) Hands.HandleInput();
-            UpdateLook(input);
+            // the generic ladders (L.13) still let you look around (pitch −50…+60°, yaw ±80° around the ladder)
+            bool lookInput = !UIState.BlocksGameplay && !IsFainting && !rescueActive && !vaulting && (!ladderClimbing || genLadder);
+            UpdateSelfieToggle();
+            if (input && !selfie) HandleHotbarInput();
+            bool lying = UpdateLying(input);
+            if (selfie) UpdateSelfieLook(lookInput, dt);
+            else UpdateLook(lookInput);
+            UpdateLadderProbe(dt);
 
             if (seated) FollowSeat();
-            else if (ladderClimbing) UpdateLadder(dt);
+            else if (ladderClimbing)
+            {
+                if (genLadder) UpdateGenericLadder(dt);
+                else UpdateLadder(dt);
+            }
             else if (vaulting) UpdateVault(dt);
-            else UpdateMovement(input, dt);
+            else UpdateMovement(input && !lying, dt);
 
             UpdateWaterState(dt);
             UpdateVaultHint(dt);
             UpdateAir(dt);
+            UpdateRescue(dt);
             MeasureVelocity(dt);
+            UpdateMotionState(dt);
         }
 
         void LateUpdate()
@@ -375,6 +421,8 @@ namespace Sealebrities
             else LatePlatformCarry();
             if (dt <= 0f) return;
             UpdateCameraPose(Mathf.Min(dt, 0.1f));
+            ApplyLyingCamera();
+            ApplySelfieCamera(Mathf.Min(dt, 0.1f));
             MeasureLook(dt);
         }
 
@@ -396,13 +444,29 @@ namespace Sealebrities
             {
                 Vector2 d = GameInput.Look;
                 if (lookSkipFrames > 0) { lookSkipFrames--; d = Vector2.zero; }
-                // slower look when the camera is zoomed in (the filming module may narrow the FOV)
-                float fovScale = cam != null ? Mathf.Clamp(cam.fieldOfView / DefaultFov, 0.15f, 1.25f) : 1f;
+                // slower look when the camera is zoomed in (the filming module may narrow the FOV); relative to the
+                // player's FOV setting, so a wide FOV does not speed the mouse up
+                float fovScale = cam != null ? Mathf.Clamp(cam.fieldOfView / GameplayFov, 0.15f, 1.25f) : 1f;
                 d = Vector2.ClampMagnitude(d * fovScale, 60f);
                 lookDelta = d;
-                pitch = Mathf.Clamp(pitch - d.y, -85f, 85f);
-                if (seated) seatYaw = Mathf.Clamp(seatYaw + d.x, -110f, 110f);
-                else yaw = Mathf.Repeat(yaw + d.x, 360f);
+                if (lyingCam)
+                {
+                    // L.9 lying on a sleep spot: look around a little, the body stays put
+                    lieYawOff = Mathf.Clamp(lieYawOff + d.x, -60f, 60f);
+                    liePitchOff = Mathf.Clamp(liePitchOff - d.y, -40f, 50f);
+                }
+                else if (OnGenericLadder)
+                {
+                    // L.13: pitch −50…+60°, yaw ±80° around the ladder
+                    pitch = Mathf.Clamp(pitch - d.y, -50f, 60f);
+                    yaw = Mathf.Repeat(ladYaw + Mathf.Clamp(Mathf.DeltaAngle(ladYaw, yaw + d.x), -80f, 80f), 360f);
+                }
+                else
+                {
+                    pitch = Mathf.Clamp(pitch - d.y, -85f, 85f);
+                    if (seated) seatYaw = Mathf.Clamp(seatYaw + d.x, -110f, 110f);
+                    else yaw = Mathf.Repeat(yaw + d.x, 360f);
+                }
             }
             head.localRotation = Quaternion.Euler(pitch, 0f, 0f);
             if (!seated) transform.rotation = Quaternion.Euler(0f, yaw, 0f);
@@ -437,25 +501,36 @@ namespace Sealebrities
         // ------------------------------------------------------------------ camera pose (bob, sway, shake, faint)
         void UpdateCameraPose(float dt)
         {
-            eyeHeight = Mathf.Lerp(eyeHeight, seated ? HelmEyeHeight : EyeHeight, 1f - Mathf.Exp(-6f * dt));
+            // Q99 comfort toggles: head bob (walk bob, sway, wave tilt) and camera shake (bumps, dips) – × 0 when off
+            float bobOn = HeadBobOn ? 1f : 0f;
+            float shakeOn = CameraShakeOn ? 1f : 0f;
+
+            // Q98: the player's FOV (the filming zoom divides it after us; the selfie view owns its own lens)
+            if (cam != null && !SelfieState.Active)
+            {
+                float fov = GameplayFov;
+                if (Mathf.Abs(cam.fieldOfView - fov) > 0.01f) cam.fieldOfView = fov;
+            }
+
+            eyeHeight = Mathf.Lerp(eyeHeight, seated ? HelmEyeHeight : crouching ? CrouchEyeHeight : EyeHeight, 1f - Mathf.Exp(-(crouching ? 10f : 6f) * dt));
             landDip = Mathf.Lerp(landDip, 0f, 1f - Mathf.Exp(-7f * dt));
-            head.localPosition = new Vector3(0f, eyeHeight - landDip, 0f);
+            head.localPosition = new Vector3(0f, eyeHeight - landDip * shakeOn, 0f);
             head.localRotation = Quaternion.Euler(pitch, 0f, 0f);
 
             // walking head bob: one vertical dip per step, one lateral sway per two steps
             float vb = (1f - Mathf.Cos(2f * bobPhase)) * 0.5f;
-            Vector3 offset = new Vector3(Mathf.Sin(bobPhase) * 0.016f, -vb * 0.032f, 0f) * bobAmp;
+            Vector3 offset = new Vector3(Mathf.Sin(bobPhase) * 0.016f, -vb * 0.032f, 0f) * (bobAmp * bobOn);
 
             float t = Time.time;
-            float roll = 0f, extraPitch = 0f, extraYaw = 0f;
-            if (isUnderwater && !seated)
+            float roll = LadderCameraRoll(dt) * bobOn, extraPitch = 0f, extraYaw = 0f;
+            if (isUnderwater && !seated && !ladderClimbing)
             {
-                roll += Mathf.Sin(t * 0.55f) * 0.9f;
-                extraPitch += Mathf.Sin(t * 0.43f + 1.3f) * 0.5f;
-                roll -= Mathf.Clamp(Vector3.Dot(vel, transform.right), -3f, 3f) * 1.4f;   // bank into lateral motion
-                offset.y += Mathf.Sin(t * 0.8f) * 0.012f;
+                roll += Mathf.Sin(t * 0.55f) * 0.9f * bobOn;
+                extraPitch += Mathf.Sin(t * 0.43f + 1.3f) * 0.5f * bobOn;
+                roll -= Mathf.Clamp(Vector3.Dot(vel, transform.right), -3f, 3f) * 1.4f * bobOn;   // bank into lateral motion
+                offset.y += Mathf.Sin(t * 0.8f) * 0.012f * bobOn;
             }
-            else if (mode == PlayerMoveMode.Surface && isInWater)
+            else if (mode == PlayerMoveMode.Surface && isInWater && bobOn > 0f)
             {
                 Vector3 p = transform.position;
                 Vector3 n = Waves.NormalAt(p.x, p.z);
@@ -463,9 +538,9 @@ namespace Sealebrities
                 extraPitch += Vector3.Dot(n, transform.forward) * Mathf.Rad2Deg * 0.4f;
             }
 
-            // camera shake (bumps)
+            // camera shake (bumps); the steady-hands food buff calms it (E.2)
             trauma = Mathf.Max(0f, trauma - dt * 1.1f);
-            float s = trauma * trauma;
+            float s = trauma * trauma * shakeOn * SteadyShakeFactor;
             if (s > 0.0001f)
             {
                 float tt = t * 17f;

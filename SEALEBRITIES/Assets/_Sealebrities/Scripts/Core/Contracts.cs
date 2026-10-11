@@ -125,10 +125,33 @@ namespace Sealebrities
         public static bool LoadingOpen;
         /// Inventory / equip screen (I key) – the world keeps running, but movement, look and the hotbar are blocked.
         public static bool InventoryOpen;
-        public static bool BlocksGameplay => PhoneOpen || PauseOpen || MainMenuOpen || LoadingOpen || InventoryOpen;
+        /// Character screen (1c) is open – blocks gameplay; GameInput Left/Right/Forward/Back drive the preview instead.
+        public static bool CharacterOpen;
+        /// A text field has focus (FinTube title, name field – L.4): GameInput ignores every action except Pause (Esc);
+        /// Enter is read by the UI itself (GameInput.KeyDown(Key.Enter)).
+        public static bool TextInput;
+        /// The selfie frame is shown (K.4). Does NOT block gameplay (WASD still moves at ×0.6).
+        public static bool SelfieOpen;
+        public static bool BlocksGameplay => PhoneOpen || PauseOpen || MainMenuOpen || LoadingOpen || InventoryOpen || CharacterOpen;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { PhoneOpen = false; PauseOpen = false; MainMenuOpen = true; LoadingOpen = true; InventoryOpen = false; }
+        static void ResetStatics()
+        {
+            PhoneOpen = false; PauseOpen = false; MainMenuOpen = true; LoadingOpen = true; InventoryOpen = false;
+            CharacterOpen = false; TextInput = false; SelfieOpen = false;
+        }
+    }
+
+    /// Fixed render layers (1c, 1d). The world camera excludes Preview and ViewModel; CreatureIcons is the icon studio.
+    public static class GameLayers
+    {
+        /// Character-screen preview stage at (0, 420, 0) – only the preview camera renders it.
+        public const int Preview = 29;
+        /// First-person held items (hands, lamp, camera, rod, phone, wrist computer) – drawn by the overlay camera.
+        public const int ViewModel = 30;
+        /// Creature icon studio (Fauna CreatureIcons).
+        public const int CreatureIcons = 31;
+        public const int PreviewMask = 1 << Preview, ViewModelMask = 1 << ViewModel, CreatureIconsMask = 1 << CreatureIcons;
     }
 
     /// Current interaction hint written by the Player module's interactor, shown by the UI (null = none).
@@ -192,6 +215,12 @@ namespace Sealebrities
     }
 
     /// Fixed world layout shared by World, Boat, Player and Fauna modules. Heights (y) are resolved from the terrain at runtime.
+    ///
+    /// Round 2b (third player message s, Design_Runde2 L.5): the main island is 0.62 of its Testversion-3 width. Every
+    /// map-scale anchor below is the TV3 value × 0.62 (verified in scratchpad/design2_l/r3); feature geometry (plateaus,
+    /// dock width, cliff heights, cave passage, ravine width/depth, ladder lengths) keeps its size. Legacy map literals in
+    /// other files are wrapped in Isl(x, z) (= TV3 value × IslandScale); offsets from an anchor stay unchanged.
+    /// The four outer dive sites and their landmark islands do not move; the house reef moves with the dock (DiveSites).
     public static class WorldLayout
     {
         public const float TerrainSize = 2048f;          // terrain spans [-1024, 1024] on X and Z
@@ -199,39 +228,75 @@ namespace Sealebrities
         public const float TerrainHeightRange = 230f;    // terrain covers -170 .. +60
         public const int HeightmapResolution = 2049;
 
-        public static readonly Vector3 IslandCenter = new Vector3(0f, 0f, 0f);
-        public const float IslandRadius = 190f;          // shoreline radius (irregular)
-        public const float IslandPeak = 42f;             // jungle hill / lighthouse cliff
+        /// Linear map scale of the main island against Testversion 3 (0.75 plan of 1a → 0.62, L.5). Used by Isl().
+        public const float IslandScale = 0.62f;
 
-        public static readonly Vector3 Hut = new Vector3(118f, 0f, 18f);
-        public static readonly Vector3 Bed = new Vector3(116f, 0f, 22f);
-        public static readonly Vector3 TV = new Vector3(121f, 0f, 14f);
-        public static readonly Vector3 Helipad = new Vector3(70f, 0f, -70f);
-        public static readonly Vector3 DockStart = new Vector3(168f, 0f, 6f);
-        public static readonly Vector3 DockEnd = new Vector3(206f, 0f, 6f);
-        public static readonly Vector3 BoatSpawn = new Vector3(212f, 0f, 14f);
+        public static readonly Vector3 IslandCenter = new Vector3(0f, 0f, 0f);
+        public const float IslandRadius = 118f;          // mean shoreline radius 122 m (irregular) – TV3 190
+        public const float IslandPeak = 30f;             // lighthouse plateau – TV3 42
+
+        public static readonly Vector3 Hut = new Vector3(73f, 0f, 11f);
+        public static readonly Vector3 Bed = new Vector3(71f, 0f, 15f);                 // Hut + (-2, 4)
+        public static readonly Vector3 TV = new Vector3(76f, 0f, 7f);                   // Hut + (3, -4)
+        public static readonly Vector3 Helipad = new Vector3(43f, 0f, -43f);
+        public static readonly Vector3 DockStart = new Vector3(104f, 0f, 4f);           // shoreline
+        public static readonly Vector3 DockEnd = new Vector3(134f, 0f, 4f);             // dock 30 m, 2.75 m water at the end
+        public static readonly Vector3 BoatSpawn = new Vector3(140f, 0f, 12f);          // DockEnd + (6, 8), water 2.9 m
         public const float BoatSpawnYaw = 90f;
-        public static readonly Vector3 FishingSpot = new Vector3(205f, 0f, 3f);
-        public static readonly Vector3 Lighthouse = new Vector3(-30f, 0f, 150f);
-        public static readonly Vector3 HiddenBay = new Vector3(-185f, 0f, -30f);
-        public static readonly Vector3 PlayerSpawn = new Vector3(114f, 0f, 22f);
+        public static readonly Vector3 FishingSpot = new Vector3(133f, 0f, 1f);         // DockEnd + (-1, -3)
+        public static readonly Vector3 Lighthouse = new Vector3(-19f, 0f, 93f);
+        public static readonly Vector3 HiddenBay = new Vector3(-115f, 0f, -19f);
+        /// Later days start at the bed. A NEW game starts at NewGameSpawn (prologue at the helipad, K.5).
+        public static readonly Vector3 PlayerSpawn = new Vector3(69f, 0f, 15f);         // Hut + (-4, 4)
         public const float PlayerSpawnYaw = 90f;
+        /// K.5 prologue: the player steps out of Wanda's chopper on the helipad (Helipad + (4, 0, 6)).
+        public static readonly Vector3 NewGameSpawn = new Vector3(47f, 0f, -37f);
+        public const float NewGameSpawnYaw = 45f;
 
         // Points of interest on the main island (World shapes the terrain for them, Props fills them with content).
-        public static readonly Vector3 WaterfallTop = new Vector3(-70f, 0f, 70f);     // cliff edge ~8 m above the pool
-        public static readonly Vector3 WaterfallPool = new Vector3(-55f, 0f, 45f);    // small basin with a beach
-        public static readonly Vector3 CaveEntrance = new Vector3(-110f, 0f, 110f);   // opening in the lighthouse hill
-        public static readonly Vector3 Ravine = new Vector3(-20f, 0f, -40f);          // east-west ravine crossed by a rope bridge
-        public static readonly Vector3 TidePools = new Vector3(150f, 0f, -95f);       // rocky south-east shore
-        public static readonly Vector3 SecondBeach = new Vector3(40f, 0f, -178f);     // southern beach
-        public static readonly Vector3 RadioTowerRuins = new Vector3(-120f, 0f, -110f);
+        public static readonly Vector3 WaterfallTop = new Vector3(-43f, 0f, 43f);       // falls' lip (21.85 m)
+        public static readonly Vector3 WaterfallPool = new Vector3(-28f, 0f, 18f);      // Top + (15, -25), pool beach
+        /// L.5: the cave mouth sits in the waterfall cliff, 16 m west of the falls ("Wasserfall-Grotte", floor 14.4 m).
+        public static readonly Vector3 CaveEntrance = new Vector3(-56f, 0f, 33.5f);
+        public static readonly Vector3 Ravine = new Vector3(-12f, 0f, -25f);            // east-west ravine, rope bridge
+        public static readonly Vector3 TidePools = new Vector3(93f, 0f, -59f);          // rocky south-east shore
+        /// The old second beach – now the beach in front of the village Altriff (L.8).
+        public static readonly Vector3 SecondBeach = new Vector3(25f, 0f, -110f);
+        public static readonly Vector3 RadioTowerRuins = new Vector3(-72f, 0f, -72f);   // plateau 15 m
 
-        /// Small landmark islands next to the outer dive sites (center, radius in meters).
+        // ---- round 2b anchors (K.5, K.8, L.5, L.8, L.12)
+        /// Village terrace centre (1.7 m, ellipse 24 × 12 m half-axes); stilt houses stand in the lagoon south of it.
+        public static readonly Vector3 Village = new Vector3(25f, 0f, -98f);
+        /// Driftwood beach on the north-east coast – Toni washes up here (K.8); his raft lies in the shallows.
+        public static readonly Vector3 DriftwoodBeach = new Vector3(60f, 0f, 100f);
+        public static readonly Vector3 DriftwoodRaft = new Vector3(66f, 0f, 104f);
+        /// Wanda's hangar shack on the helipad plateau (L.12).
+        public static readonly Vector3 HangarSpot = new Vector3(56f, 0f, -52f);
+        /// Floating swim raft with a diving board in the lagoon (L.5 detail spot 3).
+        public static readonly Vector3 SwimRaft = new Vector3(118f, 0f, 34f);
+
+        /// Small landmark islands next to the outer dive sites (center, radius in meters). UNCHANGED in round 2.
         public static readonly Vector3 KelpIsland = new Vector3(-470f, 0f, 420f);
         public static readonly Vector3 WreckIsland = new Vector3(600f, 0f, -470f);
         public static readonly Vector3 BlueDropIsland = new Vector3(-800f, 0f, -650f);
         public static readonly Vector3 TrenchIsland = new Vector3(915f, 0f, 840f);
         public const float MiniIslandRadius = 42f;
+
+        /// The secret Fog Isle from Toni's map (K.8): landmark island (shore 30 m, peak 16 m), dive site "fog_isle".
+        public static readonly Vector3 FogIsland = new Vector3(-60f, 0f, 700f);
+        public const float FogIslandShoreRadius = 30f;
+        /// Fog bank ring around the Fog Isle (K.8): without the map the boat drifts outward inside this radius.
+        public const float FogBankRadius = 260f;
+        /// Buoy lane through the fog (6 yellow buoys, 30 m wide) – clear once StoryKeys.FogMap is set.
+        public static readonly Vector3 FogLaneStart = new Vector3(-60f, 0f, 420f);
+        public static readonly Vector3 FogLaneEnd = new Vector3(-60f, 0f, 560f);
+        public const float FogLaneWidth = 30f;
+
+        /// A Testversion-3 map literal on the main island scaled to the round-2b island (x × IslandScale, z × IslandScale).
+        /// Offsets from an anchor (hut.x + 6f …) are NOT wrapped.
+        public static Vector2 Isl(float x, float z) => new Vector2(x * IslandScale, z * IslandScale);
+        /// Same as Isl for a Vector3 literal (y unchanged).
+        public static Vector3 Isl3(float x, float y, float z) => new Vector3(x * IslandScale, y, z * IslandScale);
     }
 
     /// Bridge between the UI (renders the phone screen into Texture) and the Player (shows a 3D phone in the hand
@@ -297,5 +362,304 @@ namespace Sealebrities
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics() { Built = false; Terrain = null; Sun = null; HeightProvider = null; }
+    }
+
+    // =============================================================================================
+    // Round 2 contracts (Design_Runde2 J.3 / J.3b). Stubs where the logic belongs to another module.
+    // =============================================================================================
+
+    // 1f "Zur Hütte" also brings the boat home: implemented by the Boat module in Boat/BoatHome.cs
+    // (BoatHome.AfterLocalPlayerWentHome – the UI pause menu calls it; clients send NetCommand.Custom "BoatHome",
+    // registered by BoatHome.Install through CoreCommands.RegisterCustom). J.3's BoatHome.Handler/Request is not needed.
+
+    /// 1c character screen. Opened from the first start, main menu, co-op lobby, pause menu and the hut locker.
+    public static class CharacterScreen
+    {
+        /// Set by the UI module (UICharacterScreen).
+        public static Action<CharacterScreenContext> OpenHandler;
+        /// Raised by the UI when the screen closes (saved = "Fertig" pressed, false = cancelled).
+        public static event Action Closed;
+        /// Raised by the UI after "Fertig" saved a new look (the Net module broadcasts NetSyncMsg.LookChanged).
+        public static event Action LookSaved;
+
+        public static bool IsOpen => UIState.CharacterOpen;
+
+        public static void Open(CharacterScreenContext ctx)
+        {
+            if (OpenHandler != null) OpenHandler(ctx);
+            else Debug.LogWarning("[Core] CharacterScreen.Open without a UI handler (" + ctx + ")");
+        }
+
+        public static void RaiseClosed() => Closed?.Invoke();
+        public static void RaiseLookSaved() => LookSaved?.Invoke();
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { OpenHandler = null; Closed = null; LookSaved = null; }
+    }
+
+    /// 1c live 3D preview of a bean diver (implemented by Player/CharacterPreview on layer GameLayers.Preview).
+    public interface ICharacterPreview
+    {
+        RenderTexture Texture { get; }
+        void SetLook(DiverLook look);
+        void AddYaw(float degrees);
+        void Focus(PreviewFocus focus);
+        /// The 0.6 s "ta-da" after a change.
+        void PlayReaction();
+        /// Destroys the stage, camera and render texture (call on close – zero cost while closed).
+        void Dispose();
+    }
+
+    /// Set by the Player module. Argument = render texture size (1024 / 768 / 512 by quality tier).
+    public static class CharacterPreviewFactory
+    {
+        public static Func<int, ICharacterPreview> Create;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { Create = null; }
+    }
+
+    /// Published by the Boat module every FixedUpdate; read by fauna (dolphins), livestream (signal), wrist computer.
+    public static class BoatTelemetry
+    {
+        public static bool Valid;
+        public static Vector3 Position;
+        /// m/s over ground.
+        public static float Speed;
+        public static bool Anchored;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { Valid = false; Position = Vector3.zero; Speed = 0f; Anchored = false; }
+    }
+
+    /// Viewfinder feedback published by the Filming module every detection tick (K.2), drawn by the UI.
+    /// Fixed arrays – no allocations; only the first BracketCount entries are valid.
+    public static class ViewfinderInfo
+    {
+        public const int MaxBrackets = 8;
+        public static ShotHint Hint;
+        /// 0..1 photo/thumbnail quality of the current framing (Q31, L.4).
+        public static float ThumbQuality01;
+        /// Animals detected in frame right now ("● REC 0:42 · 3").
+        public static int DetectedCount;
+        /// Viewport rect of each detected animal: (xMin, yMin, xMax, yMax) in 0..1, origin bottom-left.
+        public static readonly Vector4[] Brackets = new Vector4[MaxBrackets];
+        /// (int)SizeTier of each bracket (colour).
+        public static readonly byte[] BracketTier = new byte[MaxBrackets];
+        /// Species not yet in the Sealog (pulsing #F2C94C bracket with "?").
+        public static readonly bool[] BracketNew = new bool[MaxBrackets];
+        public static int BracketCount;
+        /// Valid Sealog photo subject inside the central 40 % frame (null = none) – the frame turns green.
+        public static SpeciesDef SealogSubject;
+
+        public static void Clear()
+        {
+            Hint = ShotHint.None; ThumbQuality01 = 0f; DetectedCount = 0; BracketCount = 0; SealogSubject = null;
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { Clear(); }
+    }
+
+    /// K.4 selfie view state of the LOCAL player – set by the Player module, read by Filming / UI / Net (avatar bytes).
+    public static class SelfieState
+    {
+        public static bool Active;
+        /// (int)SelfieExpression currently shown (manual pick or automatic).
+        public static int Expression;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { Active = false; Expression = 0; }
+    }
+
+    /// One climbable ladder (L.13). Props publish every ladder in PropInfo.Ladders; the player climbs any of them.
+    [Serializable]
+    public struct LadderInfo
+    {
+        public const byte Wood = 0, Rope = 1, Metal = 2;
+        public Vector3 bottom, top;
+        /// Horizontal unit vector pointing away from the wall (the climber faces −outward).
+        public Vector3 outward;
+        /// 0.30 m by default.
+        public float rungSpacing;
+        /// Wood / Rope / Metal (grab sounds).
+        public byte kind;
+        /// The prop's ladder object (null = always usable). Inactive owner = the ladder is not there right now (the
+        /// lighthouse cellar ladder until the trapdoor is open) – the generic climb must ignore it.
+        public Transform owner;
+        public float Length => Vector3.Distance(bottom, top);
+        /// False while the owning prop object is switched off.
+        public bool Usable => ReferenceEquals(owner, null) || (owner != null && owner.gameObject.activeInHierarchy);
+    }
+
+    /// Optional second animation surface of a built diver (L.13 motion set). The Player module's DiverPuppet implements
+    /// it next to IDiverPuppet; avatars/NPCs check `puppet as IDiverMotion`.
+    public interface IDiverMotion
+    {
+        /// state + speed (m/s) + phase (0..1 of the current cycle, sent by net so co-op avatars stay in step).
+        void SetMotion(MotionState state, float speed, float phase, HoldItem right, HoldItem left, bool lightOn);
+        /// Selfie / emote expression (SelfieExpression as int); 0 = automatic.
+        void SetExpression(int expression);
+    }
+
+    /// K.3 animal event currently running near the local player (host: set by Fauna; clients: mirrored by Net 101).
+    public static class FaunaEventInfo
+    {
+        /// Event id ("feeding_frenzy", "cleaning_station", "big_school", "encounter", "predator_hunt", "night_glow",
+        /// "whale_song", "deep_parade") or null when none runs.
+        public static string ActiveId;
+        /// Zone of the event (site id, "lagoon", "open_sea" …).
+        public static string ZoneId;
+        public static Vector3 Center;
+        /// Time.time on THIS machine when the event ends (net converts from remaining seconds).
+        public static float EndsAt;
+        public static event Action Changed;
+
+        public static bool IsActive => !string.IsNullOrEmpty(ActiveId) && Time.time < EndsAt;
+
+        /// Clips taken within this distance of the centre during the event get its eventId (K.3).
+        public const float ClipRadius = 20f;
+
+        public static void Start(string id, string zoneId, Vector3 center, float secondsLeft)
+        {
+            ActiveId = id; ZoneId = zoneId; Center = center; EndsAt = Time.time + Mathf.Max(0f, secondsLeft);
+            Changed?.Invoke();
+            GameEvents.RaiseFaunaEventStarted(id);
+        }
+
+        public static void End()
+        {
+            if (string.IsNullOrEmpty(ActiveId)) return;
+            string id = ActiveId;
+            ActiveId = null; ZoneId = null;
+            Changed?.Invoke();
+            GameEvents.RaiseFaunaEventEnded(id);
+        }
+
+        /// The event id a clip at this position should carry right now (null = none).
+        public static string EventAt(Vector3 p) =>
+            IsActive && (p - Center).sqrMagnitude <= ClipRadius * ClipRadius ? ActiveId : null;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { ActiveId = null; ZoneId = null; Center = Vector3.zero; EndsAt = 0f; Changed = null; }
+    }
+
+    /// Open-world spawn zones (L.1). FaunaZones.ZoneAt (fauna) returns one of these ids or a dive-site id; species list
+    /// the zones they live in (SpeciesDef.zones). Bit() gives the JournalEntry.zoneMask bit (L.2).
+    public static class Zones
+    {
+        public const string HouseReef = "house_reef", Kelp = "kelp_forest", Wreck = "wreck", BlueDrop = "blue_drop",
+            Trench = "deep_trench", FogIsle = "fog_isle", Lagoon = "lagoon", OpenSea = "open_sea", DeepSea = "deep_sea",
+            Island = "island", TidePools = "tide_pools", Beach = "beach";
+
+        /// Display order of the zone chips (Sealog "Fundorte").
+        public static readonly string[] All =
+            { HouseReef, Lagoon, Kelp, Wreck, BlueDrop, Trench, FogIsle, OpenSea, DeepSea, Island, TidePools, Beach };
+
+        /// Bit index of a zone in JournalEntry.zoneMask (-1 for unknown ids). Allocation free.
+        public static int Index(string zone)
+        {
+            if (zone == null) return -1;
+            for (int i = 0; i < All.Length; i++) if (string.Equals(All[i], zone, StringComparison.Ordinal)) return i;
+            return -1;
+        }
+
+        public static int Bit(string zone) { int i = Index(zone); return i < 0 ? 0 : 1 << i; }
+
+        public static string Name(string zone)
+        {
+            switch (zone)
+            {
+                case HouseReef: return Loc.Tr("Hausriff", "House Reef");
+                case Kelp: return Loc.Tr("Kelpwald", "Kelp Forest");
+                case Wreck: return Loc.Tr("Wrack", "Wreck");
+                case BlueDrop: return Loc.Tr("Blauwasser", "Blue Water");
+                case Trench: return Loc.Tr("Tiefseegraben", "Deep Trench");
+                case FogIsle: return Loc.Tr("Nebelinsel", "Fog Isle");
+                case Lagoon: return Loc.Tr("Lagune", "Lagoon");
+                case OpenSea: return Loc.Tr("Hochsee", "Open Sea");
+                case DeepSea: return Loc.Tr("Tiefsee", "Deep Sea");
+                case Island: return Loc.Tr("Insel", "Island");
+                case TidePools: return Loc.Tr("Gezeitentümpel", "Tide Pools");
+                case Beach: return Loc.Tr("Strand", "Beach");
+                default: return zone ?? "";
+            }
+        }
+    }
+
+    /// Time-of-day phases for SpeciesDef.dayMask (L.1) and the music (K.6).
+    public static class DayPhase
+    {
+        public const float DawnStart = 5.5f / 24f, DayStart = 7f / 24f, DuskStart = 17.5f / 24f, NightStart = 20.5f / 24f;
+
+        public static DayMask Of(float timeOfDay)
+        {
+            float t = Mathf.Repeat(timeOfDay, 1f);
+            if (t >= DayStart && t < DuskStart) return DayMask.Day;
+            if ((t >= DuskStart && t < NightStart) || (t >= DawnStart && t < DayStart)) return DayMask.Dusk;
+            return DayMask.Night;
+        }
+
+        public static DayMask Now => GameManager.I != null ? Of(GameManager.I.State.timeOfDay) : DayMask.Day;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // NPCs and dialogue (A, B, K.5, K.8, L.7, L.8). The npc+story module builds the NPCs and owns the lines
+    // (Data/DialogueDatabase.cs); core only carries the bus so UI subtitles, music ducking and net sync work.
+    // ---------------------------------------------------------------------------------------------
+
+    /// A story NPC in the world (Horst, Wanda, Gus' radio, Dr. Fin, Chad & Brad, Pearl, villagers, Toni).
+    public interface INpc
+    {
+        /// Stable id ("horst", "wanda", "gus", "fin", "chad", "brad", "pearl", "mira", "tomas", "ada", "juno", "lio", "toni" …).
+        string Id { get; }
+        Transform Root { get; }
+        string DisplayName { get; }
+        bool IsTalking { get; }
+        /// Quest marker above the head: 0 none, 1 "!" (quest available), 2 "?" (ready to hand in) – L.7.
+        int Marker { get; }
+    }
+
+    public static class NpcRegistry
+    {
+        public static readonly List<INpc> Active = new List<INpc>();
+
+        public static void Register(INpc n) { if (n != null && !Active.Contains(n)) Active.Add(n); }
+        public static void Unregister(INpc n) { Active.Remove(n); }
+
+        public static INpc Find(string id)
+        {
+            for (int i = 0; i < Active.Count; i++) if (Active[i] != null && Active[i].Id == id) return Active[i];
+            return null;
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { Active.Clear(); }
+    }
+
+    /// Dialogue bus. Lines travel by id + arguments; every machine localizes them itself (net StoryLine 98).
+    public static class Dialogue
+    {
+        /// Set by the npc module: (lineId, args) → text in the CURRENT language. Null → the id itself is shown.
+        public static Func<string, string[], string> Resolve;
+        /// Raised for every spoken line (speakerId, lineId, seconds, args) – the Net module broadcasts it from the host.
+        public static event Action<string, string, float, string[]> LineSpoken;
+
+        /// Speaks a line locally: localizes, raises GameEvents.NpcLine (subtitles, babble, music ducking) and LineSpoken.
+        public static void Say(string speakerId, string lineId, float seconds, params string[] args)
+        {
+            PlayLocal(speakerId, lineId, seconds, args);
+            LineSpoken?.Invoke(speakerId, lineId, seconds, args);
+        }
+
+        /// Net: a line received from the host – shown locally without re-broadcasting.
+        public static void PlayLocal(string speakerId, string lineId, float seconds, string[] args)
+        {
+            string text = Resolve != null ? Resolve(lineId, args) : lineId;
+            GameEvents.RaiseNpcLine(speakerId, text ?? lineId, seconds);
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { Resolve = null; LineSpoken = null; }
     }
 }

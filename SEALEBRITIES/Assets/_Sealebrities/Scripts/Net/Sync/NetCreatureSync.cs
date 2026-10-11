@@ -5,8 +5,12 @@ namespace Sealebrities
 {
     /// Creature replication. The HOST simulates every animal (Fauna module, unchanged AI) and, per client, keeps an
     /// interest set of the animals within ~90 m of that client's diver (110 m to leave again): new ones are sent as a
-    /// reliable spawn (net id, species, size, tier, pose), vanished/far ones as a reliable despawn, and the poses of all
-    /// interesting ones as 10 Hz unreliable snapshots (14 bytes per animal).
+    /// reliable spawn (net id, species, size, tier, pose), vanished/far ones as a reliable despawn, and the poses of
+    /// the interesting ones as 10 Hz unreliable snapshots (14 bytes per animal).
+    /// Round 2b (L.1 "fish everywhere"): a pose is only sent when it changed (crawling starfish, perched birds, a
+    /// manta at a cleaning station cost nothing) with a keep-alive every 0.8 s, and animals beyond 45 m from that
+    /// client go out at 5 Hz – the open-world density costs about the same bandwidth as the old per-site spawning.
+    /// Other creature lists (land fauna, L.11) join through RegisterSource.
     /// CLIENTS set NetFlags.CreaturesRemote (their Fauna spawner then only makes local hallucinations) and show
     /// NetCreatureProxy stand-ins that are registered as ICreature, so filming works on every machine.
     public sealed class NetCreatureSync : MonoBehaviour
@@ -14,6 +18,21 @@ namespace Sealebrities
         public const float SnapInterval = 0.1f;
         public const float InterestEnter = 90f;
         public const float InterestLeave = 110f;
+        /// Beyond this distance from the client's diver poses go out every second tick (5 Hz).
+        public const float FarDistance = 45f;
+        /// An unchanged pose is repeated after this many ticks (proxies drop animals after 3 s of silence).
+        const int KeepAliveTicks = 8;
+
+        static readonly List<IReadOnlyList<FaunaCreature>> extraSources = new List<IReadOnlyList<FaunaCreature>>(2);
+
+        /// Host: replicate the animals of another list too (e.g. the land fauna of L.11). Its creatures need unique
+        /// FaunaCreature.netId values from the same serial as the spawner's (FaunaSpawner hands them out).
+        public static void RegisterSource(IReadOnlyList<FaunaCreature> list)
+        {
+            if (list != null && !extraSources.Contains(list)) extraSources.Add(list);
+        }
+
+        public static void UnregisterSource(IReadOnlyList<FaunaCreature> list) => extraSources.Remove(list);
         /// Proxies are shown this far behind the host (10 Hz snapshots need > 1 interval of buffer).
         public const float ProxyDelay = 0.15f;
         const int HostId = 0;
@@ -23,11 +42,20 @@ namespace Sealebrities
         const int MaxSpawnPerMsg = 40, MaxSnapPerMsg = 255, MaxDespawnPerMsg = 200;
 
         // ------------------------------------------------------------------ host side
+        /// What a client last got for one animal (change detection).
+        struct Known
+        {
+            public int seenTick, sentTick;
+            public ushort px, py, pz;
+            public uint rot;
+            public byte act, anim;
+        }
+
         sealed class Interest
         {
             public int playerId;
             public int tick;
-            public readonly Dictionary<int, int> known = new Dictionary<int, int>(128);
+            public readonly Dictionary<int, Known> known = new Dictionary<int, Known>(160);
         }
 
         readonly Dictionary<int, Interest> interests = new Dictionary<int, Interest>();
@@ -174,22 +202,14 @@ namespace Sealebrities
             BeginSpawn(ts);
             BeginSnap(ts);
             BeginDespawn();
-            float inR2 = InterestEnter * InterestEnter, outR2 = InterestLeave * InterestLeave;
-            for (int i = 0; i < list.Count; i++)
+            ProcessList(it, center, list, tick);
+            for (int s = 0; s < extraSources.Count; s++)
             {
-                var c = list[i];
-                if (ReferenceEquals(c, null) || c == null) continue;
-                if (c.hallucination || !c.alive || c.pendingDespawn || c.netId <= 0 || c.species == null) continue;
-                float d2 = (c.pos - center).sqrMagnitude;
-                bool known = it.known.ContainsKey(c.netId);
-                if (d2 > (known ? outR2 : inR2)) continue;
-                if (!known && SpeciesIndex(c.species) < 0) continue;   // not replicable (unknown to the database)
-                it.known[c.netId] = tick;
-                if (known) AddSnap(it.playerId, c);
-                else AddSpawn(it.playerId, c);
+                var extra = extraSources[s];
+                if (extra != null && !ReferenceEquals(extra, list)) ProcessList(it, center, extra, tick);
             }
             tmpIds.Clear();
-            foreach (var kv in it.known) if (kv.Value != tick) tmpIds.Add(kv.Key);
+            foreach (var kv in it.known) if (kv.Value.seenTick != tick) tmpIds.Add(kv.Key);
             for (int i = 0; i < tmpIds.Count; i++)
             {
                 it.known.Remove(tmpIds[i]);
@@ -198,6 +218,45 @@ namespace Sealebrities
             FlushSpawn(it.playerId);
             FlushDespawn(it.playerId);
             FlushSnap(it.playerId);
+        }
+
+        void ProcessList(Interest it, Vector3 center, IReadOnlyList<FaunaCreature> list, int tick)
+        {
+            float inR2 = InterestEnter * InterestEnter, outR2 = InterestLeave * InterestLeave, farR2 = FarDistance * FarDistance;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var c = list[i];
+                if (ReferenceEquals(c, null) || c == null) continue;
+                if (c.hallucination || !c.alive || c.pendingDespawn || c.netId <= 0 || c.species == null) continue;
+                float d2 = (c.pos - center).sqrMagnitude;
+                bool known = it.known.TryGetValue(c.netId, out var k);
+                if (d2 > (known ? outR2 : inR2)) continue;
+                if (!known && SpeciesIndex(c.species) < 0) continue;   // not replicable (unknown to the database)
+                SyncQuant.PackPos(c.pos, out ushort px, out ushort py, out ushort pz);
+                uint rot = SyncQuant.PackRot(c.tr != null ? c.tr.rotation : Quaternion.identity);
+                byte act = SyncQuant.To01(c.Activity01);
+                byte anim = SyncQuant.To01(NetCreatureProxy.AnimChannel(c));
+                if (!known)
+                {
+                    AddSpawn(it.playerId, c, px, py, pz, rot, act, anim);
+                    it.known[c.netId] = new Known { seenTick = tick, sentTick = tick, px = px, py = py, pz = pz, rot = rot, act = act, anim = anim };
+                    continue;
+                }
+                k.seenTick = tick;
+                int since = tick - k.sentTick;
+                bool far = d2 > farR2;
+                bool changed = Mathf.Abs(px - k.px) > 0 || Mathf.Abs(pz - k.pz) > 0 || Mathf.Abs(py - k.py) > 3
+                               || SyncQuant.RotChanged(rot, k.rot) || Mathf.Abs(act - k.act) > 6 || Mathf.Abs(anim - k.anim) > 6;
+                // near: every tick when it moved; far: every second tick (5 Hz, staggered by id); always a keep-alive
+                bool due = since >= KeepAliveTicks || (changed && (!far || ((tick + c.netId) & 1) == 0));
+                if (due)
+                {
+                    AddSnap(it.playerId, c.netId, px, py, pz, rot, act, anim);
+                    k.sentTick = tick;
+                    k.px = px; k.py = py; k.pz = pz; k.rot = rot; k.act = act; k.anim = anim;
+                }
+                it.known[c.netId] = k;
+            }
         }
 
         void BeginSpawn(float ts)
@@ -209,7 +268,7 @@ namespace Sealebrities
             spawnCount = 0;
         }
 
-        void AddSpawn(int target, FaunaCreature c)
+        void AddSpawn(int target, FaunaCreature c, ushort px, ushort py, ushort pz, uint rot, byte act, byte anim)
         {
             int idx = SpeciesIndex(c.species);
             if (idx < 0) return;
@@ -217,10 +276,10 @@ namespace Sealebrities
             spawnW.UShort((ushort)idx);
             spawnW.Float(c.sizeCm);
             spawnW.Byte((byte)c.tier);
-            SyncQuant.WritePos(spawnW, c.pos);
-            SyncQuant.WriteRot(spawnW, c.tr != null ? c.tr.rotation : Quaternion.identity);
-            spawnW.Byte(SyncQuant.To01(c.Activity01));
-            spawnW.Byte(SyncQuant.To01(NetCreatureProxy.AnimChannel(c)));
+            SyncQuant.WritePackedPos(spawnW, px, py, pz);
+            SyncQuant.WritePackedRot(spawnW, rot);
+            spawnW.Byte(act);
+            spawnW.Byte(anim);
             if (++spawnCount >= MaxSpawnPerMsg)
             {
                 float ts = SyncTimelines.Now;
@@ -246,13 +305,13 @@ namespace Sealebrities
             snapCount = 0;
         }
 
-        void AddSnap(int target, FaunaCreature c)
+        void AddSnap(int target, int netId, ushort px, ushort py, ushort pz, uint rot, byte act, byte anim)
         {
-            snapW.UShort((ushort)c.netId);
-            SyncQuant.WritePos(snapW, c.pos);
-            SyncQuant.WriteRot(snapW, c.tr != null ? c.tr.rotation : Quaternion.identity);
-            snapW.Byte(SyncQuant.To01(c.Activity01));
-            snapW.Byte(SyncQuant.To01(NetCreatureProxy.AnimChannel(c)));
+            snapW.UShort((ushort)netId);
+            SyncQuant.WritePackedPos(snapW, px, py, pz);
+            SyncQuant.WritePackedRot(snapW, rot);
+            snapW.Byte(act);
+            snapW.Byte(anim);
             if (++snapCount >= MaxSnapPerMsg)
             {
                 float ts = SyncTimelines.Now;
@@ -488,6 +547,6 @@ namespace Sealebrities
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { speciesIndex = null; }
+        static void ResetStatics() { speciesIndex = null; extraSources.Clear(); }
     }
 }

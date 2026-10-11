@@ -13,20 +13,21 @@ namespace Sealebrities
         public static void Build(CreatureMeshContext ctx)
         {
             var s = ctx.S;
-            bool manta = (s.variant ?? "") == "manta";
+            string rv = s.variant ?? "";
+            bool manta = rv == "manta", eagle = rv == "eagle", pointed = manta || eagle;
             var b = ctx.B;
             float bw = CreatureMeshMath.Clamp(s.bodyWidth, 0.5f, 2.5f);
             float thick = CreatureMeshMath.Clamp(s.bodyHeight, 0.03f, 0.2f);
             ctx.Layout = CreatureMeshLayout.Disc;
-            ctx.EyeStyle = manta ? CreatureMeshEyeStyle.Mammal : CreatureMeshEyeStyle.Friendly;
+            ctx.EyeStyle = pointed ? CreatureMeshEyeStyle.Mammal : CreatureMeshEyeStyle.Friendly;
 
-            float discLen = manta ? 0.46f : CreatureMeshMath.Clamp(0.95f / bw, 0.45f, 1f);
-            float zFront = manta ? 0.22f : discLen * 0.5f;
+            float discLen = manta ? 0.46f : eagle ? 0.42f : CreatureMeshMath.Clamp(0.95f / bw, 0.45f, 1f);
+            float zFront = pointed ? 0.22f : discLen * 0.5f;
             float zBack = zFront - discLen;
-            float zTip = manta ? -0.085f : 0f;
+            float zTip = pointed ? -0.085f : 0f;
 
             Func<float, float> zF, zR;
-            if (manta)
+            if (pointed)
             {
                 zF = x =>
                 {
@@ -47,8 +48,8 @@ namespace Sealebrities
             }
             Func<float, float> thickAt = x =>
             {
-                float core = manta ? CreatureMeshMath.Gauss(x, 0f, 0.1f) : CreatureMeshMath.Gauss(x, 0f, 0.16f);
-                return thick * ((manta ? 0.14f : 0.22f) + (manta ? 0.86f : 0.78f) * core);
+                float core = pointed ? CreatureMeshMath.Gauss(x, 0f, 0.1f) : CreatureMeshMath.Gauss(x, 0f, 0.16f);
+                return thick * ((pointed ? 0.14f : 0.22f) + (pointed ? 0.86f : 0.78f) * core);
             };
             Func<float, float> chord = sc => CreatureMeshMath.Pow(CreatureMeshMath.Sin(Pi * CreatureMeshMath.Pow(CreatureMeshMath.Clamp01(sc), 0.78f)), 0.62f);
 
@@ -63,7 +64,7 @@ namespace Sealebrities
             ctx.Spine.Add(body);
             int[] wingBones;
             Func<Vector3, BoneWeight> discSkin;
-            if (manta)
+            if (pointed)
             {
                 int wr = ctx.Bone("WingR", body, new Vector3(0.085f, 0f, 0f));
                 int wtr = ctx.Bone("WingTipR", wr, new Vector3(0.3f, 0f, -0.05f));
@@ -98,14 +99,14 @@ namespace Sealebrities
             ctx.Flippers.AddRange(wingBones);
 
             // ---- disc: top and bottom surfaces over (x, chord fraction), coarse faceted grid
-            int NX = manta ? 14 : 12, NS = manta ? 5 : 6;
+            int NX = pointed ? 14 : 12, NS = pointed ? 5 : 6;
             Func<float, float> xMap = u => 0.5f * CreatureMeshMath.Sin(Pi * (u - 0.5f));
             Func<float, float, Vector3> topP = (u, v) =>
             {
                 float x = xMap(u), ax = CreatureMeshMath.Abs(x);
                 float z = CreatureMeshMath.Lerp(zF(ax), zR(ax), v);
                 float y = thickAt(ax) * chord(v) * 0.62f;
-                if (!manta) y += thick * 0.18f * CreatureMeshMath.Gauss(x, 0f, 0.08f) * CreatureMeshMath.Gauss(v, 0.32f, 0.22f);
+                if (!pointed) y += thick * 0.18f * CreatureMeshMath.Gauss(x, 0f, 0.08f) * CreatureMeshMath.Gauss(v, 0.32f, 0.22f);
                 return new Vector3(x, y, z);
             };
             Func<float, float, Vector3> botP = (u, v) =>
@@ -124,8 +125,8 @@ namespace Sealebrities
                 p => Vector3.down, (p, u, v) => discSkin(p));
 
             // ---- tail
-            float tailLen = manta ? 0.22f : discLen * 0.95f;
-            float tr0 = manta ? 0.012f : thick * 0.28f;
+            float tailLen = manta ? 0.22f : eagle ? 0.95f : discLen * 0.95f;
+            float tr0 = pointed ? 0.012f : thick * 0.28f;
             var tailPath = new[]
             {
                 new Vector3(0f, 0.004f, zR(0f) + 0.05f),
@@ -142,7 +143,7 @@ namespace Sealebrities
             tail.Uv = (t, vv) => CreatureMeshParts.FinUv(3, vv, t);
             tail.Build(b, CreatureMeshSlot.Fin, (p, a, t) => tailChain.Weigh(a));
 
-            if (!manta)
+            if (!pointed)
             {
                 // venomous spine on the tail + pelvic lobes
                 Vector3 sp0 = CreatureMeshMath.PathPoint(tailPath, 0.38f) + Vector3.up * tr0 * 0.4f;
@@ -175,7 +176,24 @@ namespace Sealebrities
             }
 
             // ---- head
-            if (manta)
+            if (eagle)
+            {
+                // spotted eagle ray: a rounded "duck bill" snout in front of the disc, eyes on the sides of the head
+                Vector3 sn0 = new Vector3(0f, thickAt(0f) * 0.2f, zF(0f) - 0.03f);
+                var bill = new[] { sn0, sn0 + new Vector3(0f, -0.004f, 0.06f), sn0 + new Vector3(0f, -0.014f, 0.11f) };
+                var tube = CreatureMeshParts.Tube(bill, t => CreatureMeshMath.Lerp(0.05f, 0.03f, t) * CreatureMeshMath.Nose(1f - t, 0.3f) + 0.002f, 5, 8, t => Vector3.up);
+                tube.HalfTop = t => (CreatureMeshMath.Lerp(0.026f, 0.014f, t) * CreatureMeshMath.Nose(1f - t, 0.3f)) + 0.002f;
+                tube.HalfBot = tube.HalfTop;
+                tube.CapStart = false;
+                tube.Uv = (t, vv) => new Vector2(0.5f, 0.97f);
+                tube.Build(b, CreatureMeshSlot.Skin, (p, a, t) => CreatureMeshSkin.One(body));
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    Vector3 c = new Vector3(side * 0.06f, thickAt(0.06f) * 0.35f + 0.004f, zF(0.06f) - 0.04f);
+                    CreatureMeshParts.Eye(ctx, c, CreatureMeshMath.Norm(new Vector3(side, 0.35f, 0.3f)), 0.014f, CreatureMeshSkin.Fixed(body));
+                }
+            }
+            else if (pointed)
             {
                 // wide terminal mouth
                 CreatureMeshParts.Ellipsoid(b, CreatureMeshSlot.Mouth, new Vector3(0f, -0.004f, zF(0f) - 0.006f), Vector3.forward, Vector3.up,

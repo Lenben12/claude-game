@@ -5,8 +5,10 @@ using UnityEngine;
 namespace Sealebrities
 {
     /// Procedural audio runtime: ambience crossfade (waves + jungle above, drone below with low-pass muffling),
-    /// regulator breathing, heartbeat at low air, warning beeps, deep groans, splash, reward/UI sounds driven by
-    /// GameEvents, and the ukulele music loop in the main menu / launch intro.
+    /// regulator breathing (Q12: 4.2 s → 2.6 s below 25 % air → 1.8 s below 10 %), heartbeat below 10 % air, warning
+    /// beeps, deep groans, the underwater soundscape (dolphins, whale song, snapping shrimp on the reef, crabs in the tide
+    /// pools, garibaldi, sea lion, anglerfish hum), splash + plunge on entering the water (Q9), reward/UI sounds driven by
+    /// GameEvents, and the relaxed background music (FXMusicDirector, K.6).
     /// Volumes: master = AudioListener.volume (Settings.Apply); everything here is scaled by Settings sfx or music
     /// and follows Settings.Changed live (one-shot sources carry the category volume, so even playing sounds follow).
     /// All sources are 2D and follow the main camera. A real pause (Time.timeScale 0) pauses everything but the
@@ -15,24 +17,34 @@ namespace Sealebrities
     {
         const float CutoffOpen = 22000f;
         const float CutoffUnder = 650f;
-        const float MusicMix = 0.55f;
 
         readonly GameObject root;
         readonly Transform rootT;
-        readonly AudioSource waves, jungle, drone, music, breath, heart, deep, sfx, ui;
+        readonly AudioSource waves, jungle, drone, reef, breath, heart, deep, animal, sfx, ui;
         readonly AudioLowPassFilter wavesLpf, jungleLpf;
+        readonly FXMusicDirector musicDir;
 
         Task<FXSynthBank> task;
-        Task<float[]> musicTask;
         FXSynthBank bank;
-        bool failed, ready, musicFailed;
+        bool failed, ready;
         int createStep;
 
         AudioClip cWaves, cJungle, cDrone, cGroan, cInhale, cExhale, cHeart, cSplash, cBump;
         AudioClip cBlip, cRecOn, cRecOff, cDiscover, cFanfare, cCoin;
-        AudioClip cWarn, cShutter, cEquip, cCast, cReel, cCatch, cSparkle, cClick, cPing, cError, cMusic;
-        readonly AudioClip[] created = new AudioClip[32];
+        AudioClip cWarn, cShutter, cEquip, cCast, cReel, cCatch, cSparkle, cClick, cPing, cError;
+        AudioClip cPlunge, cDolphin, cWhale, cCrabs, cShrimp, cGaribaldi, cSeaLion, cAngler;
+        readonly AudioClip[] created = new AudioClip[40];
         int createdCount;
+
+        // underwater soundscape (Q12): one cooldown per animal voice, a scan of the creature list twice a second
+        const int VoiceDolphin = 0, VoiceWhale = 1, VoiceSeaLion = 2, VoiceGaribaldi = 3, VoiceAngler = 4, VoiceCrabs = 5, VoiceCount = 6;
+        static readonly float[] VoiceRange = { 70f, 300f, 60f, 22f, 24f, 22f };
+        static readonly float[] VoiceMinGap = { 7f, 26f, 9f, 6f, 9f, 2.5f };
+        static readonly float[] VoiceMaxGap = { 16f, 45f, 20f, 14f, 16f, 6f };
+        readonly float[] voiceNext = new float[VoiceCount];
+        readonly float[] voiceDist = new float[VoiceCount];
+        float scanTimer;
+        float vReef = -1f;
 
         // volumes (Settings)
         float vSfx = 1f, vMusic = 0.7f;
@@ -47,7 +59,6 @@ namespace Sealebrities
         float heartTimer, groanTimer = 30f, warnTimer;
         bool warnActive;
         float vWaves = -1f, vJungle = -1f, vDrone = -1f, pDrone = -1f, cutoffApplied = -1f;
-        float musicLevel, musicApplied = -1f;
         HoldItem lastRight, lastLeft;
 
         public FXAudio(Transform parent)
@@ -59,30 +70,27 @@ namespace Sealebrities
             waves = MakeSource("FX_Waves", true, 40, true, out wavesLpf);
             jungle = MakeSource("FX_Jungle", true, 45, true, out jungleLpf);
             drone = MakeSource("FX_UnderwaterDrone", true, 40, false, out _);
-            music = MakeSource("FX_Music", true, 20, false, out _);
-            music.ignoreListenerPause = true;
+            reef = MakeSource("FX_ReefCrackle", true, 55, false, out _);
             breath = MakeSource("FX_Breath", false, 60, false, out _);
             heart = MakeSource("FX_Heartbeat", false, 60, false, out _);
             deep = MakeSource("FX_DeepGroan", false, 90, false, out _);
+            animal = MakeSource("FX_Animals", false, 80, false, out _);
             sfx = MakeSource("FX_Sfx", false, 70, false, out _);
             ui = MakeSource("FX_UI", false, 50, false, out _);
             ui.ignoreListenerPause = true;
 
+            try { musicDir = new FXMusicDirector(rootT); }
+            catch (Exception e) { Debug.LogWarning("Sealebrities FX: music unavailable: " + e.Message); musicDir = null; }
+
             ApplyVolumes();
 
-            try
-            {
-                musicTask = Task.Run(() => FXAudioSynth.Music());
-                task = Task.Run(() => FXAudioSynth.Generate());
-            }
+            try { task = Task.Run(() => FXAudioSynth.Generate()); }
             catch (Exception)
             {
                 task = null;
-                musicTask = null;
                 bank = FXAudioSynth.Generate();
-                try { cMusic = Make("FX_MenuMusic", FXAudioSynth.Music()); } catch (Exception) { musicFailed = true; }
-                if (cMusic != null) StartMusic();
             }
+            for (int i = 0; i < VoiceCount; i++) voiceNext[i] = UnityEngine.Random.Range(4f, 12f);
         }
 
         AudioSource MakeSource(string name, bool loop, int priority, bool lowPass, out AudioLowPassFilter lpf)
@@ -110,25 +118,30 @@ namespace Sealebrities
         {
             if (pauseApplied) AudioListener.pause = false;
             FXMusic.Playing = false;
+            if (musicDir != null) musicDir.Dispose();
             for (int i = 0; i < createdCount; i++)
                 if (created[i] != null) UnityEngine.Object.Destroy(created[i]);
             createdCount = 0;
         }
 
+        static float Vol01(float v, float fallback) => float.IsNaN(v) || float.IsInfinity(v) ? fallback : Mathf.Clamp01(v);
+
         /// Re-reads the sfx / music volumes from Settings (initially and on Settings.Changed).
         public void ApplyVolumes()
         {
             var d = Settings.Data;
-            vSfx = d != null ? Mathf.Clamp01(d.sfx) : 1f;
-            vMusic = d != null ? Mathf.Clamp01(d.music) : 0.7f;
+            vSfx = d != null ? Vol01(d.sfx, 1f) : 1f;
+            vMusic = d != null ? Vol01(d.music, 0.7f) : 0.7f;
             // one-shot sources: PlayOneShot scales by the source volume, so playing sounds follow the slider too
             breath.volume = vSfx;
             heart.volume = vSfx;
             deep.volume = vSfx;
+            animal.volume = vSfx;
             sfx.volume = vSfx;
             ui.volume = vSfx;
+            if (musicDir != null) musicDir.ApplyVolumes();
             // loops: re-applied by the next tick
-            vWaves = -1f; vJungle = -1f; vDrone = -1f; musicApplied = -1f;
+            vWaves = -1f; vJungle = -1f; vDrone = -1f; vReef = -1f;
         }
 
         // ------------------------------------------------------------------ events
@@ -152,6 +165,7 @@ namespace Sealebrities
             Collectibles.Found += OnCollectible;
             Hands.Changed += OnHandsChanged;
             FXSfx.Handler = PlayPublic;
+            if (musicDir != null) musicDir.Subscribe();
         }
 
         public void Unsubscribe()
@@ -174,6 +188,7 @@ namespace Sealebrities
             Collectibles.Found -= OnCollectible;
             Hands.Changed -= OnHandsChanged;
             if (FXSfx.Handler == (Action<FXSound, float>)PlayPublic) FXSfx.Handler = null;
+            if (musicDir != null) musicDir.Unsubscribe();
         }
 
         static float Now => Time.unscaledTime;
@@ -282,6 +297,16 @@ namespace Sealebrities
 
         public void PlaySplash(float strength) => Play(sfx, cSplash, 0.75f * strength);
 
+        /// The lens crossed the surface (Q9): diving in = a deep "plunge" whoomp + bubble rush, coming up = a light splash.
+        public void PlaySplash(float strength, bool under)
+        {
+            if (under && cPlunge != null) Play(sfx, cPlunge, 0.8f * strength);
+            else Play(sfx, cSplash, (under ? 0.75f : 0.45f) * strength);
+        }
+
+        /// The body hit the water from a jump (the camera is still above it): a big splash.
+        public void PlayBodySplash(float strength) => Play(sfx, cSplash, Mathf.Lerp(0.45f, 0.9f, strength));
+
         /// FXSfx.Play from other modules.
         void PlayPublic(FXSound s, float volume)
         {
@@ -315,32 +340,6 @@ namespace Sealebrities
         }
 
         // ------------------------------------------------------------------ loading
-        void TryFinishMusic()
-        {
-            if (cMusic != null || musicFailed || musicTask == null || !musicTask.IsCompleted) return;
-            if (musicTask.IsFaulted || musicTask.IsCanceled)
-            {
-                musicFailed = true;
-                Debug.LogWarning("Sealebrities FX: music synthesis failed: " + (musicTask.Exception != null ? musicTask.Exception.GetBaseException().Message : "cancelled"));
-                musicTask = null;
-                return;
-            }
-            cMusic = Make("FX_MenuMusic", musicTask.Result);
-            musicTask = null;
-            StartMusic();
-        }
-
-        void StartMusic()
-        {
-            if (cMusic == null) return;
-            music.clip = cMusic;
-            music.loop = true;
-            music.volume = 0f;
-            music.time = 0f;
-            music.Play();
-            musicApplied = -1f;
-        }
-
         void TryFinishLoading()
         {
             if (failed) return;
@@ -386,12 +385,21 @@ namespace Sealebrities
                 case 22: cClick = Make("FX_Click", bank.click); break;
                 case 23: cPing = Make("FX_Ping", bank.ping); break;
                 case 24: cError = Make("FX_Error", bank.error); break;
+                case 25: cPlunge = Make("FX_Plunge", bank.plunge); break;
+                case 26: cDolphin = Make("FX_Dolphin", bank.dolphin); break;
+                case 27: cWhale = Make("FX_WhaleSong", bank.whale); break;
+                case 28: cCrabs = Make("FX_CrabClicks", bank.crabs); break;
+                case 29: cShrimp = Make("FX_ShrimpCrackle", bank.shrimp); break;
+                case 30: cGaribaldi = Make("FX_Garibaldi", bank.garibaldi); break;
+                case 31: cSeaLion = Make("FX_SeaLion", bank.seaLion); break;
+                case 32: cAngler = Make("FX_AnglerHum", bank.angler); break;
                 default:
                     bank = null;
                     ready = true;
                     StartLoop(waves, cWaves);
                     StartLoop(jungle, cJungle);
                     StartLoop(drone, cDrone);
+                    StartLoop(reef, cShrimp);
                     break;
             }
         }
@@ -426,8 +434,7 @@ namespace Sealebrities
             }
 
             if (f.camT != null) rootT.position = f.camPos;
-            TryFinishMusic();
-            TickMusic(f);
+            if (musicDir != null) musicDir.Tick(f);
             if (!ready)
             {
                 TryFinishLoading();
@@ -437,26 +444,7 @@ namespace Sealebrities
 
             TickAmbience(f);
             TickDiver(f, b);
-        }
-
-        /// Ukulele loop whenever no game runs (main menu, launch intro, boot); fades out when the game starts.
-        void TickMusic(FXFrame f)
-        {
-            if (cMusic == null) { FXMusic.Playing = false; return; }
-            bool want = !f.inGame;
-            float dt = Mathf.Min(Time.unscaledDeltaTime, 0.1f);
-            musicLevel = Mathf.MoveTowards(musicLevel, want ? 1f : 0f, dt / (want ? 2f : 1.2f));
-            float v = musicLevel * MusicMix * vMusic;
-            if (Mathf.Abs(v - musicApplied) > 0.002f || (v == 0f && musicApplied != 0f))
-            {
-                music.volume = v;
-                musicApplied = v;
-            }
-            bool audible = musicLevel > 0.001f;
-            if (audible && !music.isPlaying) music.Play();
-            else if (!audible && music.isPlaying) { music.Stop(); music.time = 0f; }
-            FXMusic.Playing = audible && vMusic > 0.001f;
-            FXMusic.Time = music.isPlaying ? music.time : 0f;
+            TickAnimals(f);
         }
 
         void TickAmbience(FXFrame f)
@@ -468,7 +456,7 @@ namespace Sealebrities
             float nearShore = 1f - FXMath.Smooth01(shore / 90f);
             float height = Mathf.Max(0f, cp.y - Waves.SeaLevel);
             float heightFall = Mathf.Lerp(1f, 0.45f, FXMath.Smooth01((height - 3f) / 40f));
-            float musicDuck = 1f - 0.3f * musicLevel;
+            float musicDuck = 1f - 0.3f * (musicDir != null ? musicDir.Level01 * vMusic : 0f);
 
             float wavesAbove = (0.3f + 0.32f * nearShore) * heightFall * musicDuck;
             float jungleAmt = 1f - FXMath.Smooth01((distXZ - WorldLayout.IslandRadius * 0.55f) / (WorldLayout.IslandRadius * 0.9f));
@@ -522,17 +510,17 @@ namespace Sealebrities
                 if (b.ExhaleNow) Play(breath, cExhale, 0.5f);
             }
 
-            // heartbeat when the tank is nearly empty
-            bool hb = f.hasPlayer && f.underwater && !f.fainting && f.air01 < 0.15f;
+            // heartbeat below 10 % air (Q12: 1.6 Hz, a little faster toward empty)
+            bool hb = f.hasPlayer && f.underwater && !f.fainting && f.air01 < 0.1f;
             if (hb)
             {
                 heartTimer -= f.dt;
                 if (heartTimer <= 0f)
                 {
-                    float k = 1f - f.air01 / 0.15f;
-                    heartTimer += 60f / Mathf.Lerp(80f, 145f, k);
+                    float k = 1f - f.air01 / 0.1f;
+                    heartTimer += 1f / Mathf.Lerp(1.6f, 2.0f, k);
                     if (heartTimer < 0f) heartTimer = 0.3f;
-                    Play(heart, cHeart, Mathf.Lerp(0.45f, 0.9f, k));
+                    Play(heart, cHeart, Mathf.Lerp(0.5f, 0.9f, k));
                 }
             }
             else heartTimer = 0f;
@@ -563,6 +551,123 @@ namespace Sealebrities
                 }
             }
             else if (groanTimer < 20f) groanTimer = 20f;
+        }
+
+        // ------------------------------------------------------------------ underwater soundscape (Q12)
+        bool sitesCached;
+        Vector3 reefCenter, fogCenter;
+        float reefRadius, fogRadius;
+
+        void CacheSites()
+        {
+            sitesCached = true;
+            reefCenter = new Vector3(188f, 0f, 38f); reefRadius = 105f;
+            fogCenter = new Vector3(-60f, 0f, 640f); fogRadius = 85f;
+            var all = DiveSites.All;
+            for (int i = 0; i < all.Count; i++)
+            {
+                var s = all[i];
+                if (s == null) continue;
+                if (s.id == Zones.HouseReef) { reefCenter = s.center; reefRadius = s.radius; }
+                else if (s.id == Zones.FogIsle) { fogCenter = s.center; fogRadius = s.radius; }
+            }
+        }
+
+        static float FlatDist(Vector3 a, Vector3 b)
+        {
+            float dx = a.x - b.x, dz = a.z - b.z;
+            return Mathf.Sqrt(dx * dx + dz * dz);
+        }
+
+        /// Distant animal voices from the creatures that are really around (dolphins, Big Bertha within 300 m, Sir
+        /// Flapsalot, garibaldi, Lumen), crab clicks at the tide pools and the snapping-shrimp crackle on the reef bed.
+        /// Allocation free: the creature list is scanned twice a second.
+        void TickAnimals(FXFrame f)
+        {
+            if (!sitesCached) CacheSites();
+            bool under = f.hasPlayer && f.underwater && !f.fainting;
+            Vector3 cp = f.camPos;
+
+            // snapping shrimp: loud on the house reef, the Fog Isle and the lagoon patch reefs, quieter on other shallow
+            // seabeds, only close to the bottom
+            float reefT = 0f;
+            if (under && f.depth < 30f)
+            {
+                float zone = 0.35f;
+                float dIsland = Mathf.Sqrt(cp.x * cp.x + cp.z * cp.z);
+                if (FlatDist(cp, reefCenter) < reefRadius + 25f || FlatDist(cp, fogCenter) < fogRadius + 20f) zone = 1f;
+                else if (dIsland < WorldLayout.IslandRadius + 90f) zone = 0.75f;
+                float floorDist = cp.y - WorldInfo.GroundHeight(cp);
+                reefT = 0.55f * zone * (1f - FXMath.SmoothRange(3f, 14f, floorDist)) * (1f - FXMath.SmoothRange(18f, 30f, f.depth));
+            }
+            vReef = Approach(reef, vReef, reefT * vSfx * f.under01, f.dt * 0.6f);
+
+            for (int i = 0; i < VoiceCount; i++) voiceNext[i] -= f.dt;
+            scanTimer -= f.dt;
+            if (scanTimer <= 0f)
+            {
+                scanTimer = 0.5f;
+                Scan(cp);
+            }
+
+            // crabs click on the tide-pool rocks: heard standing there, wading or snorkelling
+            float dTide = FlatDist(cp, WorldLayout.TidePools);
+            if (dTide < voiceDist[VoiceCrabs]) voiceDist[VoiceCrabs] = dTide;
+            bool nearWater = under || f.inWater || cp.y < Waves.SeaLevel + 4f;
+
+            for (int v = 0; v < VoiceCount; v++)
+            {
+                if (voiceNext[v] > 0f) continue;
+                float d = voiceDist[v], range = VoiceRange[v];
+                bool audible = v == VoiceCrabs ? nearWater && d < range : under && d < range;
+                // dolphins also call from far away in open water now and then, even when none are in sight
+                if (!audible && v == VoiceDolphin && under && f.depth < 25f && Mathf.Sqrt(cp.x * cp.x + cp.z * cp.z) > WorldLayout.IslandRadius + 140f
+                    && UnityEngine.Random.value < 0.35f)
+                {
+                    audible = true;
+                    d = range * 0.85f;
+                }
+                if (!audible) { voiceNext[v] = 1.5f; continue; }   // check again soon
+                voiceNext[v] = UnityEngine.Random.Range(VoiceMinGap[v], VoiceMaxGap[v]);
+                float near = 1f - Mathf.Clamp01(d / range);
+                float vol;
+                AudioClip clip;
+                switch (v)
+                {
+                    case VoiceDolphin: clip = cDolphin; vol = 0.12f + 0.45f * near * near; break;
+                    case VoiceWhale: clip = cWhale; vol = 0.2f + 0.5f * near; break;
+                    case VoiceSeaLion: clip = cSeaLion; vol = 0.15f + 0.5f * near * near; break;
+                    case VoiceGaribaldi: clip = cGaribaldi; vol = 0.1f + 0.35f * near; break;
+                    case VoiceAngler: clip = cAngler; vol = 0.15f + 0.45f * near; break;
+                    default: clip = cCrabs; vol = 0.3f + 0.6f * near; break;
+                }
+                animal.pitch = UnityEngine.Random.Range(0.92f, 1.08f);
+                Play(animal, clip, vol);
+            }
+        }
+
+        void Scan(Vector3 cp)
+        {
+            for (int v = 0; v < VoiceCount; v++) voiceDist[v] = float.MaxValue;
+            var list = CreatureRegistry.Active;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var c = list[i];
+                if (c == null || (c is UnityEngine.Object o && o == null)) continue;
+                var sp = c.Species;
+                if (sp == null || c.IsHallucination) continue;
+                int voice;
+                string id = sp.id;
+                if (id == "dolphin") voice = VoiceDolphin;
+                else if (id == "humpback") voice = VoiceWhale;
+                else if (id == "sea_lion") voice = VoiceSeaLion;
+                else if (id == "garibaldi") voice = VoiceGaribaldi;
+                else if (id == "anglerfish") voice = VoiceAngler;
+                else if (id == "hermit_crab" || id == "sally_crab" || id == "ghost_crab") voice = VoiceCrabs;
+                else continue;
+                float d = Vector3.Distance(cp, c.Position);
+                if (d < voiceDist[voice]) voiceDist[voice] = d;
+            }
         }
     }
 }

@@ -8,19 +8,20 @@ using UnityEngine.Rendering.Universal;
 namespace Sealebrities
 {
     /// Applies the graphics tier (Settings.Data.quality: Low / Medium / High, art bible §1.5) to the active URP
-    /// asset, the SSAO renderer feature and the main camera. Runs only when the tier changes (never per frame).
+    /// asset and the main camera. Runs only when the tier changes (never per frame).
     ///
     ///                 High              Medium             Low
     ///   shadows       2048 / 2c / 120 m 1024 / 2c / 80 m   1024 / 2c / 45 m, hard
-    ///   SSAO          on                on, half res       off (renderer without SSAO)
+    ///   SSAO          off               off                off      (round 2, Q3: it made the hut walls grainy)
     ///   MSAA / AA     4x / -            2x / -             off / FXAA
     ///   render scale  1.0               1.0                0.85
     ///   (+ bloom quality, god rays, caustics and particle counts in the other FX parts)
     ///
-    /// Shader-variant safety: URP strips the "SSAO off" variants when every renderer has SSAO. The editor setup
-    /// therefore adds a second renderer without SSAO (PC_Renderer_NoAO); Low switches the camera to it. Without that
-    /// renderer SSAO is only disabled where it is known to be safe (editor, or the asset keeps both variants),
-    /// otherwise it stays on at half resolution. The cascade count stays 2 on every tier for the same reason.
+    /// SSAO: the editor setup removes the feature from the PC renderer. Should a project still carry an SSAO feature
+    /// (setup not re-run), it is switched off at runtime where the "SSAO off" shader variants are known to exist (editor,
+    /// prefiltering keeps both, or a second renderer without SSAO is in the build – then the camera also uses that
+    /// renderer); otherwise its intensity is pinned to 0 (no darkening, no grain). It is never switched on.
+    /// The cascade count stays 2 on every tier (URP strips the single-cascade shadow variants).
     ///
     /// In the editor every asset change is undone when play mode ends (the URP asset is a project file).
     sealed class FXGraphics
@@ -32,8 +33,6 @@ namespace Sealebrities
             public float shadowDistance;
             public int shadowRes;
             public bool softShadows;
-            public bool ssao;
-            public bool ssaoHalfRes;
         }
 
         static TierValues For(GraphicsQuality q)
@@ -41,11 +40,11 @@ namespace Sealebrities
             switch (q)
             {
                 case GraphicsQuality.Low:
-                    return new TierValues { renderScale = 0.85f, msaa = 1, shadowDistance = 45f, shadowRes = 1024, softShadows = false, ssao = false, ssaoHalfRes = true };
+                    return new TierValues { renderScale = 0.85f, msaa = 1, shadowDistance = 45f, shadowRes = 1024, softShadows = false };
                 case GraphicsQuality.Medium:
-                    return new TierValues { renderScale = 1f, msaa = 2, shadowDistance = 80f, shadowRes = 1024, softShadows = true, ssao = true, ssaoHalfRes = true };
+                    return new TierValues { renderScale = 1f, msaa = 2, shadowDistance = 80f, shadowRes = 1024, softShadows = true };
                 default:
-                    return new TierValues { renderScale = 1f, msaa = 4, shadowDistance = 120f, shadowRes = 2048, softShadows = true, ssao = true, ssaoHalfRes = false };
+                    return new TierValues { renderScale = 1f, msaa = 4, shadowDistance = 120f, shadowRes = 2048, softShadows = true };
             }
         }
 
@@ -54,9 +53,6 @@ namespace Sealebrities
         const float Cascade2Split = 0.25f;
         const float DepthBias = 1.0f;
         const float NormalBias = 0.6f;
-        const float SsaoIntensity = 1.0f;
-        const float SsaoRadius = 0.24f;            // bible 0.30, 0.22 when the view-model hands blotch
-        const float SsaoDirectLighting = 0.25f;
 
         const BindingFlags Inst = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
         static readonly FieldInfo SoftShadowsField = typeof(UniversalRenderPipelineAsset).GetField("m_SoftShadowsSupported", Inst);
@@ -68,8 +64,8 @@ namespace Sealebrities
         readonly List<ScreenSpaceAmbientOcclusion> ssao = new List<ScreenSpaceAmbientOcclusion>();
         int noAoRenderer = -1;      // renderer index without an active SSAO feature, -1 = none
         bool ssaoOffSafe;            // the build keeps the SSAO-off shader variants
+        bool ssaoStillOn;            // an SSAO feature of the default renderer could not be switched off (intensity 0)
 
-        bool hasTier;
         GraphicsQuality tier = GraphicsQuality.High;
         public GraphicsQuality Tier => tier;
 
@@ -89,7 +85,6 @@ namespace Sealebrities
         public void Apply(GraphicsQuality q)
         {
             tier = q;
-            hasTier = true;
             // PropQuality builds the LOD screen heights for bias 1; the "PC" quality level used to carry lodBias 2,
             // which silently doubled every prop draw distance on every tier (~4x the drawn prop area)
             if (!Mathf.Approximately(QualitySettings.lodBias, 1f)) QualitySettings.lodBias = 1f;
@@ -115,7 +110,7 @@ namespace Sealebrities
             if (!Mathf.Approximately(a.shadowDepthBias, DepthBias)) a.shadowDepthBias = DepthBias;
             if (!Mathf.Approximately(a.shadowNormalBias, NormalBias)) a.shadowNormalBias = NormalBias;
             SetSoftShadows(a, t.softShadows);
-            ApplySsao(t);
+            SsaoOff();
 
             if (cam != null) ConfigureCamera(cam);
         }
@@ -170,25 +165,20 @@ namespace Sealebrities
             catch (Exception) { }
         }
 
-        void ApplySsao(TierValues t)
+        /// Q3: no SSAO on any tier. Normally the editor setup already removed the feature; this only handles projects
+        /// that still carry one (never switches it on).
+        void SsaoOff()
         {
+            ssaoStillOn = false;
             for (int i = 0; i < ssao.Count; i++)
             {
                 var f = ssao[i];
-                if (f == null) continue;
-                // Low: the camera renders with the no-AO renderer when there is one; otherwise disable the feature
-                // only where the off variants exist, else keep it at half resolution (cheap, never broken).
-                bool active = t.ssao || (noAoRenderer < 0 && !ssaoOffSafe);
-                if (noAoRenderer >= 0) active = true;   // renderer 0 keeps its AO (the camera switches renderer)
-                if (f.isActive != active) f.SetActive(active);
-
+                if (f == null || !f.isActive) continue;
+                if (ssaoOffSafe || noAoRenderer >= 0) { f.SetActive(false); continue; }
+                // the "SSAO off" variants may be stripped from this build: keep the pass but without any occlusion
+                ssaoStillOn = true;
                 object s = SsaoSettingsField != null ? SsaoSettingsField.GetValue(f) : null;
-                if (s == null) continue;
-                SetField(s, "Intensity", SsaoIntensity);
-                SetField(s, "Radius", SsaoRadius);
-                SetField(s, "DirectLightingStrength", SsaoDirectLighting);
-                SetField(s, "Downsample", t.ssaoHalfRes);
-                SetEnum(s, "BlurQuality", t.ssaoHalfRes ? 2 : 0);   // High = 0 (bilateral), Low = 2 (kawase)
+                if (s != null) SetField(s, "Intensity", 0f);
             }
         }
 
@@ -203,21 +193,10 @@ namespace Sealebrities
             catch (Exception) { }
         }
 
-        static void SetEnum(object target, string name, int value)
-        {
-            try
-            {
-                var fi = target.GetType().GetField(name, Inst);
-                if (fi == null || !fi.FieldType.IsEnum) return;
-                object v = Enum.ToObject(fi.FieldType, value);
-                if (!Equals(fi.GetValue(target), v)) fi.SetValue(target, v);
-            }
-            catch (Exception) { }
-        }
-
         // ------------------------------------------------------------------ camera
-        /// Once per new main camera and on every tier change: post-processing on, no opaque/depth texture copies
-        /// (nothing samples them), MSAA or FXAA depending on the tier, renderer without SSAO on Low.
+        /// Once per new main camera and on every tier change: post-processing on (on the view-model overlay when the
+        /// camera has one, see PlayerViewModelCamera), no opaque/depth texture copies
+        /// (nothing samples them), MSAA or FXAA depending on the tier, the default renderer (no SSAO, Q3).
         public void ConfigureCamera(Camera c)
         {
             if (c != cam)
@@ -233,15 +212,18 @@ namespace Sealebrities
             int msaa = asset != null ? asset.msaaSampleCount : 1;
             if (c.allowMSAA != (msaa > 1)) c.allowMSAA = msaa > 1;
             if (d == null) return;
-            if (!d.renderPostProcessing) d.renderPostProcessing = true;
+            // post-processing on the main camera – unless the player's view-model overlay (last camera of the stack)
+            // runs it for the whole stack; on both cameras the world would be graded twice
+            bool post = !PlayerViewModelCamera.StackRunsPostProcessing(d);
+            if (d.renderPostProcessing != post) d.renderPostProcessing = post;
             if (d.requiresColorOption != CameraOverrideOption.Off) d.requiresColorOption = CameraOverrideOption.Off;
             if (d.requiresDepthOption != CameraOverrideOption.Off) d.requiresDepthOption = CameraOverrideOption.Off;
             var aa = msaa > 1 ? AntialiasingMode.None : AntialiasingMode.FastApproximateAntialiasing;
             if (d.antialiasing != aa) d.antialiasing = aa;
             if (d.stopNaN) d.stopNaN = false;
 
-            bool useNoAo = hasTier && !For(tier).ssao && noAoRenderer >= 0;
-            try { d.SetRenderer(useNoAo ? noAoRenderer : -1); } catch (Exception) { }
+            // SSAO is off in the default renderer on every tier (Q3): the camera always uses the pipeline's default renderer
+            try { d.SetRenderer(-1); } catch (Exception) { }
         }
 
         /// Under water nothing beyond the fog limit is visible (the background is the fog colour): pull the far

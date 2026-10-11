@@ -12,7 +12,7 @@ namespace Sealebrities
     ///  - gear: owned items per gear slot; click to equip (Gear.Equip, per player)
     public class UIInventory
     {
-        static readonly GearSlot[] GearSlots = { GearSlot.Camera, GearSlot.Lamp, GearSlot.Rod, GearSlot.Tank, GearSlot.Fins, GearSlot.Boat };
+        static readonly GearSlot[] GearSlots = { GearSlot.Camera, GearSlot.Lamp, GearSlot.Rod, GearSlot.Tank, GearSlot.Fins, GearSlot.Boat, GearSlot.CameraMod, GearSlot.Radio };
         static readonly HoldItem[] ShelfItems = { HoldItem.Camera, HoldItem.Flashlight, HoldItem.FishingRod };
         const float SlotSize = 84f;
 
@@ -330,6 +330,7 @@ namespace Sealebrities
             {
                 var slot = GearSlots[k];
                 GearDatabase.OwnedInSlot(st, slot, tmpItems);
+                if (tmpItems.Count == 0 && (slot == GearSlot.CameraMod || slot == GearSlot.Radio)) continue;   // round-2 slots only once owned
                 var row = UIKit.Row();
                 row.style.marginBottom = 10f;
                 row.style.flexWrap = Wrap.Wrap;

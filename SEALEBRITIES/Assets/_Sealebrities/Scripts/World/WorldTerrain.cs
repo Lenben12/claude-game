@@ -13,6 +13,8 @@ namespace Sealebrities
     public static class WorldTerrain
     {
         const float FrameBudgetMs = 9f;
+        /// Soft coral-pink sand (#E8C0AE) – the Fog Isle's own look (its map colour is pink #F28CBE).
+        static readonly Color FogIslePinkSand = new Color(0.91f, 0.753f, 0.682f, 1f);
         static ushort[] identity;
         static Material[] classMats;
 
@@ -36,6 +38,7 @@ namespace Sealebrities
                     LowPoly.Mat(Color.Lerp(LowPoly.Seabed, LowPoly.WetSand, 0.45f)),
                     LowPoly.Mat(LowPoly.DeepRock),
                     LowPoly.Mat(LowPoly.GrassDry),
+                    LowPoly.Mat(FogIslePinkSand),   // K.8: the Fog Isle's pink coral sand
                 };
             }
             return classMats[(int)c];

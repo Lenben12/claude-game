@@ -4,19 +4,38 @@ using UnityEngine.UIElements;
 
 namespace Sealebrities
 {
-    /// Tracks focused text fields so keyboard shortcuts (Tab, I, J …) are ignored while typing.
+    /// Tracks focused text fields so keyboard shortcuts (Tab, I, J …) are ignored while typing. While a field has focus
+    /// UIState.TextInput is true (L.4: GameInput then ignores every action except Pause); Enter submits (onSubmit) and
+    /// Esc leaves the field – both handled by UIController.
     public static class UITextInput
     {
         static TextField current;
+        static Action currentSubmit;
 
-        public static bool Active => current != null && current.panel != null;
+        public static bool Active
+        {
+            get
+            {
+                bool a = current != null && current.panel != null;
+                if (!a && UIState.TextInput) UIState.TextInput = false;   // a field vanished without a focus-out
+                return a;
+            }
+        }
 
-        public static void Track(TextField f)
+        public static void Track(TextField f, Action onSubmit = null)
         {
             if (f == null) return;
-            f.RegisterCallback<FocusInEvent>(_ => current = f);
-            f.RegisterCallback<FocusOutEvent>(_ => { if (current == f) current = null; });
-            f.RegisterCallback<DetachFromPanelEvent>(_ => { if (current == f) current = null; });
+            f.RegisterCallback<FocusInEvent>(_ => { current = f; currentSubmit = onSubmit; UIState.TextInput = true; });
+            f.RegisterCallback<FocusOutEvent>(_ => Release(f));
+            f.RegisterCallback<DetachFromPanelEvent>(_ => Release(f));
+        }
+
+        static void Release(TextField f)
+        {
+            if (current != f) return;
+            current = null;
+            currentSubmit = null;
+            UIState.TextInput = false;
         }
 
         /// Ends typing (Esc).
@@ -24,11 +43,46 @@ namespace Sealebrities
         {
             var f = current;
             current = null;
+            currentSubmit = null;
+            UIState.TextInput = false;
             if (f != null) f.Blur();
         }
 
+        /// Enter: runs the field's submit action (e.g. FinTube upload), then leaves the field.
+        public static void Submit()
+        {
+            var a = currentSubmit;
+            Blur();
+            try { a?.Invoke(); }
+            catch (Exception e) { Debug.LogException(e); }
+        }
+
+        /// Styled single-line text field (light card look).
+        public static TextField Field(string value, int maxLength, float fontSize, string placeholder = null)
+        {
+            var field = new TextField { maxLength = maxLength, value = value ?? "" };
+            field.style.fontSize = fontSize;
+            field.style.height = fontSize * 2.1f;
+            field.style.marginLeft = 0f; field.style.marginRight = 0f;
+            var input = field.Q(className: TextField.inputUssClassName);
+            if (input != null)
+            {
+                input.style.backgroundColor = Color.white;
+                input.style.color = UIPalette.Ink;
+                UIKit.Radius(input, 14f);
+                UIKit.Border(input, 2f, UIPalette.A(UIPalette.Ink, 0.14f));
+                UIKit.Pad(input, 4f, 14f, 4f, 14f);
+            }
+            if (!string.IsNullOrEmpty(placeholder))
+            {
+                try { field.textEdition.placeholder = placeholder; field.textEdition.hidePlaceholderOnFocus = true; }
+                catch (Exception) { }
+            }
+            return field;
+        }
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { current = null; }
+        static void ResetStatics() { current = null; currentSubmit = null; }
     }
 
     /// Per-viewer UI preferences that are not part of SettingsData (PlayerPrefs, guarded).
@@ -46,6 +100,8 @@ namespace Sealebrities
 
     /// Settings screen (main menu, pause menu and the phone's settings app). Writes Settings.Data, then
     /// Settings.Apply() + Settings.Save(). compact = phone layout (narrow, bigger text, icon tabs).
+    /// Every slider label goes through UIFormat (1e). The character look lives on the character screen (1c) – the
+    /// co-op tab keeps voice chat only and links to the screen.
     public class UISettingsView
     {
         enum Tab { Audio, Video, Controls, Game, Coop }
@@ -59,19 +115,17 @@ namespace Sealebrities
         static UISettingsView captureOwner;
 
         public readonly VisualElement Root;
-        readonly VisualElement tabsRow, content;
+        readonly VisualElement tabsRow, content, footer;
         readonly bool compact;
         readonly float fs;
         Tab tab;
         bool dirty;
         GameAction captureAction;
-        Label captureLabel;
 
-        static readonly Color[] SuitColors =
-        {
-            UIPalette.Rgb(0xEE7F2D), UIPalette.Rgb(0x3FB8C4), UIPalette.Rgb(0xE0607E), UIPalette.Rgb(0xF2C94C),
-            UIPalette.Rgb(0x8E6CD9), UIPalette.Rgb(0x6E9445), UIPalette.Rgb(0x4F7FAE), UIPalette.Rgb(0xEDE6DA),
-        };
+        /// Main menu only (Q42): shows „Intro ansehen“ in the footer.
+        public Action OnWatchIntro;
+        /// Shows „Charakter anpassen“ on the co-op tab (null = hidden, e.g. inside the phone).
+        public Action OnOpenCharacter;
 
         public UISettingsView(bool compact)
         {
@@ -92,10 +146,14 @@ namespace Sealebrities
             else
             {
                 var sv = UIKit.Scroll();
-                sv.style.maxHeight = 600f;
+                sv.style.maxHeight = 560f;
                 sv.contentContainer.Add(content);
                 Root.Add(sv);
             }
+            footer = UIKit.Row();
+            footer.style.marginTop = 10f;
+            footer.style.flexShrink = 0;
+            Root.Add(footer);
             Rebuild();
         }
 
@@ -142,6 +200,27 @@ namespace Sealebrities
                 case Tab.Game: BuildGame(); break;
                 default: BuildCoop(); break;
             }
+            BuildFooter();
+        }
+
+        void BuildFooter()
+        {
+            footer.Clear();
+            bool inGame = GameManager.I != null && GameManager.I.InGame;
+            if (OnWatchIntro != null && !inGame)
+            {
+                var b = UIKit.Btn("", () => { CancelCapture(); OnWatchIntro?.Invoke(); }, UIBtnKind.Ghost, fs * 0.85f);
+                b.style.flexDirection = FlexDirection.Row;
+                b.style.alignItems = Align.Center;
+                UIKit.Pad(b, 8f, 14f, 8f, 10f);
+                b.Add(new UIGlyph(UIGlyphs.Play, UIPalette.InkSoft, fs * 1.1f));
+                var l = UIKit.Text(Loc.Tr("Intro ansehen", "Watch intro"), fs * 0.85f, UIPalette.InkSoft, true);
+                l.style.marginLeft = 8f;
+                l.pickingMode = PickingMode.Ignore;
+                b.Add(l);
+                footer.Add(b);
+            }
+            UIKit.Show(footer, footer.childCount > 0);
         }
 
         // ------------------------------------------------------------------ tabs
@@ -200,17 +279,24 @@ namespace Sealebrities
             return row;
         }
 
-        VisualElement VolumeSlider(UIGlyph.DrawFn icon, string label, float value, Action<float> set, bool master)
+        /// Volume 0..1 shown as a whole percent (UIFormat.Percent). Only finite, clamped values are written (UISlider
+        /// guarantees it, the label and the stored value are clamped again); saved when the slider is released.
+        VisualElement VolumeSlider(UIGlyph.DrawFn icon, string label, float value, Action<float> set, bool master, float fallback)
         {
             var c = Card();
             var head = LabelRow(icon, label);
-            var pct = UIKit.Text(Mathf.RoundToInt(value * 100f) + " %", fs, UIPalette.TurquoiseInk, true);
+            value = UIFormat.Clamp(value, 0f, 1f, fallback);
+            var pct = UIKit.Text(UIFormat.Percent(value), fs, UIPalette.TurquoiseInk, true);
+            pct.style.minWidth = fs * 3.6f;
+            pct.style.unityTextAlign = TextAnchor.MiddleRight;
             head.Add(pct);
             c.Add(head);
             var s = new UISlider(0f, 1f, value, v =>
             {
+                if (float.IsNaN(v) || float.IsInfinity(v)) return;
+                v = Mathf.Clamp01(v);
                 set(v);
-                pct.text = Mathf.RoundToInt(v * 100f) + " %";
+                pct.text = UIFormat.Percent(v);
                 if (master) AudioListener.volume = v;
             }, UIPalette.Turquoise, _ => { Settings.Apply(); Settings.Save(); }, fs * 1.8f);
             s.style.marginTop = 6f;
@@ -241,10 +327,11 @@ namespace Sealebrities
         void BuildAudio()
         {
             var d = Settings.Data;
-            content.Add(VolumeSlider(UIGlyphs.Speaker, Loc.Tr("Gesamt", "Master"), d.master, v => d.master = v, true));
-            content.Add(VolumeSlider(UIGlyphs.Wave, Loc.Tr("Musik", "Music"), d.music, v => d.music = v, false));
-            content.Add(VolumeSlider(UIGlyphs.Bell, Loc.Tr("Effekte", "Effects"), d.sfx, v => d.sfx = v, false));
-            content.Add(VolumeSlider(UIGlyphs.Mic, Loc.Tr("Stimmen", "Voices"), d.voice, v => d.voice = v, false));
+            content.Add(VolumeSlider(UIGlyphs.Speaker, Loc.Tr("Gesamt", "Master"), d.master, v => d.master = v, true, Settings.DefaultMaster));
+            content.Add(VolumeSlider(UIGlyphs.Note, Loc.Tr("Musik", "Music"), d.music, v => d.music = v, false, Settings.DefaultMusic));
+            content.Add(VolumeSlider(UIGlyphs.Bell, Loc.Tr("Effekte", "Effects"), d.sfx, v => d.sfx = v, false, Settings.DefaultSfx));
+            content.Add(VolumeSlider(UIGlyphs.Mic, Loc.Tr("Stimmen", "Voices"), d.voice, v => d.voice = v, false, Settings.DefaultVoice));
+            content.Add(ToggleRow(UIGlyphs.Bubbles, Loc.Tr("Musik beim Tauchen", "Music while diving"), d.musicWhileDiving, v => d.musicWhileDiving = v));
         }
 
         void BuildVideo()
@@ -253,6 +340,7 @@ namespace Sealebrities
             content.Add(SegmentRow(UIGlyphs.Monitor, Loc.Tr("Grafik", "Graphics"),
                 new[] { Loc.Tr("Niedrig", "Low"), Loc.Tr("Mittel", "Medium"), Loc.Tr("Hoch", "High") }, (int)d.quality,
                 i => d.quality = (GraphicsQuality)i));
+            content.Add(FovSlider());
             var opts = Settings.FpsOptions;
             var labels = new string[opts.Length];
             int sel = opts.Length - 1;
@@ -263,6 +351,31 @@ namespace Sealebrities
             }
             content.Add(SegmentRow(UIGlyphs.Clock, Loc.Tr("FPS-Limit", "FPS limit"), labels, sel, i => d.fpsLimit = Settings.FpsOptions[i]));
             content.Add(ToggleRow(UIGlyphs.Monitor, "VSync", d.vsync, v => d.vsync = v));
+        }
+
+        /// Q98 field of view 60–100° (default 70): saved on release, applied live by the Player module (Settings.Changed).
+        VisualElement FovSlider()
+        {
+            var d = Settings.Data;
+            var c = Card();
+            var head = LabelRow(UIGlyphs.Eye, Loc.Tr("Sichtfeld", "Field of view"));
+            float v0 = UIFormat.Clamp(d.fov, Settings.MinFov, Settings.MaxFov, Settings.DefaultFov);
+            var val = UIKit.Text(UIFormat.Degrees(v0, Settings.MinFov, Settings.MaxFov), fs, UIPalette.TurquoiseInk, true);
+            val.style.minWidth = fs * 3.2f;
+            val.style.unityTextAlign = TextAnchor.MiddleRight;
+            head.Add(val);
+            c.Add(head);
+            var s = new UISlider(Settings.MinFov, Settings.MaxFov, v0, v =>
+            {
+                if (float.IsNaN(v) || float.IsInfinity(v)) return;
+                v = Mathf.Clamp(Mathf.Round(v), Settings.MinFov, Settings.MaxFov);
+                d.fov = v;
+                val.text = UIFormat.Degrees(v, Settings.MinFov, Settings.MaxFov);
+                Settings.MarkDirty();
+            }, UIPalette.Turquoise, _ => { Settings.Apply(); Settings.Save(); }, fs * 1.8f);
+            s.style.marginTop = 6f;
+            c.Add(s);
+            return c;
         }
 
         void BuildControls()
@@ -314,11 +427,7 @@ namespace Sealebrities
             }
             var key = UIKit.KeyCap(capturing ? Loc.Tr("Taste drücken …", "Press a key …") : GameInput.BindingLabel(a), fs * 0.8f);
             key.style.minWidth = compact ? 120f : 110f;
-            if (capturing)
-            {
-                key.style.backgroundColor = UIPalette.Sun;
-                captureLabel = key;
-            }
+            if (capturing) key.style.backgroundColor = UIPalette.Sun;
             key.pickingMode = PickingMode.Position;
             key.RegisterCallback<ClickEvent>(_ =>
             {
@@ -346,8 +455,20 @@ namespace Sealebrities
             lang.Add(seg);
             content.Add(lang);
 
+            // L.10 task display: Normal / Small / Off
+            content.Add(SegmentRow(UIGlyphs.Tasks, Loc.Tr("Aufgaben-Anzeige", "Task display"),
+                new[] { Loc.Tr("Normal", "Normal"), Loc.Tr("Klein", "Small"), Loc.Tr("Aus", "Off") }, Mathf.Clamp(d.questDisplay, 0, 2),
+                i => d.questDisplay = i));
+            // Q99 toggles
+            content.Add(ToggleRow(UIGlyphs.Wave, Loc.Tr("Kopfwippen", "Head bob"), d.headBob, v => d.headBob = v));
+            content.Add(ToggleRow(UIGlyphs.Camera, Loc.Tr("Kamerawackeln", "Camera shake"), d.cameraShake, v => d.cameraShake = v));
+            // K.2 auto-record
+            content.Add(ToggleRow(UIGlyphs.Rec, Loc.Tr("Unter Wasser automatisch filmen", "Auto-record under water"), d.autoRecordUnderwater, v => d.autoRecordUnderwater = v));
+            content.Add(ToggleRow(UIGlyphs.Bubble, Loc.Tr("Untertitel", "Subtitles"), d.subtitles, v => d.subtitles = v));
+            content.Add(ToggleRow(UIGlyphs.Person, Loc.Tr("Tutorial-Hilfe von Horst", "Tutorial help from Horst"), d.npcTutorial, v => d.npcTutorial = v));
+
             var phone = Card();
-            phone.Add(LabelRow(UIGlyphs.Bubble, Loc.Tr("Handy-Ansicht", "Phone view")));
+            phone.Add(LabelRow(UIGlyphs.Phone, Loc.Tr("Handy-Ansicht", "Phone view")));
             var pseg = new UISegmented(new[] { Loc.Tr("In der Hand (3D)", "In hand (3D)"), Loc.Tr("Flach", "Flat") }, UIPrefs.PhoneFlat ? 1 : 0,
                 i => UIPrefs.PhoneFlat = i == 1, UIPalette.Turquoise, fs * 0.8f);
             pseg.style.marginTop = 8f;
@@ -364,65 +485,22 @@ namespace Sealebrities
                 diff.Add(row);
                 content.Add(diff);
             }
-            _ = d;
         }
 
         void BuildCoop()
         {
             var d = Settings.Data;
-            // name
-            var nameCard = Card();
-            nameCard.Add(LabelRow(UIGlyphs.Person, Loc.Tr("Dein Name", "Your name")));
-            var field = new TextField { maxLength = Settings.MaxNameLength, value = d.playerName ?? "" };
-            field.style.marginTop = 8f;
-            field.style.fontSize = fs;
-            field.style.height = fs * 2f;
-            var input = field.Q(className: TextField.inputUssClassName);
-            if (input != null)
+            // the look and the name live on the character screen (1c)
+            if (OnOpenCharacter != null)
             {
-                input.style.backgroundColor = UIPalette.CardAlt;
-                input.style.color = UIPalette.Ink;
-                UIKit.Radius(input, 12f);
-                UIKit.Border(input, 2f, UIPalette.A(UIPalette.Ink, 0.12f));
-                UIKit.Pad(input, 4f, 12f, 4f, 12f);
+                var cc = Card();
+                var row = LabelRow(UIGlyphs.Person, Settings.DisplayName);
+                var b = UIKit.Btn(Loc.Tr("Charakter", "Character"), () => { CancelCapture(); OnOpenCharacter?.Invoke(); }, UIBtnKind.Accent, fs * 0.8f);
+                UIKit.Pad(b, 8f, 16f, 8f, 16f);
+                row.Add(b);
+                cc.Add(row);
+                content.Add(cc);
             }
-            field.RegisterValueChangedCallback(e =>
-            {
-                Settings.Data.playerName = e.newValue ?? "";
-                Settings.MarkDirty();
-            });
-            field.RegisterCallback<FocusOutEvent>(_ => { Settings.Apply(); Settings.Save(); });
-            UITextInput.Track(field);
-            nameCard.Add(field);
-            content.Add(nameCard);
-
-            // suit color
-            var suit = Card();
-            suit.Add(LabelRow(UIGlyphs.Person, Loc.Tr("Anzugfarbe", "Suit color")));
-            var sw = UIKit.Row();
-            sw.style.flexWrap = Wrap.Wrap;
-            sw.style.marginTop = 8f;
-            for (int i = 0; i < SuitColors.Length; i++)
-            {
-                var col = SuitColors[i];
-                bool sel = ColorClose(col, d.suitColor);
-                var b = UIKit.Box();
-                float size = compact ? 56f : 44f;
-                UIKit.Size(b, size, size);
-                UIKit.Radius(b, size * 0.5f);
-                b.style.marginRight = 10f; b.style.marginBottom = 8f;
-                UIKit.Border(b, sel ? 4f : 2f, sel ? UIPalette.Ink : UIPalette.A(UIPalette.Ink, 0.15f));
-                if (sel) { UIKit.Center(b); b.Add(new UIGlyph(UIGlyphs.Check, UIPalette.OnColor(col), size * 0.5f)); }
-                UIKit.Clickable(b, () => { Settings.Data.suitColor = col; Settings.Apply(); Settings.Save(); dirty = true; }, col, UIPalette.Lighten(col, 0.15f));
-                sw.Add(b);
-            }
-            suit.Add(sw);
-            content.Add(suit);
-
-            // hat
-            content.Add(SegmentRow(UIGlyphs.Person, Loc.Tr("Hut", "Hat"),
-                new[] { Loc.Tr("Keiner", "None"), Loc.Tr("Fischer", "Bucket"), Loc.Tr("Wikinger", "Viking"), Loc.Tr("Haiflosse", "Shark"), Loc.Tr("Ente", "Duck") },
-                Mathf.Clamp(d.hat, 0, 4), i => d.hat = i));
 
             // voice
             content.Add(SegmentRow(UIGlyphs.Mic, Loc.Tr("Sprachchat", "Voice chat"),
@@ -434,7 +512,5 @@ namespace Sealebrities
             content.Add(ptt);
             content.Add(ToggleRow(UIGlyphs.MicOff, Loc.Tr("Mikro stumm", "Mute mic"), d.micMuted, v => d.micMuted = v));
         }
-
-        static bool ColorClose(Color a, Color b) => Mathf.Abs(a.r - b.r) + Mathf.Abs(a.g - b.g) + Mathf.Abs(a.b - b.b) < 0.06f;
     }
 }

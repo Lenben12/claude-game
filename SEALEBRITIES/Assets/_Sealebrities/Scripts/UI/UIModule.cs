@@ -73,7 +73,8 @@ namespace Sealebrities
             if (controller != null) controller.ShowMainMenu();
         }
 
-        /// Debug/AutoShot helper: opens the phone on an app by id ("sealog", "tasks", "market", "gallery", "shop",
+        /// Debug/AutoShot helper: opens the phone on an app by id ("sealog", "tasks", "market", "gallery", "shop", "deals",
+        /// "fin", "weather",
         /// "fintube", "krill", "followfish", "map", "messages", "settings"). "sealog:&lt;speciesId&gt;" opens that species'
         /// journal page, null or "" the home screen, "close" closes the phone, "inventory" / "inventory:close" toggles the
         /// inventory. Returns false when the phone cannot open (no game, menu/pause/loading open).
@@ -117,6 +118,18 @@ namespace Sealebrities
                 if (s != null) phone.Sealog.ShowSpecies(s);
             }
             return true;
+        }
+
+        /// Debug/AutoShot helper (J.6 "16_character"): opens the character screen (main-menu context, or the pause context
+        /// in a game) and, with hat ≥ 0, puts that hat on the preview diver without saving. "close" = hat −2.
+        public static bool DebugOpenCharacter(int hat = -1)
+        {
+            if (controller == null || controller.Character == null) return false;
+            if (hat == -2) { controller.Character.Close(false); return true; }
+            var gm = GameManager.I;
+            controller.OpenCharacter(gm != null && gm.InGame ? CharacterScreenContext.Pause : CharacterScreenContext.MainMenu, null);
+            if (hat >= 0) controller.Character.DebugSetHat(hat);
+            return controller.Character.IsOpen;
         }
 
         static PanelSettings CreatePanelSettings()

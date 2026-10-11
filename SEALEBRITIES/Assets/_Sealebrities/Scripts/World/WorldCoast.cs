@@ -68,11 +68,15 @@ namespace Sealebrities
         // Only the last metre at the beach stays see-through turquoise.
         // (second/third pass: the shallow house reef (2-4 m) still showed through from the dock end → effectively
         // opaque from 2.5 m on; only the beach strip stays see-through turquoise)
-        static readonly float[] StopDepth = { 0f, 0.6f, 1.5f, 2.5f, 4f, 5f, 15f, 35f };
-        static readonly float[] StopR = { 0x43, 0x3E, 0x33, 0x2E, 0x2C, 0x2A, 0x24, 0x20 };
-        static readonly float[] StopG = { 0x9E, 0x96, 0x7C, 0x6E, 0x66, 0x5E, 0x4A, 0x3F };
-        static readonly float[] StopB = { 0xB5, 0xAF, 0x9C, 0x92, 0x8C, 0x88, 0x74, 0x66 };
-        static readonly float[] StopA = { 0.60f, 0.72f, 0.93f, 0.99f, 0.997f, 1.0f, 1.0f, 1.0f };
+        // Round 2 (Q4, player answer: a wide turquoise lagoon, then blue): below 6 m the ramp follows the Q4 table
+        // 0–0.6 m #4FB8C8 α 0.55 · 1.5 m #46ADC4 α 0.70 · 3.5 m #3D9DBE α 0.86 · 6 m #357FAE α 0.93, with the same
+        // per-depth pre-compensation the calibration measured between the art-bible table and the screen (×0.93 at the
+        // beach → ×0.78 from 6 m on). 15 m and 35 m keep their calibrated values (open sea unchanged, ▣ #326D9B near).
+        static readonly float[] StopDepth = { 0f, 0.6f, 1.5f, 3.5f, 6f, 15f, 35f };
+        static readonly float[] StopR = { 0x49, 0x47, 0x39, 0x30, 0x29, 0x24, 0x20 };
+        static readonly float[] StopG = { 0xAB, 0xA6, 0x8E, 0x7C, 0x63, 0x4A, 0x3F };
+        static readonly float[] StopB = { 0xBA, 0xB4, 0xA1, 0x96, 0x88, 0x74, 0x66 };
+        static readonly float[] StopA = { 0.55f, 0.55f, 0.70f, 0.86f, 0.93f, 1.0f, 1.0f };
 
         /// sRGB colour (alpha = opacity) of the sea surface over a seafloor depth.
         public static Color RampColor(float depth)

@@ -173,8 +173,79 @@ namespace Sealebrities
             if (PropRun.Due()) yield return null;
 
             Boathouse(root, batch, cols, excl, x0, z0);
+            Extras(root, batch, cols, excl, x0, x1, z0, deck);
 
             batch.Flush(root, "DockMesh", ShadowCastingMode.On, 0f);
+        }
+
+        // ------------------------------------------------------------------ L.5 #2 / A.2 / B.3: dock life and berths
+        /// Horst's bench by the dock start with sandwich wrappers and his badly painted „Hafenmeister“ sign, a
+        /// crab-trap stack, the bait cooler, a lifebuoy post, the two visitor berths (mooring dolphins with bollards and
+        /// fenders) and the visitor mooring buoy; publishes Horst's spots, the berths and the sunglasses spot (H2).
+        static void Extras(Transform root, PropBatch batch, Transform cols, PropExclusion excl, float x0, float x1, float z0, float deck)
+        {
+            Vector3 ds = WorldLayout.DockStart;
+            // Horst's bench on the sand south-west of the dock start, facing the sea
+            Vector3 hb = new Vector3(ds.x - 3f, 0f, ds.z - 3f);
+            hb.y = G(hb.x, hb.z);
+            if (hb.y < 0.25f) { hb = new Vector3(ds.x - 5f, 0f, ds.z - 2.5f); hb.y = G(hb.x, hb.z); }
+            PropKit.Bench(batch, cols, root, hb, 120f, true);
+            Quaternion bq = Quaternion.Euler(0f, 120f, 0f);
+            for (int i = 0; i < 3; i++)
+                batch.W(i == 1 ? PropMats.Paper : PropMats.White).Box(hb + bq * new Vector3(-0.4f + i * 0.35f, 0.49f, -0.05f + 0.08f * i), new Vector3(0.18f, 0.01f, 0.14f), bq * Quaternion.Euler(0f, i * 40f, 0f));
+            Vector3 sp = hb + bq * new Vector3(1.4f, 0f, -0.4f);
+            sp.y = G(sp.x, sp.z);
+            PropKit.Sign(batch, cols, sp, 120f + 180f, Loc.Tr("HAFENMEISTER", "HARBOUR MASTER"), LowPoly.Hex("#EDE6DA"), LowPoly.Hex("#B8454A"), 1.25f, 0.4f);
+            PropSpots.Register("horst_bench", hb + bq * new Vector3(0f, 0f, 0.95f));
+            PropInfo.SetSpot("horst_bench", hb + Vector3.up * 0.47f, 120f);
+            excl.Add(hb.x, hb.z, 2.2f);
+            // crab-trap stack, bait cooler and a lifebuoy on the dock (north side, away from the fishing spot)
+            PropKit.CrabTrap(batch, new Vector3(x0 + 2.4f, deck, z0 + 0.7f), 10f);
+            PropKit.CrabTrap(batch, new Vector3(x0 + 2.4f, deck + 0.42f, z0 + 0.7f), 35f, 0.9f);
+            PropKit.CrabTrap(batch, new Vector3(x0 + 3.2f, deck, z0 + 0.75f), -20f);
+            PropCol.Box(cols, new Vector3(x0 + 2.8f, deck + 0.4f, z0 + 0.72f), new Vector3(1.5f, 0.8f, 0.7f), Quaternion.identity, "CrabTraps");
+            PropKit.Cooler(batch, cols, new Vector3(x1 - 12.5f, deck, z0 + 0.75f), 90f, PropMats.Flat(LowPoly.Hex("#F2F2EA")));
+            PropKit.LifebuoyPost(batch, cols, new Vector3(x0 + 10.5f, deck, z0 - 1.05f), 180f);
+            PropKit.RopeCoil(batch, new Vector3(x0 + 16.5f, deck, z0 + 0.8f), 0.28f);
+            // berths A and B (south of the dock): mooring dolphins – three piles lashed together, bollard + fenders
+            Vector3[] berths = { ds + new Vector3(10f, 0f, -7f), ds + new Vector3(14f, 0f, -14f) };
+            string[] ids = { "berth_a", "berth_b" };
+            for (int i = 0; i < berths.Length; i++)
+            {
+                Vector3 b = berths[i];
+                Vector3 dol = b + new Vector3(0f, 0f, 3.2f);
+                float g = G(dol.x, dol.z);
+                for (int k = 0; k < 3; k++)
+                {
+                    float a = k * Mathf.PI * 2f / 3f;
+                    Vector3 pp = dol + new Vector3(Mathf.Cos(a) * 0.3f, 0f, Mathf.Sin(a) * 0.3f);
+                    batch.W(PropMats.WoodWet).Cylinder(new Vector3(pp.x, g - 0.5f, pp.z), Quaternion.Euler(0f, 0f, (k - 1) * 3f), 0.16f, 0.14f, deck + 0.9f - g, 7, false, true);
+                }
+                batch.W(PropMats.Rope).Torus(new Vector3(dol.x, deck + 0.5f, dol.z), Quaternion.identity, 0.5f, 0.05f, 10, 3);
+                batch.W(PropMats.DarkMetal).Cylinder(new Vector3(dol.x, deck + 0.9f, dol.z), Quaternion.identity, 0.12f, 0.1f, 0.25f, 8, false, true);
+                batch.W(PropMats.Orange).Cylinder(new Vector3(dol.x, Waves.SeaLevel - 0.1f, dol.z - 0.5f), Quaternion.identity, 0.14f, 0.14f, 0.5f, 6, true, true);
+                PropCol.Capsule(cols, new Vector3(dol.x, (g + deck + 0.9f) * 0.5f, dol.z), 0.45f, deck + 0.9f - g, Quaternion.identity, "MooringDolphin");
+                var bw = new Vector3(b.x, Waves.SeaLevel, b.z);
+                PropSpots.Register(ids[i], bw, 90f);
+            }
+            // the visitor mooring buoy further out
+            Vector3 vm = WorldLayout.DockEnd + new Vector3(10f, 0f, -12f);
+            PropKit.MooringBuoy(root, vm, PropMats.White, 0.8f);
+            PropInfo.SetSpot("visitor_mooring", new Vector3(vm.x, Waves.SeaLevel, vm.z));
+            // Horst's sunglasses (H2) lie between the dock posts where the water is ~3 m deep
+            float bestK = float.MaxValue;
+            Vector3 glasses = Vector3.zero;
+            for (float x = x0 + 3f; x < x1 - 1f; x += 0.5f)
+            {
+                float g = G(x, z0 + 0.4f);
+                float k = Mathf.Abs(-g - 3f);
+                if (k < bestK) { bestK = k; glasses = new Vector3(x, g + 0.08f, z0 + 0.4f); }
+            }
+            if (glasses != Vector3.zero) PropSpots.Register("q_sunglasses", glasses);
+            PropSpots.Register("dock", new Vector3((x0 + x1) * 0.5f, deck, z0));
+            // the dock ladder for the player's generic climb (L.13) – the Player module drives it (no fallback here)
+            PropInfo.AddLadder(PropInfo.DockLadderBottom, PropInfo.DockLadderTop, Vector3.right, LadderInfo.Wood);
+            for (int i = 0; i < 3; i++) PropInfo.AddLandSpot(new Vector3(x0 + 2.5f + i * 11f, deck + 2.65f, z0 + (i % 2 == 0 ? 1f : -1f) * (1.2f - 0.1f)), LandSpotKind.Perch, 0.3f, "dock");
         }
 
         // ------------------------------------------------------------------ ladder (working)

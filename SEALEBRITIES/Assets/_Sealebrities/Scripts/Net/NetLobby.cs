@@ -6,13 +6,23 @@ using UnityEngine.UIElements;
 
 namespace Sealebrities
 {
-    /// "Mit Freunden" screens (Net.OpenLobby): profile (name, suit colour, hat), Spiel hosten (continue / new game with
-    /// 3 difficulty cards, port, own addresses + internet hint), Beitreten (IP[:port] + LAN list), connecting state,
-    /// notices (session ended, errors). In game: a small co-op card while the pause menu is open (players, ping,
-    /// host addresses, leave) and the F3 diagnostics overlay. Built into the UI module's document as its own layer.
-    public static class NetLobby
+    /// "Mit Freunden" screens (Net.OpenLobby): the profile card (1c: live 3D thumbnail of your bean diver, your name and
+    /// „Charakter anpassen“ → the character screen), then the clear first choice "Über Steam (empfohlen)" when Steam
+    /// runs (host a Steam lobby + friends who host right now, NetLobbySteam.cs) and "Per IP / Heimnetz" second: Spiel
+    /// hosten (continue / new game with 3 difficulty cards, port, own addresses + internet hint), Beitreten (IP[:port] +
+    /// LAN list), connecting state, notices (session ended, errors).
+    /// In game: the Steam invite card while the pause menu is open in a Steam session ("Freunde einladen"), the
+    /// (disabled) co-op card and the F3 diagnostics overlay. Built into the UI module's document as its own layer.
+    public static partial class NetLobby
     {
-        enum Page { Home, Host, Join, Connecting }
+        enum Page { Home, Host, Join, Connecting, SteamHost }
+
+        // 1c profile card: live thumbnail (Player module's CharacterPreview) – only while the home page is shown
+        const int ThumbTextureSize = 256;
+        const float ThumbSize = 220f;
+        static ICharacterPreview lobbyPreview;
+        static bool characterFromLobby;
+        static float characterOpenedAt;
 
         static readonly Color[] Swatches =
         {
@@ -43,6 +53,7 @@ namespace Sealebrities
             page = Page.Home; open = false; dirty = false; installed = false; profileDirty = false;
             hostContinue = true; hostDifficulty = Difficulty.OpenWater; portText = "27015"; joinText = "";
             dotsTimer = 0f; coopRefresh = 0f; overlayRefresh = 0f; dots = 0;
+            lobbyPreview = null; characterFromLobby = false; characterOpenedAt = 0f;
         }
 
         internal static void Install()
@@ -51,12 +62,76 @@ namespace Sealebrities
             installed = true;
             GameEvents.LanguageChanged += OnLanguageChanged;
             NetSession.StatusChanged += OnStatusChanged;
+            CharacterScreen.Closed += OnCharacterClosed;
+            InstallSteam();
+        }
+
+        // =================================================================== 1c character screen from the lobby
+        static void OpenCharacter()
+        {
+            if (CharacterScreen.OpenHandler == null) return;
+            SaveProfile();
+            // one preview stage at a time: the character screen builds its own
+            DisposeLobbyPreview();
+            characterFromLobby = true;
+            characterOpenedAt = Time.unscaledTime;
+            if (lobby != null) lobby.style.display = DisplayStyle.None;
+            try { CharacterScreen.Open(CharacterScreenContext.Lobby); }
+            catch (Exception e)
+            {
+                Debug.LogException(e);
+                RestoreAfterCharacter();
+            }
+        }
+
+        static void OnCharacterClosed()
+        {
+            if (characterFromLobby) RestoreAfterCharacter();
+        }
+
+        static void RestoreAfterCharacter()
+        {
+            characterFromLobby = false;
+            if (!open) return;
+            if (lobby != null) lobby.style.display = DisplayStyle.Flex;
+            dirty = true;   // new name / look on the profile card
+        }
+
+        static bool EnsureLobbyPreview()
+        {
+            if (lobbyPreview != null) return lobbyPreview.Texture != null;
+            var factory = CharacterPreviewFactory.Create;
+            if (factory == null) return false;
+            try
+            {
+                lobbyPreview = factory(ThumbTextureSize);
+                if (lobbyPreview == null) return false;
+                lobbyPreview.SetLook(Settings.Look);
+                lobbyPreview.Focus(PreviewFocus.Body);
+                return lobbyPreview.Texture != null;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[Net] lobby character preview failed: " + e.Message);
+                DisposeLobbyPreview();
+                return false;
+            }
+        }
+
+        static void DisposeLobbyPreview()
+        {
+            var p = lobbyPreview;
+            lobbyPreview = null;
+            if (p == null) return;
+            try { p.Dispose(); }
+            catch (Exception e) { Debug.LogWarning("[Net] lobby character preview dispose: " + e.Message); }
         }
 
         static void OnLanguageChanged()
         {
             dirty = true;
             coopRefresh = 0f;
+            steamCardDirty = true;
         }
 
         // =================================================================== layer
@@ -95,6 +170,8 @@ namespace Sealebrities
             HideNotice();
             open = true;
             page = NetSession.IsConnecting || NetSession.IsRetrying ? Page.Connecting : Page.Home;
+            steamConnecting = page == Page.Connecting && NetSession.IsSteam;
+            friendRefresh = 0f;
             if (page == Page.Home) NetSession.ClearStatus();
             portText = NetSession.RequestedPort.ToString(CultureInfo.InvariantCulture);
             if (string.IsNullOrEmpty(joinText))
@@ -111,6 +188,7 @@ namespace Sealebrities
         {
             Open();
             if (!open) return;
+            steamConnecting = false;
             page = Page.Connecting;
             Build();
         }
@@ -119,10 +197,13 @@ namespace Sealebrities
         {
             if (!open && lobby == null) return;
             open = false;
+            characterFromLobby = false;
+            DisposeLobbyPreview();
             if (lobby != null) lobby.RemoveFromHierarchy();
             lobby = null;
             body = null;
             lanBox = null;
+            friendGamesBox = null;
             statusLabel = null;
             connectingLabel = null;
             StopLan();
@@ -156,7 +237,8 @@ namespace Sealebrities
                 case Page.Home: Close(); break;
                 case Page.Connecting:
                     NetSession.CancelJoin();
-                    page = Page.Join;
+                    page = steamConnecting ? Page.Home : Page.Join;
+                    steamConnecting = false;
                     Build();
                     break;
                 default:
@@ -179,6 +261,7 @@ namespace Sealebrities
             dirty = false;
             if (!open || !EnsureLayer()) return;
             if (lobby != null) lobby.RemoveFromHierarchy();
+            if (page != Page.Home) DisposeLobbyPreview();   // the thumbnail lives on the home page only
 
             lobby = new VisualElement { name = "sb-net-lobby" };
             NetLobbyStyle.Fill(lobby);
@@ -196,7 +279,7 @@ namespace Sealebrities
 
             // header
             var head = NetLobbyStyle.Row();
-            if (page == Page.Host || page == Page.Join)
+            if (page == Page.Host || page == Page.Join || page == Page.SteamHost)
             {
                 var back = NetLobbyStyle.Ghost(Loc.Tr("Zurück", "Back"), Back, 17f);
                 back.style.marginRight = 16f;
@@ -205,8 +288,9 @@ namespace Sealebrities
             string title;
             switch (page)
             {
-                case Page.Host: title = Loc.Tr("Spiel hosten", "Host a game"); break;
-                case Page.Join: title = Loc.Tr("Beitreten", "Join a game"); break;
+                case Page.Host: title = Loc.Tr("Hosten per IP / Heimnetz", "Host by IP / home network"); break;
+                case Page.Join: title = Loc.Tr("Beitreten per IP / Heimnetz", "Join by IP / home network"); break;
+                case Page.SteamHost: title = Loc.Tr("Über Steam hosten", "Host via Steam"); break;
                 case Page.Connecting: title = Loc.Tr("Verbinden", "Connecting"); break;
                 default: title = Loc.Tr("Mit Freunden tauchen", "Dive with friends"); break;
             }
@@ -231,10 +315,12 @@ namespace Sealebrities
             body = NetLobbyStyle.Col();
             body.style.flexShrink = 1;
             card.Add(body);
+            friendGamesBox = null;
             switch (page)
             {
                 case Page.Host: BuildHost(); break;
                 case Page.Join: BuildJoin(); break;
+                case Page.SteamHost: BuildSteamHost(); break;
                 case Page.Connecting: BuildConnecting(); break;
                 default: BuildHome(); break;
             }
@@ -244,11 +330,122 @@ namespace Sealebrities
             card.Add(statusLabel);
             UpdateStatus();
 
+            if (characterFromLobby) lobby.style.display = DisplayStyle.None;
             layer.Add(lobby);
         }
 
         // ------------------------------------------------------------------ home: profile + choice
+        /// The name shown on the profile card: the chosen name, else the Steam persona name, else "Taucher".
+        static string ProfileName()
+        {
+            string shownName = Settings.Data.playerName;
+            if (string.IsNullOrWhiteSpace(shownName) && !string.IsNullOrWhiteSpace(SteamService.PersonaName))
+            {
+                shownName = SteamService.PersonaName.Trim();
+                if (shownName.Length > Settings.MaxNameLength) shownName = shownName.Substring(0, Settings.MaxNameLength);
+            }
+            if (!string.IsNullOrWhiteSpace(NetBoot.NameOverride)) shownName = NetBoot.NameOverride;
+            return string.IsNullOrWhiteSpace(shownName) ? Loc.Tr("Taucher", "Diver") : shownName.Trim();
+        }
+
+        /// 1c: profile card – live thumbnail of the bean diver (220 × 220), name, „Charakter anpassen“. The look and the
+        /// name are edited on the character screen; this card only shows them.
+        static void BuildProfileCard()
+        {
+            var prof = NetLobbyStyle.Row();
+            prof.style.alignItems = Align.Center;
+            prof.style.backgroundColor = new Color(1f, 1f, 1f, 0.75f);
+            NetLobbyStyle.Radius(prof, 18f);
+            NetLobbyStyle.Pad(prof, 12f, 14f);
+            body.Add(prof);
+
+            var frame = new VisualElement { name = "sb-net-thumb" };
+            frame.style.width = ThumbSize;
+            frame.style.height = ThumbSize;
+            frame.style.flexShrink = 0;
+            frame.style.overflow = Overflow.Hidden;
+            NetLobbyStyle.Radius(frame, 18f);
+            // the preview stage's warm gradient (#F2C48A → #E98F6A) as the frame colour while it renders
+            NetLobbyStyle.Clickable(frame, OpenCharacter, NetLobbyStyle.Hex(0xF2C48A), NetLobbyStyle.Hex(0xF5D3A5));
+            if (EnsureLobbyPreview())
+            {
+                var img = new Image { image = lobbyPreview.Texture, scaleMode = ScaleMode.ScaleAndCrop, pickingMode = PickingMode.Ignore };
+                img.style.flexGrow = 1;
+                frame.Add(img);
+            }
+            else frame.Add(BeanBadge(Settings.Look));
+            prof.Add(frame);
+            prof.Add(NetLobbyStyle.Gap(22f, true));
+
+            var col = NetLobbyStyle.Col();
+            col.style.flexGrow = 1;
+            col.style.flexShrink = 1;
+            col.Add(NetLobbyStyle.Text(Loc.Tr("Dein Taucher", "Your diver"), 17f, NetLobbyStyle.Muted, true));
+            var nameLabel = NetLobbyStyle.Text(ProfileName(), 34f, NetLobbyStyle.Ink, true);
+            nameLabel.style.overflow = Overflow.Hidden;
+            nameLabel.style.textOverflow = TextOverflow.Ellipsis;
+            col.Add(nameLabel);
+            if (!string.IsNullOrWhiteSpace(NetBoot.NameOverride))
+                col.Add(NetLobbyStyle.Text("(-netname " + NetBoot.NameOverride + ")", 15f, NetLobbyStyle.Muted));
+            var hint = NetLobbyStyle.Para(Loc.Tr("Anzug, Hut, Gesicht – deine Freunde sehen dich genau so.",
+                                                 "Suit, hat, face – your friends see you exactly like this."), 16f, NetLobbyStyle.Muted);
+            hint.style.marginTop = 4f;
+            col.Add(hint);
+            col.Add(NetLobbyStyle.Gap(14f));
+            var btn = NetLobbyStyle.Accent(Loc.Tr("Charakter anpassen", "Customise character"), OpenCharacter, 21f);
+            btn.style.alignSelf = Align.FlexStart;
+            NetLobbyStyle.Pad(btn, 12f, 26f);
+            col.Add(btn);
+            prof.Add(col);
+        }
+
+        /// Flat stand-in while no 3D preview exists: a How-to-Fish bean (suit body, face, hat brim) in UI shapes.
+        static VisualElement BeanBadge(DiverLook look)
+        {
+            var box = new VisualElement { pickingMode = PickingMode.Ignore };
+            box.style.flexGrow = 1;
+            box.style.alignItems = Align.Center;
+            box.style.justifyContent = Justify.FlexEnd;
+            var face = new VisualElement { pickingMode = PickingMode.Ignore };
+            face.style.width = 74f;
+            face.style.height = 52f;
+            face.style.marginBottom = -6f;
+            NetLobbyStyle.Radius(face, 26f);
+            var skins = CosmeticsDatabase.SkinTones;
+            face.style.backgroundColor = skins != null && skins.Length > 0 ? skins[Mathf.Clamp(look.skin, 0, skins.Length - 1)] : NetLobbyStyle.Hex(0xE8C08A);
+            var bean = new VisualElement { pickingMode = PickingMode.Ignore };
+            bean.style.width = 120f;
+            bean.style.height = 150f;
+            bean.style.borderTopLeftRadius = 60f;
+            bean.style.borderTopRightRadius = 60f;
+            bean.style.borderBottomLeftRadius = 30f;
+            bean.style.borderBottomRightRadius = 30f;
+            bean.style.backgroundColor = NetLobbyStyle.Hex(0x343849);
+            var band = new VisualElement { pickingMode = PickingMode.Ignore };
+            band.style.marginTop = 62f;
+            band.style.height = 30f;
+            band.style.backgroundColor = new Color(look.suit.r, look.suit.g, look.suit.b, 1f);
+            bean.Add(band);
+            box.Add(face);
+            box.Add(bean);
+            face.BringToFront();
+            return box;
+        }
+
         static void BuildHome()
+        {
+            if (CharacterScreen.OpenHandler != null)
+            {
+                BuildProfileCard();
+                BuildChoices();
+                return;
+            }
+            // no character screen installed (UI module older than round 2): the quick look editor of round 1
+            BuildQuickLook();
+            BuildChoices();
+        }
+
+        static void BuildQuickLook()
         {
             var prof = NetLobbyStyle.Col();
             prof.style.backgroundColor = new Color(1f, 1f, 1f, 0.75f);
@@ -260,7 +457,14 @@ namespace Sealebrities
             var nl = NetLobbyStyle.Text(Loc.Tr("Name", "Name"), 19f, NetLobbyStyle.Muted, true);
             nl.style.width = 90f;
             nameRow.Add(nl);
-            var nameField = NetLobbyStyle.Field(Settings.Data.playerName, Settings.MaxNameLength, 300f);
+            // no name chosen yet: the Steam name is the default (editable; only saved when the player changes it)
+            string shownName = Settings.Data.playerName;
+            if (string.IsNullOrWhiteSpace(shownName) && !string.IsNullOrWhiteSpace(SteamService.PersonaName))
+            {
+                shownName = SteamService.PersonaName.Trim();
+                if (shownName.Length > Settings.MaxNameLength) shownName = shownName.Substring(0, Settings.MaxNameLength);
+            }
+            var nameField = NetLobbyStyle.Field(shownName, Settings.MaxNameLength, 300f);
             nameField.RegisterValueChangedCallback(e =>
             {
                 string v = e.newValue ?? "";
@@ -328,8 +532,48 @@ namespace Sealebrities
                 hatRow.Add(chip);
             }
             prof.Add(hatRow);
+        }
 
-            body.Add(NetLobbyStyle.Gap(22f));
+        /// Steam first (when it runs), IP / home network second.
+        static void BuildChoices()
+        {
+            body.Add(NetLobbyStyle.Gap(20f));
+            if (SteamService.Available)
+            {
+                // 1st choice: Steam (no IP, no port forwarding, invite from the friends list)
+                BuildSteamHomeSection();
+                body.Add(NetLobbyStyle.Gap(16f));
+                BuildIpSection(true);
+                return;
+            }
+            var why = NetLobbyStyle.Para(Loc.Tr("Koop über Steam ist gerade nicht möglich: ", "Co-op via Steam is not possible right now: ") + SteamService.UnavailableText(),
+                                         16f, NetLobbyStyle.Muted);
+            why.style.marginBottom = 12f;
+            body.Add(why);
+            BuildIpSection(false);
+        }
+
+        /// "Per IP / Heimnetz": big tiles when Steam is unavailable, a compact second row below the Steam section otherwise.
+        static void BuildIpSection(bool compact)
+        {
+            if (compact)
+            {
+                var head = NetLobbyStyle.Row();
+                head.Add(NetLobbyStyle.Text(Loc.Tr("Per IP / Heimnetz", "By IP / home network"), 20f, NetLobbyStyle.Ink, true));
+                head.Add(NetLobbyStyle.Gap(10f, true));
+                head.Add(NetLobbyStyle.Text(Loc.Tr("gleiches WLAN, VPN oder ohne Steam", "same Wi-Fi, VPN or without Steam"), 16f, NetLobbyStyle.Muted));
+                body.Add(head);
+                body.Add(NetLobbyStyle.Gap(8f));
+                var row = NetLobbyStyle.Row();
+                row.style.alignItems = Align.Stretch;
+                row.Add(SmallTile("+", Loc.Tr("Hosten per IP", "Host by IP"), Loc.Tr("Port + Adresse teilen", "Share port + address"),
+                                  NetLobbyStyle.TurquoiseDark, () => Go(Page.Host)));
+                row.Add(NetLobbyStyle.Gap(14f, true));
+                row.Add(SmallTile("»", Loc.Tr("Beitreten per IP", "Join by IP"), Loc.Tr("IP eintippen oder Heimnetz-Liste", "Type the IP or pick from the LAN list"),
+                                  NetLobbyStyle.Turquoise, () => Go(Page.Join)));
+                body.Add(row);
+                return;
+            }
             var tiles = NetLobbyStyle.Row();
             tiles.style.alignItems = Align.Stretch;
             tiles.Add(Tile("+", Loc.Tr("Spiel hosten", "Host a game"), Loc.Tr("Deine Insel – Freunde kommen dazu", "Your island – friends drop in"),
@@ -340,12 +584,47 @@ namespace Sealebrities
             body.Add(tiles);
         }
 
-        static VisualElement Tile(string glyph, string title, string sub, Color bg, Action onClick)
+        /// Compact one-line tile (glyph circle + title + subtitle).
+        static VisualElement SmallTile(string glyph, string title, string sub, Color bg, Action onClick)
+        {
+            var t = NetLobbyStyle.Row();
+            t.style.flexGrow = 1;
+            t.style.flexBasis = 0;
+            t.style.minHeight = 76f;
+            NetLobbyStyle.Pad(t, 10f, 16f);
+            NetLobbyStyle.Radius(t, 18f);
+            NetLobbyStyle.Clickable(t, onClick, bg, NetLobbyStyle.Lighten(bg, 0.12f));
+            var circle = new VisualElement { pickingMode = PickingMode.Ignore };
+            circle.style.width = 44f;
+            circle.style.height = 44f;
+            circle.style.flexShrink = 0;
+            NetLobbyStyle.Radius(circle, 22f);
+            circle.style.backgroundColor = new Color(1f, 1f, 1f, 0.28f);
+            circle.style.alignItems = Align.Center;
+            circle.style.justifyContent = Justify.Center;
+            var g = NetLobbyStyle.Text(glyph, 28f, NetLobbyStyle.White, true);
+            g.style.unityTextAlign = TextAnchor.MiddleCenter;
+            g.style.marginTop = -3f;
+            circle.Add(g);
+            t.Add(circle);
+            t.Add(NetLobbyStyle.Gap(12f, true));
+            var col = NetLobbyStyle.Col();
+            col.pickingMode = PickingMode.Ignore;
+            col.style.flexShrink = 1;
+            col.Add(NetLobbyStyle.Text(title, 22f, NetLobbyStyle.White, true));
+            var st = NetLobbyStyle.Para(sub, 15f, new Color(1f, 1f, 1f, 0.92f));
+            st.style.marginTop = 1f;
+            col.Add(st);
+            t.Add(col);
+            return t;
+        }
+
+        static VisualElement Tile(string glyph, string title, string sub, Color bg, Action onClick, float height = 190f)
         {
             var t = NetLobbyStyle.Col();
             t.style.flexGrow = 1;
             t.style.flexBasis = 0;
-            t.style.height = 190f;
+            t.style.height = height;
             t.style.justifyContent = Justify.Center;
             t.style.alignItems = Align.Center;
             NetLobbyStyle.Radius(t, 24f);
@@ -625,6 +904,7 @@ namespace Sealebrities
         static void StartJoin(string host, int port, bool explicitPort = true)
         {
             SaveProfile();
+            steamConnecting = false;
             page = Page.Connecting;
             NetSession.JoinHostPort(host, port, explicitPort);
             Build();
@@ -647,6 +927,7 @@ namespace Sealebrities
 
         static string ConnectingText()
         {
+            if (steamConnecting || NetSession.IsSteam) return Loc.Tr("Verbinde über Steam", "Connecting via Steam") + " " + new string('.', 1 + dots % 3);
             string target = string.IsNullOrEmpty(NetSession.JoinTarget) ? "" : " " + NetSession.JoinTarget;
             return Loc.Tr("Verbinde mit", "Connecting to") + target + " " + new string('.', 1 + dots % 3);
         }
@@ -657,7 +938,8 @@ namespace Sealebrities
             if (!open) return;
             if (page == Page.Connecting && NetSession.Current == NetSession.Phase.Idle && !NetSession.IsRetrying)
             {
-                page = Page.Join;
+                page = steamConnecting ? Page.Home : Page.Join;
+                steamConnecting = false;
                 dirty = true;
             }
             UpdateStatus();
@@ -713,10 +995,19 @@ namespace Sealebrities
         {
             TickOverlay(dt);
             TickCoopCard(dt);
+            TickSteamCard(dt);
+
+            if (characterFromLobby)
+            {
+                // the character screen owns Esc while it is open; heal a screen that never opened / never said "closed"
+                if (!UIState.CharacterOpen && Time.unscaledTime - characterOpenedAt > 0.6f) RestoreAfterCharacter();
+                return;
+            }
 
             if (GameInput.PausePressed)
             {
                 if (notice != null) HideNotice();
+                else if (invitePicker != null) CloseInvitePicker();
                 else if (open) Back();
             }
 
@@ -729,6 +1020,7 @@ namespace Sealebrities
             }
             if (lan != null && lan.Tick() && page == Page.Join) RebuildLan();
             if (dirty) Build();
+            TickSteamHome(dt);
             if (page == Page.Connecting && connectingLabel != null)
             {
                 dotsTimer += dt;

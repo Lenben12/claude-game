@@ -12,6 +12,8 @@ namespace Sealebrities
         public class Parts
         {
             public Transform mainRotor, tailRotor, hook;
+            /// Wanda in the cockpit (hidden while she stands on the pad as the npc module's NPC).
+            public GameObject pilot;
             public Renderer beacon;
         }
 
@@ -78,9 +80,10 @@ namespace Sealebrities
                     inner.TriOut(tailIn, In(rows - 1, c), In(rows - 1, (c + 1) % seg), Vector3.forward);
                 }
             }
-            set[BoatMats.Pilot].TaperBox(new Vector3(0.42f, 0.05f, 1.15f), new Vector2(0.4f, 0.34f), new Vector2(0.32f, 0.26f), 0.55f, Quaternion.identity);
-            set[BoatMats.Helmet].Ellipsoid(new Vector3(0.42f, 0.55f, 1.18f), new Vector3(0.17f, 0.17f, 0.18f), Quaternion.identity, 6, 4);
-            set[BoatMats.HeliDark].Box(new Vector3(0.42f, 0.54f, 1.34f), new Vector3(0.22f, 0.09f, 0.05f));
+            // Wanda Wirbel at the controls (smooth bean, orange flight suit, aviator cap, goggles, scarf) + her seat
+            parts.pilot = HeliMishaps.BuildPilot(root, new Vector3(0.42f, -0.12f, 1.05f));
+            set[BoatMats.HeliDark].Box(new Vector3(0.42f, -0.2f, 0.92f), new Vector3(0.42f, 0.12f, 0.42f));
+            set[BoatMats.HeliDark].Box(new Vector3(0.42f, 0.15f, 0.76f), new Vector3(0.42f, 0.6f, 0.08f));
             set[BoatMats.HeliDark].Box(new Vector3(0f, -0.25f, 2.15f), new Vector3(1.2f, 0.35f, 0.35f));
 
             // engine housing, exhausts, mast
@@ -155,61 +158,85 @@ namespace Sealebrities
         }
     }
 
-    /// One delivery flight: inbound from ~900 m at 70 m altitude, descend over the helipad, hover, drop crates on
-    /// parachutes, climb out and despawn.
+    /// One delivery flight with Wanda at the controls: inbound from ~900 m at 70 m altitude to the first drop point,
+    /// descend, hover, drop the crates of that stop on parachutes, hop to the next stop (L.12 mishaps send crates to
+    /// the hut roof, a palm, a wrong corner of the island, the village or the boat), then – when the pad was a stop –
+    /// land on the pad and idle for 2 minutes (one line for a player within 20 m), climb out and despawn.
     public class HeliChopper : MonoBehaviour
     {
-        enum Phase { Inbound, Descend, Hover, Climb, Outbound }
+        enum Phase { Inbound, Descend, Hover, Transfer, ToPad, Land, Idle, Climb, Outbound }
 
-        const float CruiseAlt = 70f, CruiseSpeed = 42f, HoverAGL = 24f, SpawnDist = 900f, DespawnDist = 1050f;
+        const float CruiseAlt = 70f, CruiseSpeed = 42f, HoverAGL = 24f, MishapHoverAGL = 17f, SpawnDist = 900f, DespawnDist = 1050f;
+        const float TransferSpeed = 24f, SkidHeight = 1.37f;
+
+        sealed class Stop
+        {
+            public Vector3 hover;              // ground point under the hover
+            public bool pad, radioDone;
+            public readonly List<HeliCrate> crates = new List<HeliCrate>();
+            public readonly List<HeliService.Placement> places = new List<HeliService.Placement>();
+            /// The delivery's rolled mishap when the flight was planned.
+            public readonly List<DeliveryMishap> raws = new List<DeliveryMishap>();
+        }
 
         HeliService service;
         HeliModel.Parts parts;
-        readonly List<HeliCrate> cargo = new List<HeliCrate>();
+        readonly List<Stop> stops = new List<Stop>();
+        int stopIndex, dropIndex;
+        bool padVisited, cargoDone, spokeOnPad, departRequested;
         Phase phase;
-        Vector3 vel, prevVel, accS, exitDir;
-        float yaw, pitch, roll, timer, padY;
-        int dropIndex;
+        Vector3 vel, prevVel, accS, exitDir, hoverGround;
+        float yaw, pitch, roll, timer, padY, rotorSpin = 1f, idleT;
         AudioSource rotorSrc;
         ParticleSystem downwash;
         Light beaconLight;
         bool washOnWater = true;
 
+        /// Landed on the pad (idling) – the service asks it to leave before the next flight.
+        public bool OnPad => phase == Phase.Land || phase == Phase.Idle;
+
         public static HeliChopper Spawn(HeliService svc, Transform parent, List<Delivery> deliveries)
         {
-            Vector3 pad = svc.Pad;
-            Vector3 outward = pad - WorldLayout.IslandCenter;
-            outward.y = 0f;
-            if (outward.sqrMagnitude < 1f) outward = Vector3.forward;
-            outward.Normalize();
-            Vector3 dir = Quaternion.Euler(0f, Random.Range(-55f, 55f), 0f) * outward;
-            Vector3 start = pad + dir * SpawnDist;
-            start.y = CruiseAlt;
-
             var go = new GameObject("DeliveryChopper");
             go.transform.SetParent(parent, false);
-            go.transform.position = start;
             var h = go.AddComponent<HeliChopper>();
-            h.Init(svc, deliveries, dir);
+            h.Init(svc, deliveries);
             return h;
         }
 
-        void Init(HeliService svc, List<Delivery> deliveries, Vector3 fromDir)
+        void Init(HeliService svc, List<Delivery> deliveries)
         {
             service = svc;
             parts = HeliModel.Build(transform);
+
+            // cargo + stops (crates hang on the hook; pad slots are reserved now so two crates never share one)
+            int n = deliveries.Count;
+            for (int i = 0; i < n; i++)
+            {
+                var d = deliveries[i];
+                float zOff = (i - (n - 1) * 0.5f) * 1.0f;
+                var crate = HeliCrate.CreateHanging(svc, parts.hook, d, zOff);
+                int slot = svc.FreeSlot();
+                var pl = svc.Place(d, slot);
+                if (pl.onPad) crate.ReserveSlot(slot);
+                AddToStop(crate, pl);
+            }
+            OrderStops();
+
+            Vector3 first = stops.Count > 0 ? stops[0].hover : svc.Pad;
+            Vector3 outward = first - WorldLayout.IslandCenter;
+            outward.y = 0f;
+            if (outward.sqrMagnitude < 1f) outward = Vector3.forward;
+            outward.Normalize();
+            Vector3 fromDir = Quaternion.Euler(0f, Random.Range(-55f, 55f), 0f) * outward;
+            Vector3 start = first + fromDir * SpawnDist;
+            start.y = CruiseAlt;
+            transform.position = start;
             yaw = Mathf.Atan2(-fromDir.x, -fromDir.z) * Mathf.Rad2Deg;
             transform.rotation = Quaternion.Euler(0f, yaw, 0f);
             vel = -fromDir * CruiseSpeed;
             prevVel = vel;
             exitDir = Quaternion.Euler(0f, Random.Range(-40f, 40f), 0f) * fromDir;
-
-            int n = deliveries.Count;
-            for (int i = 0; i < n; i++)
-            {
-                float zOff = (i - (n - 1) * 0.5f) * 1.0f;
-                cargo.Add(HeliCrate.CreateHanging(svc, parts.hook, deliveries[i], zOff));
-            }
 
             rotorSrc = BoatSynth.LoopSource(gameObject, BoatSynth.Rotor, 15f, 900f, AudioRolloffMode.Linear);
             rotorSrc.volume = 0.9f;
@@ -228,18 +255,71 @@ namespace Sealebrities
             beaconLight.shadows = LightShadows.None;
             beaconLight.enabled = false;
 
-            GameEvents.RaiseToast(Loc.Tr("Der Liefer-Heli ist im Anflug!", "The delivery chopper is on its way!"));
+            GameEvents.RaiseNotify(NotifyKind.Delivery, Loc.Tr("Liefer-Heli im Anflug", "Delivery chopper inbound"));
+        }
+
+        void AddToStop(HeliCrate crate, HeliService.Placement pl)
+        {
+            Vector3 h = pl.hover;
+            for (int i = 0; i < stops.Count; i++)
+            {
+                var s = stops[i];
+                bool padLike = pl.onPad || (pl.mishap == DeliveryMishap.Water && (h - service.Pad).sqrMagnitude < 1f);
+                if (s.pad == padLike && new Vector2(s.hover.x - h.x, s.hover.z - h.z).sqrMagnitude < 36f)
+                {
+                    s.crates.Add(crate);
+                    s.places.Add(pl);
+                    s.raws.Add(crate.Delivery != null ? crate.Delivery.Mishap : DeliveryMishap.None);
+                    return;
+                }
+            }
+            var ns = new Stop { hover = h, pad = pl.onPad || (pl.mishap == DeliveryMishap.Water && (h - service.Pad).sqrMagnitude < 1f) };
+            ns.crates.Add(crate);
+            ns.places.Add(pl);
+            ns.raws.Add(crate.Delivery != null ? crate.Delivery.Mishap : DeliveryMishap.None);
+            stops.Add(ns);
+        }
+
+        /// The pad first (the normal case), then the mishap stops nearest-neighbour.
+        void OrderStops()
+        {
+            for (int i = 0; i < stops.Count; i++)
+                if (stops[i].pad && i != 0) { var t = stops[0]; stops[0] = stops[i]; stops[i] = t; break; }
+            for (int i = 1; i < stops.Count - 1; i++)
+            {
+                int best = i;
+                float bd = float.MaxValue;
+                for (int j = i; j < stops.Count; j++)
+                {
+                    float d = (stops[j].hover - stops[i - 1].hover).sqrMagnitude;
+                    if (d < bd) { bd = d; best = j; }
+                }
+                if (best != i) { var t = stops[i]; stops[i] = stops[best]; stops[best] = t; }
+            }
         }
 
         void OnDestroy()
         {
             if (downwash != null) Destroy(downwash.gameObject);
+            if (service != null) service.ChopperGone(this);
+            if (phase == Phase.Idle) HeliService.ChopperOnPad = false;
         }
 
-        Vector3 HoldOver(Vector3 pad, Vector3 pos)
+        /// Ends the idle on the pad early (a new delivery is due).
+        public void Depart() => departRequested = true;
+
+        Vector3 HoldOver(Vector3 at, Vector3 pos, float k = 0.8f)
         {
-            Vector3 h = new Vector3(pad.x - pos.x, 0f, pad.z - pos.z) * 0.8f;
+            Vector3 h = new Vector3(at.x - pos.x, 0f, at.z - pos.z) * k;
             return Vector3.ClampMagnitude(h, 3f);
+        }
+
+        Stop Current => stopIndex < stops.Count ? stops[stopIndex] : null;
+
+        float HoverHeight(Stop s)
+        {
+            if (s == null || s.pad) return HoverAGL;
+            return MishapHoverAGL;
         }
 
         void Update()
@@ -248,56 +328,108 @@ namespace Sealebrities
             if (dt <= 0f || service == null) return;
             Vector3 pos = transform.position;
             Vector3 pad = service.Pad;
+            var stop = Current;
 
             switch (phase)
             {
                 case Phase.Inbound:
                 {
-                    Vector3 to = new Vector3(pad.x - pos.x, 0f, pad.z - pos.z);
+                    Vector3 at = stop != null ? stop.hover : pad;
+                    Vector3 to = new Vector3(at.x - pos.x, 0f, at.z - pos.z);
                     float dist = to.magnitude;
                     float spd = Mathf.Min(CruiseSpeed, Mathf.Sqrt(2f * 3.2f * dist) + 0.3f);
                     Vector3 desired = dist > 0.01f ? to / dist * spd : Vector3.zero;
                     desired.y = Mathf.Clamp((CruiseAlt - pos.y) * 0.5f, -6f, 6f);
                     vel = Vector3.MoveTowards(vel, desired, 7f * dt);
+                    if (dist < 3f && new Vector2(vel.x, vel.z).magnitude < 2.5f) BeginDescend(at);
+                    break;
+                }
+                case Phase.Transfer:
+                case Phase.ToPad:
+                {
+                    Vector3 at = phase == Phase.ToPad ? pad : (stop != null ? stop.hover : pad);
+                    Vector3 to = new Vector3(at.x - pos.x, 0f, at.z - pos.z);
+                    float dist = to.magnitude;
+                    float spd = Mathf.Min(TransferSpeed, Mathf.Sqrt(2f * 3f * dist) + 0.3f);
+                    Vector3 desired = dist > 0.01f ? to / dist * spd : Vector3.zero;
+                    float cruise = Mathf.Max(hoverGround.y + 30f, at.y + 30f);
+                    desired.y = Mathf.Clamp((cruise - pos.y) * 0.6f, -5f, 6f);
+                    vel = Vector3.MoveTowards(vel, desired, 6f * dt);
                     if (dist < 3f && new Vector2(vel.x, vel.z).magnitude < 2.5f)
                     {
-                        phase = Phase.Descend;
-                        padY = service.PadSurfaceY();
+                        if (phase == Phase.ToPad) BeginLanding();
+                        else BeginDescend(at);
                     }
                     break;
                 }
                 case Phase.Descend:
                 {
-                    Vector3 hold = HoldOver(pad, pos);
-                    float targetY = padY + HoverAGL;
+                    Vector3 hold = HoldOver(hoverGround, pos);
+                    float targetY = padY + HoverHeight(stop);
                     hold.y = Mathf.Clamp((targetY - pos.y) * 0.7f, -7f, 4f);
                     vel = Vector3.MoveTowards(vel, hold, 6f * dt);
                     if (Mathf.Abs(targetY - pos.y) < 0.6f)
                     {
                         phase = Phase.Hover;
                         timer = 1.5f;
+                        dropIndex = 0;
                     }
                     break;
                 }
                 case Phase.Hover:
                 {
-                    Vector3 hold = HoldOver(pad, pos);
-                    hold.y = (padY + HoverAGL - pos.y) * 0.8f;
+                    Vector3 hold = HoldOver(hoverGround, pos);
+                    hold.y = (padY + HoverHeight(stop) - pos.y) * 0.8f;
                     vel = Vector3.MoveTowards(vel, hold, 4f * dt);
                     timer -= dt;
                     if (timer <= 0f)
                     {
-                        if (dropIndex < cargo.Count)
+                        if (stop != null && dropIndex < stop.crates.Count)
                         {
-                            DropNext();
-                            timer = dropIndex < cargo.Count ? 1.1f : 2f;
+                            DropNext(stop);
+                            timer = dropIndex < stop.crates.Count ? 1.1f : 2f;
                         }
-                        else phase = Phase.Climb;
+                        else NextStop();
+                    }
+                    break;
+                }
+                case Phase.Land:
+                {
+                    Vector3 hold = HoldOver(pad, pos, 1.2f);
+                    float targetY = padY + SkidHeight;
+                    float dy = targetY - pos.y;
+                    hold.y = Mathf.Clamp(dy * 0.9f, -2.2f, 1f);
+                    vel = Vector3.MoveTowards(vel, hold, 3f * dt);
+                    if (Mathf.Abs(dy) < 0.05f)
+                    {
+                        phase = Phase.Idle;
+                        HeliService.ChopperOnPad = true;
+                        idleT = 0f;
+                        vel = Vector3.zero;
+                        BoatParticles.Puff(new Vector3(pos.x, padY + 0.1f, pos.z), new Color(0.72f, 0.66f, 0.55f, 0.5f), 18, 0.8f);
+                    }
+                    break;
+                }
+                case Phase.Idle:
+                {
+                    vel = Vector3.zero;
+                    pos.y = padY + SkidHeight;
+                    idleT += dt;
+                    rotorSpin = Mathf.MoveTowards(rotorSpin, 0.32f, dt * 0.5f);
+                    TrySpeakOnPad(pos);
+                    if (idleT >= HeliMishaps.PadIdleSeconds || departRequested)
+                    {
+                        phase = Phase.Climb;
+                        HeliService.ChopperOnPad = false;
+                        timer = 0f;
                     }
                     break;
                 }
                 case Phase.Climb:
                 {
+                    if (parts.pilot != null && !parts.pilot.activeSelf) parts.pilot.SetActive(true);   // back in the cockpit
+                    rotorSpin = Mathf.MoveTowards(rotorSpin, 1f, dt * 0.8f);
+                    if (rotorSpin < 0.9f) { vel = Vector3.zero; break; }   // spool up before lifting off
                     Vector3 desired = new Vector3(exitDir.x * 12f, Mathf.Clamp((CruiseAlt - pos.y) * 0.6f, 0f, 7f), exitDir.z * 12f);
                     vel = Vector3.MoveTowards(vel, desired, 5f * dt);
                     if (pos.y > CruiseAlt - 3f) phase = Phase.Outbound;
@@ -320,12 +452,69 @@ namespace Sealebrities
             pos += vel * dt;
             transform.position = pos;
             Orient(dt);
-            parts.mainRotor.Rotate(0f, 1300f * dt, 0f, Space.Self);
-            parts.tailRotor.Rotate(2600f * dt, 0f, 0f, Space.Self);
+            parts.mainRotor.Rotate(0f, 1300f * rotorSpin * dt, 0f, Space.Self);
+            parts.tailRotor.Rotate(2600f * rotorSpin * dt, 0f, 0f, Space.Self);
             UpdateDownwash(pos);
             UpdateBeacon();
-            rotorSrc.pitch = 1f + new Vector2(vel.x, vel.z).magnitude / CruiseSpeed * 0.07f + (phase == Phase.Climb ? 0.05f : 0f);
-            rotorSrc.volume = 0.9f * Settings.SfxVolume;
+            rotorSrc.pitch = (0.62f + 0.38f * rotorSpin) * (1f + new Vector2(vel.x, vel.z).magnitude / CruiseSpeed * 0.07f + (phase == Phase.Climb ? 0.05f : 0f));
+            rotorSrc.volume = (0.35f + 0.55f * rotorSpin) * Settings.SfxVolume;
+        }
+
+        void BeginDescend(Vector3 at)
+        {
+            phase = Phase.Descend;
+            hoverGround = at;
+            padY = Current != null && Current.pad ? service.PadSurfaceY() : at.y;
+        }
+
+        void NextStop()
+        {
+            var s = Current;
+            if (s != null && s.pad) padVisited = true;
+            stopIndex++;
+            if (stopIndex < stops.Count)
+            {
+                phase = Phase.Transfer;
+                return;
+            }
+            // all cargo is out
+            bool land = padVisited;
+            if (!cargoDone)
+            {
+                cargoDone = true;
+                service.CargoDone(this, land);
+            }
+            if (land)
+            {
+                bool atPad = s != null && s.pad;
+                if (atPad) BeginLanding();
+                else phase = Phase.ToPad;
+            }
+            else phase = Phase.Climb;
+        }
+
+        void BeginLanding()
+        {
+            phase = Phase.Land;
+            padY = service.PadSurfaceY();
+            hoverGround = service.Pad;
+        }
+
+        /// One short line for a player near the pad while Wanda idles (K.5 / L.12 – "says one line within 20 m").
+        void TrySpeakOnPad(Vector3 pos)
+        {
+            // the npc module's Wanda climbs out and stands on the pad (her own lines) – the cockpit is empty then
+            bool npcWanda = NpcRegistry.Find(HeliMishaps.WandaId) != null;
+            if (parts.pilot != null && parts.pilot.activeSelf == npcWanda) parts.pilot.SetActive(!npcWanda);
+            if (npcWanda) return;
+            if (spokeOnPad || idleT < 2.5f) return;
+            var p = Refs.Player;
+            if (p == null || (p is Object o && o == null) || p.Root == null) return;
+            if ((p.Root.position - pos).sqrMagnitude > 20f * 20f) return;
+            spokeOnPad = true;
+            var gm = GameManager.I;
+            int seed = gm != null && gm.State != null ? gm.State.day * 7 + gm.State.saveSeed : 0;
+            HeliMishaps.Say(HeliMishaps.PadLine(seed), 4f);
         }
 
         void Orient(float dt)
@@ -343,9 +532,10 @@ namespace Sealebrities
             accS = Vector3.Lerp(accS, acc, 1f - Mathf.Exp(-dt * 3f));
             Quaternion inv = Quaternion.Inverse(Quaternion.Euler(0f, yaw, 0f));
             Vector3 lv = inv * vel, la = inv * accS;
-            float wob = (phase == Phase.Hover || phase == Phase.Descend) ? 1f : 0.3f;
-            float tPitch = Mathf.Clamp(lv.z * 0.22f + la.z * 1.5f, -14f, 16f) + Mathf.Sin(Time.time * 1.3f) * wob;
-            float tRoll = Mathf.Clamp(-yawRate * 0.4f - la.x * 1.5f, -22f, 22f) + Mathf.Sin(Time.time * 0.9f + 1f) * wob;
+            bool grounded = phase == Phase.Idle || (phase == Phase.Climb && rotorSpin < 0.9f);
+            float wob = grounded ? 0f : (phase == Phase.Hover || phase == Phase.Descend || phase == Phase.Land) ? 1f : 0.3f;
+            float tPitch = grounded ? 0f : Mathf.Clamp(lv.z * 0.22f + la.z * 1.5f, -14f, 16f) + Mathf.Sin(Time.time * 1.3f) * wob;
+            float tRoll = grounded ? 0f : Mathf.Clamp(-yawRate * 0.4f - la.x * 1.5f, -22f, 22f) + Mathf.Sin(Time.time * 0.9f + 1f) * wob;
             float k = 1f - Mathf.Exp(-dt * 2.5f);
             pitch = Mathf.Lerp(pitch, tPitch, k);
             roll = Mathf.Lerp(roll, tRoll, k);
@@ -355,7 +545,8 @@ namespace Sealebrities
         void UpdateDownwash(Vector3 pos)
         {
             if (downwash == null) return;
-            if (pos.y - padY > 60f && phase != Phase.Descend && phase != Phase.Hover)
+            bool low = phase == Phase.Descend || phase == Phase.Hover || phase == Phase.Land || phase == Phase.Idle || phase == Phase.Climb;
+            if (pos.y - padY > 60f && !low)
             {
                 BoatParticles.SetRate(downwash, 0f);
                 return;
@@ -375,7 +566,7 @@ namespace Sealebrities
                 main.startColor = water ? new ParticleSystem.MinMaxGradient(new Color(0.9f, 0.95f, 1f, 0.45f))
                                         : new ParticleSystem.MinMaxGradient(new Color(0.72f, 0.66f, 0.55f, 0.4f));
             }
-            BoatParticles.SetRate(downwash, (1f - h / 40f) * 70f);
+            BoatParticles.SetRate(downwash, (1f - h / 40f) * 70f * rotorSpin * rotorSpin);
         }
 
         void UpdateBeacon()
@@ -387,19 +578,33 @@ namespace Sealebrities
             beaconLight.intensity = 3f * night;
         }
 
-        void DropNext()
+        void DropNext(Stop stop)
         {
-            var crate = cargo[dropIndex++];
+            int i = dropIndex++;
+            var crate = stop.crates[i];
             if (crate == null) return;   // opened elsewhere meanwhile (co-op) – nothing to drop
-            int slot = service.FreeSlot();
-            Vector3 target = service.SlotPosition(slot);
-            bool drift = HeliService.DriftsAway(crate.Delivery);   // same result on every co-op machine
-            if (drift)
+            // the host may have decided the mishap after this flight started: re-place with the current state
+            var cur = service.Resolve(crate.Delivery) ?? crate.Delivery;
+            var pl = stop.places[i];
+            var raw = stop.raws[i];
+            if (cur != null && cur.Mishap != raw)
             {
-                if (service.FindDriftTarget(out Vector3 water)) target = water;
-                else drift = false;
+                var fresh = service.Place(cur, crate.Slot >= 0 ? crate.Slot : service.FreeSlot());
+                // only when it can still be dropped from here (same stop); otherwise the reconcile moves it later
+                if (new Vector2(fresh.hover.x - stop.hover.x, fresh.hover.z - stop.hover.z).sqrMagnitude < 36f)
+                {
+                    pl = fresh;
+                    raw = cur.Mishap;
+                }
             }
-            crate.Release(slot, target, drift);
+            int slot = pl.onPad ? (crate.Slot >= 0 ? crate.Slot : service.FreeSlot()) : -1;
+            Vector3 target = pl.onPad ? service.SlotPosition(slot) : pl.point;
+            crate.Release(slot, target, pl.mishap, raw, pl.trunk);
+            if (pl.mishap != DeliveryMishap.None && !stop.radioDone)
+            {
+                stop.radioDone = true;
+                service.RadioMishap(pl.mishap);
+            }
         }
     }
 }

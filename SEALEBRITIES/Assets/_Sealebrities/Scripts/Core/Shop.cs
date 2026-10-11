@@ -8,6 +8,10 @@ namespace Sealebrities
     /// 45 in-game minutes, day or night. The tutorial tank (tank_t1 while the tutorial runs) always uses the express
     /// timing at the standard price (usually ordered ~13:30–15:00 → arrives ~14:15–15:45, first dive in daylight).
     /// Owned items are shared by the whole co-op crew (one wallet); each player equips their own choice (Gear.Equip).
+    ///
+    /// Round 2: snack packs (E.1 – FoodDef, delivery id "food:&lt;id&gt;", always the express timing at the standard
+    /// price, crate → shared pantry), "Angebot des Tages" (L.12 – one listed item −20 % per day, rolled by the host),
+    /// story discounts (rod_t1 −50 % after Dr. Fin R1, uw_radio −50 % after Gus M2), reward-only / story-gated items.
     public static class Shop
     {
         public const float ExpressSurcharge = 0.5f;
@@ -17,6 +21,8 @@ namespace Sealebrities
         public const float LastStandardOrder = 20f / 24f;
         /// Morning arrival for late orders (07:12).
         public const float MorningArrival = 0.30f;
+        /// L.12 "Angebot des Tages": −20 %.
+        public const float DealOfDayDiscount = 0.2f;
 
         static readonly System.Random rng = new System.Random();
 
@@ -24,21 +30,43 @@ namespace Sealebrities
 
         public static bool IsOwned(GearItem item) => item != null && S.ownedItems.Contains(item.id);
 
-        public static bool IsOrdered(GearItem item)
+        public static bool IsOrdered(GearItem item) => item != null && IsOrdered(item.id);
+
+        public static bool IsOrdered(string itemId)
         {
-            if (item == null) return false;
+            if (itemId == null) return false;
             var d = S.deliveries;
-            for (int i = 0; i < d.Count; i++) if (d[i] != null && d[i].itemId == item.id) return true;
+            for (int i = 0; i < d.Count; i++) if (d[i] != null && d[i].itemId == itemId) return true;
             return false;
         }
 
-        public static long Price(GearItem item, bool express) => express ? (long)(item.price * (1f + ExpressSurcharge)) : item.price;
+        /// Listed in the shop at all (not a reward-only item; story flag set when one is required).
+        public static bool IsListed(GearItem item) => GearDatabase.IsListed(item);
+
+        /// Today's "Angebot des Tages" item id (null = none).
+        public static string DealOfTheDay => GameManager.I != null ? S.dealOfDayItem : null;
+
+        public static bool IsDealOfTheDay(GearItem item) => item != null && item.id == DealOfTheDay;
+
+        /// Price before the express surcharge: story discounts and the deal of the day applied.
+        public static long BasePrice(GearItem item)
+        {
+            if (item == null) return 0;
+            float p = item.price;
+            if (item.id == "rod_t1" && StoryFlags.Has(StoryKeys.RodT1Discount)) p *= 0.5f;
+            if (item.id == "uw_radio" && (StoryFlags.Has(StoryKeys.RadioDiscount) || Missions.IsDone("M2"))) p *= 0.5f;
+            if (IsDealOfTheDay(item)) p *= 1f - DealOfDayDiscount;
+            return (long)Mathf.Round(p);
+        }
+
+        public static long Price(GearItem item, bool express) => express ? (long)(BasePrice(item) * (1f + ExpressSurcharge)) : BasePrice(item);
 
         public static bool CanBuy(GearItem item, bool express, out string reason)
         {
             reason = null;
             if (item == null) { reason = "?"; return false; }
             if (item.comingSoon) { reason = Loc.Tr("Bald verfügbar", "Coming soon"); return false; }
+            if (!IsListed(item)) { reason = Loc.Tr("Nicht im Shop", "Not sold in the shop"); return false; }
             if (IsOwned(item)) { reason = Loc.Tr("Besitzt du schon", "Already owned"); return false; }
             if (IsOrdered(item)) { reason = Loc.Tr("Unterwegs", "On its way"); return false; }
             if (S.followers < item.followersNeeded) { reason = Loc.Tr($"Ab {Loc.Number(item.followersNeeded)} Followern", $"From {Loc.Number(item.followersNeeded)} followers"); return false; }
@@ -84,7 +112,7 @@ namespace Sealebrities
         public static bool Buy(GearItem item, bool express)
         {
             if (GameManager.I == null) return false;
-            if (!CanBuy(item, express, out var reason)) { GameEvents.RaiseToast(reason); return false; }
+            if (!CanBuy(item, express, out var reason)) { GameEvents.RaiseNotify(NotifyKind.Warning, reason); return false; }
             if (Net.IsClient)
             {
                 // the host answers with one toast ("ordered – chopper arrives at 19:30" or why it was refused)
@@ -98,7 +126,7 @@ namespace Sealebrities
                 GameEvents.RaiseMoneyChanged(S.money);
                 GameEvents.RaiseDeliveryOrdered(item);
                 // the confirmation in this player's own language (the host only forwards a refusal)
-                OrderedToast(item, cday, ctime);
+                OrderedToast(item.Name, cday, ctime);
                 return true;
             }
             if (!GameManager.I.TrySpend(Price(item, express))) return false;
@@ -107,18 +135,64 @@ namespace Sealebrities
             S.deliveries.Add(d);
             GameEvents.RaiseDeliveryOrdered(item);
             // a guest's order (executing on the host): the guest already showed its own localized confirmation
-            if (!(Net.IsHost && NetCommands.ScopeFrom > 0)) OrderedToast(item, day, time);
+            if (!(Net.IsHost && NetCommands.ScopeFrom > 0)) OrderedToast(item.Name, day, time);
             GameManager.I.Save();
             return true;
         }
 
-        static void OrderedToast(GearItem item, int day, float time)
+        // ---------------------------------------------------------------- snacks (E.1)
+        public static bool CanBuyFood(FoodDef f, out string reason)
+        {
+            reason = null;
+            if (f == null || !f.SoldByChopper) { reason = Loc.Tr("Nicht im Shop", "Not sold in the shop"); return false; }
+            if (IsOrdered(FoodDatabase.DeliveryId(f))) { reason = Loc.Tr("Unterwegs", "On its way"); return false; }
+            if (S.followers < f.followersNeeded) { reason = Loc.Tr($"Ab {Loc.Number(f.followersNeeded)} Followern", $"From {Loc.Number(f.followersNeeded)} followers"); return false; }
+            if (S.money < f.price) { reason = Loc.Tr("Zu wenig Geld", "Not enough money"); return false; }
+            return true;
+        }
+
+        /// Orders a pack of snacks (packSize items) – always the express timing at the standard price (E.1).
+        /// SHARED STATE: clients send NetCommand.Buy ("food:&lt;id&gt;", express).
+        public static bool BuyFood(FoodDef f, bool express = true)
+        {
+            if (GameManager.I == null) return false;
+            if (!CanBuyFood(f, out var reason)) { GameEvents.RaiseNotify(NotifyKind.Warning, reason); return false; }
+            string id = FoodDatabase.DeliveryId(f);
+            if (Net.IsClient)
+            {
+                Net.Command(NetCommand.Buy, id, "1");
+                ArrivalFor(true, out int cday, out float ctime);
+                S.deliveries.Add(new Delivery { itemId = id, express = true, arrivalDay = cday, arrivalTime = ctime });
+                S.money = System.Math.Max(0, S.money - f.price);
+                GameEvents.RaiseMoneyChanged(S.money);
+                OrderedToast(f.Name, cday, ctime);
+                return true;
+            }
+            if (!GameManager.I.TrySpend(f.price)) return false;
+            ArrivalFor(true, out int day, out float time);
+            S.deliveries.Add(new Delivery { itemId = id, express = true, arrivalDay = day, arrivalTime = time });
+            if (!(Net.IsHost && NetCommands.ScopeFrom > 0)) OrderedToast(f.Name, day, time);
+            GameManager.I.Save();
+            return true;
+        }
+
+        static void OrderedToast(string name, int day, float time)
         {
             string clock = GameManager.Clock(time);
             if (day > S.day)
-                GameEvents.RaiseToast(Loc.Tr($"{item.Name} bestellt – Heli kommt morgen um {clock}.", $"{item.Name} ordered – chopper arrives tomorrow at {clock}."));
+                GameEvents.RaiseNotify(NotifyKind.Delivery, Loc.Tr($"{name} bestellt", $"{name} ordered"), Loc.Tr($"morgen {clock}", $"tomorrow {clock}"));
             else
-                GameEvents.RaiseToast(Loc.Tr($"{item.Name} bestellt – Heli kommt um {clock}.", $"{item.Name} ordered – chopper arrives at {clock}."));
+                GameEvents.RaiseNotify(NotifyKind.Delivery, Loc.Tr($"{name} bestellt", $"{name} ordered"), clock);
+        }
+
+        /// Display name of a delivery (gear or snack pack).
+        public static string DeliveryName(Delivery d)
+        {
+            if (d == null) return "";
+            var f = FoodDatabase.FromDeliveryId(d.itemId);
+            if (f != null) return f.Name;
+            var g = GearDatabase.Get(d.itemId);
+            return g != null ? g.Name : d.itemId;
         }
 
         /// True when the delivery's arrival time has passed.
@@ -147,13 +221,28 @@ namespace Sealebrities
             return any;
         }
 
+        /// The delivery of an item that arrives at exactly this day / time (same rule as HeliService.Same) – the host
+        /// resolves a guest's OpenCrate with it, so opening crate B never removes crate A of the same snack pack.
+        public static Delivery FindDelivery(string itemId, int day, float time)
+        {
+            var list = S.deliveries;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var d = list[i];
+                if (d != null && d.itemId == itemId && d.arrivalDay == day && Mathf.Abs(d.arrivalTime - time) < 0.002f) return d;
+            }
+            return null;
+        }
+
         /// Called when the LOCAL player picks up the crate. The opener switches to the new item right away
         /// (Gear.ClearChoice); other players keep their own equipment choice.
         /// SHARED STATE: on co-op clients this sends NetCommand.OpenCrate (itemId) to the host.
         public static void Receive(Delivery d)
         {
             if (d == null || GameManager.I == null) return;
-            if (Net.IsClient) Net.Command(NetCommand.OpenCrate, d.itemId);   // applied optimistically below
+            if (Net.IsClient)   // applied optimistically below; day + time identify the crate among equal orders
+                Net.Command(NetCommand.OpenCrate, d.itemId, d.arrivalDay.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            d.arrivalTime.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
             var item = GearDatabase.Get(d.itemId);
             if (item != null) Gear.ClearChoice(item.slot);
             Apply(d, item);
@@ -169,12 +258,41 @@ namespace Sealebrities
         static void Apply(Delivery d, GearItem item)
         {
             S.deliveries.Remove(d);
+            var food = FoodDatabase.FromDeliveryId(d.itemId);
+            if (food != null)
+            {
+                Pantry.AddLocal(food.id, Mathf.Max(1, food.packSize));
+                GameEvents.RaiseNotify(NotifyKind.Delivery, food.Name, "+" + Mathf.Max(1, food.packSize) + Loc.Tr(" im Kühlschrank", " in the fridge"));
+                GameManager.I.Save();
+                return;
+            }
             if (item == null) return;
             if (!S.ownedItems.Contains(item.id)) S.ownedItems.Add(item.id);
             GameEvents.RaiseDeliveryReceived(item);
             GameEvents.RaiseGearChanged();
             GameEvents.RaiseBanner(Loc.Tr("Neu ausgerüstet: ", "New gear: ") + item.Name, new Color(1f, 0.55f, 0.1f));
             GameManager.I.Save();
+        }
+
+        // ---------------------------------------------------------------- deal of the day (L.12)
+        static readonly System.Collections.Generic.List<GearItem> dealCandidates = new System.Collections.Generic.List<GearItem>();
+
+        /// Host, new day / new game: picks one listed, not owned item the channel can already buy (seeded by save + day).
+        public static void RollDealOfTheDay(GameState s)
+        {
+            if (s == null || !Net.HasAuthority) return;
+            dealCandidates.Clear();
+            var all = GearDatabase.All;
+            for (int i = 0; i < all.Count; i++)
+            {
+                var g = all[i];
+                if (g.comingSoon || !GearDatabase.IsListed(g) || g.price <= 0 || s.ownedItems.Contains(g.id)) continue;
+                if (g.followersNeeded > s.followers) continue;
+                if (g.id == "tank_t1" && s.day <= 1) continue;   // the tutorial tank keeps its 100 $
+                dealCandidates.Add(g);
+            }
+            s.dealOfDayItem = dealCandidates.Count > 0 ? dealCandidates[s.SeededRandom(2000 + s.day).Next(dealCandidates.Count)].id : null;
+            dealCandidates.Clear();
         }
     }
 }

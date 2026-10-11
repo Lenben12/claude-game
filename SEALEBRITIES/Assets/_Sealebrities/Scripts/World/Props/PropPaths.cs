@@ -48,8 +48,14 @@ namespace Sealebrities
 
         static Vector2 V(float x, float z) => new Vector2(x, z);
         static Vector2 XZ(Vector3 p) => new Vector2(p.x, p.z);
+        /// A Testversion-3 map literal on the round-2b island (L.5: × WorldLayout.IslandScale).
+        static Vector2 I(float x, float z) => WorldLayout.Isl(x, z);
 
-        /// Control points of every trail (deterministic, from WorldLayout only).
+        /// Front of the Waterfall Grotto mouth (L.5: the cave opens in the waterfall cliff).
+        public static Vector2 CaveFront => XZ(WorldLayout.CaveEntrance) - XZ(WorldFeatures.CaveDir) * 6f;
+
+        /// Control points of every trail (deterministic, from WorldLayout only). Round 2b (L.5): the probe routes of
+        /// scratchpad/design2_l/r3 (681 m in total, every trail ≤ 3 m steeper than 32°) + a spur to the driftwood beach.
         public static List<Route> Routes
         {
             get
@@ -61,30 +67,32 @@ namespace Sealebrities
                 Vector2 door = new Vector2(lh.x, lh.z) + toHut * 3.4f;
                 float stepsX = hut.x + 7.2f + 2.5f;
                 var heli = WorldLayout.Helipad;
-                var cave = WorldLayout.CaveEntrance;
                 var wt = WorldLayout.WaterfallTop;
-                var wp = WorldLayout.WaterfallPool;
                 var rv = WorldLayout.Ravine;
                 var tp = WorldLayout.TidePools;
                 var sb = WorldLayout.SecondBeach;
                 var rt = WorldLayout.RadioTowerRuins;
-                var bay = WorldLayout.HiddenBay;
+                var dw = WorldLayout.DriftwoodBeach;
                 routes = new List<Route>
                 {
-                    new Route { name = "dock", boardwalk = true, points = new[] { V(stepsX + 2f, hut.z - 1.5f), V(140f, 13.5f), V(150f, 9.5f), V(158f, WorldLayout.DockStart.z + 0.2f) } },
-                    new Route { name = "lighthouse", points = new[] { V(stepsX + 1.5f, hut.z + 1f), V(stepsX - 1f, hut.z + 9f), V(110f, 36f), V(94f, 50f), V(72f, 70f), V(48f, 92f), V(22f, 114f), V(2f, 131f), V(-14f, 142f), door } },
-                    new Route { name = "helipad", points = new[] { V(hut.x + 6f, hut.z - 7f), V(112f, -8f), V(98f, -32f), V(heli.x + 9f, heli.z + 9f) } },
-                    new Route { name = "cave", points = new[] { V(-14f, 142f), V(-40f, 133f), V(-66f, 125f), V(-88f, 117f), V(cave.x + 6f, cave.z + 1f) } },
-                    // down the walkable ramp the world cuts into the waterfall cliff, around the plunge pool to its beach
-                    new Route { name = "waterfall", points = new[] { V(-88f, 117f), V(-86f, 98f), V(-80f, 84f), V(wt.x - 4f, wt.z + 5f), XZ(WorldFeatures.FallRampTop), XZ(WorldFeatures.FallRampBottom), V(-46f, 55f), V(-43.5f, 45f), XZ(WorldFeatures.PoolBeach) } },
-                    new Route { name = "ravine_north", points = new[] { XZ(WorldFeatures.PoolBeach), V(-44f, 22f), V(-33f, 2f), V(rv.x - 3f, rv.z + 20f), V(rv.x, rv.z + 11f) } },
-                    new Route { name = "ravine_south", points = new[] { V(rv.x, rv.z - 11f), V(rv.x - 6f, rv.z - 20f), V(-48f, -76f), V(-78f, -96f), V(rt.x + 10f, rt.z + 3f) } },
+                    new Route { name = "dock", boardwalk = true, points = new[] { V(stepsX + 2f, hut.z - 1.5f), I(140f, 13.5f), I(150f, 9.5f), V(WorldLayout.DockStart.x - 10f, WorldLayout.DockStart.z + 0.2f) } },
+                    new Route { name = "lighthouse", points = new[] { V(stepsX + 1.5f, hut.z + 1f), V(stepsX - 1f, hut.z + 9f), I(110f, 36f), I(94f, 50f), I(72f, 70f), I(48f, 92f), I(22f, 114f), I(2f, 131f), I(-14f, 142f), door } },
+                    new Route { name = "helipad", points = new[] { V(hut.x + 6f, hut.z - 7f), I(112f, -8f), I(98f, -32f), V(heli.x + 9f, heli.z + 9f) } },
+                    // L.5: from the lighthouse trail over the plateau, down the ramp in the waterfall cliff to the pool beach
+                    new Route { name = "waterfall", points = new[] { I(22f, 114f), V(wt.x + 22f, wt.z + 20f), V(wt.x + 9f, wt.z + 9f), XZ(WorldFeatures.FallRampTop), XZ(WorldFeatures.FallRampBottom), XZ(WorldFeatures.FallRampBottom) + V(9f, -9f), XZ(WorldFeatures.PoolBeach) } },
+                    // L.5: the Waterfall Grotto opens in the same cliff – from the foot of the ramp along the amphitheater floor
+                    new Route { name = "cave", points = new[] { XZ(WorldFeatures.FallRampBottom), XZ(WorldFeatures.FallFoot) + XZ(WorldFeatures.FallDir) * 9f, CaveFront } },
+                    new Route { name = "ravine_north", points = new[] { XZ(WorldFeatures.PoolBeach), I(-44f, 22f), I(-33f, 2f), V(rv.x - 3f, rv.z + 20f), V(rv.x, rv.z + 11f) } },
+                    new Route { name = "ravine_south", points = new[] { V(rv.x, rv.z - 11f), V(rv.x - 6f, rv.z - 20f), I(-48f, -76f), I(-78f, -96f), V(rt.x + 10f, rt.z + 3f) } },
                     // through the gully the world cuts into the cove's southern ridge, down to the hidden beach
                     new Route { name = "bay", points = new[] { V(rt.x - 6f, rt.z + 8f), XZ(WorldFeatures.BayGullyTop), Vector2.Lerp(XZ(WorldFeatures.BayGullyTop), XZ(WorldFeatures.BayGullyBottom), 0.5f), XZ(WorldFeatures.BayGullyBottom), XZ(WorldFeatures.HiddenBayBeach) } },
-                    new Route { name = "heli_ravine", points = new[] { V(rv.x + 2f, rv.z - 16f), V(4f, -60f), V(34f, -68f), V(heli.x - 9f, heli.z - 2f) } },
-                    new Route { name = "second_beach", points = new[] { V(heli.x - 2f, heli.z - 10f), V(60f, -100f), V(52f, -130f), V(sb.x + 4f, sb.z + 22f), V(sb.x, sb.z + 10f) } },
-                    new Route { name = "tidepools", points = new[] { V(sb.x + 12f, sb.z + 10f), V(80f, -158f), V(110f, -138f), V(132f, -114f), V(tp.x - 6f, tp.z + 4f) } },
-                    new Route { name = "tide_hut", points = new[] { V(tp.x - 8f, tp.z + 9f), V(134f, -62f), V(124f, -36f), V(113f, -10f) } },
+                    new Route { name = "heli_ravine", points = new[] { V(rv.x + 2f, rv.z - 16f), V(-1f, -45f), V(14f, -47f), V(heli.x - 9f, heli.z - 2f) } },
+                    // the village Altriff (L.8) on the old second beach: the trail ends on the terrace
+                    new Route { name = "second_beach", points = new[] { V(heli.x - 2f, heli.z - 10f), I(60f, -100f), I(52f, -130f), V(sb.x + 4f, sb.z + 22f), V(sb.x, sb.z + 10f) } },
+                    new Route { name = "tidepools", points = new[] { V(sb.x + 12f, sb.z + 10f), I(80f, -158f), I(110f, -138f), I(132f, -114f), V(tp.x - 6f, tp.z + 4f) } },
+                    new Route { name = "tide_hut", points = new[] { V(tp.x - 8f, tp.z + 9f), I(134f, -62f), I(124f, -36f), I(113f, -10f) } },
+                    // round 2b: spur from the lighthouse trail down to the driftwood beach on the north-east coast (K.8)
+                    new Route { name = "driftwood", points = new[] { I(72f, 70f), V(52f, 60f), V(57f, 76f), V(dw.x - 1f, dw.z - 8f) } },
                 };
                 return routes;
             }
@@ -103,26 +111,30 @@ namespace Sealebrities
             var hut = WorldLayout.Hut;
             var lh = WorldLayout.Lighthouse;
             var heli = WorldLayout.Helipad;
-            var cave = WorldLayout.CaveEntrance;
-            var wp = WorldLayout.WaterfallPool;
+            var wt = WorldLayout.WaterfallTop;
             var rv = WorldLayout.Ravine;
             var tp = WorldLayout.TidePools;
             var sb = WorldLayout.SecondBeach;
             var rt = WorldLayout.RadioTowerRuins;
             var bay = WorldLayout.HiddenBay;
+            var dw = WorldLayout.DriftwoodBeach;
             float stepsX = hut.x + 7.2f + 2.5f;
+            Vector2 rampFoot = XZ(WorldFeatures.FallRampBottom);
             return new[]
             {
-                new Junction { at = V(stepsX + 4.5f, hut.z + 4.5f), icons = new[] { PropIcon.Lighthouse, PropIcon.Dock, PropIcon.Helipad }, toward = new[] { V(110f, 36f), V(150f, 9.5f), V(112f, -8f) } },
-                new Junction { at = V(-11f, 138f), icons = new[] { PropIcon.Lighthouse, PropIcon.Cave, PropIcon.Hut }, toward = new[] { V(lh.x, lh.z), V(-40f, 133f), V(2f, 131f) } },
-                new Junction { at = V(-85f, 120f), icons = new[] { PropIcon.Cave, PropIcon.Waterfall, PropIcon.Lighthouse }, toward = new[] { V(cave.x, cave.z), V(-86f, 98f), V(-66f, 125f) } },
-                new Junction { at = V(wp.x + 9f, wp.z - 2f), icons = new[] { PropIcon.Waterfall, PropIcon.Bridge }, toward = new[] { V(wp.x, wp.z), V(-44f, 22f) } },
-                new Junction { at = V(rv.x + 4f, rv.z - 15f), icons = new[] { PropIcon.Bridge, PropIcon.Radio, PropIcon.Helipad }, toward = new[] { V(rv.x, rv.z), V(-48f, -76f), V(4f, -60f) } },
-                new Junction { at = V(heli.x - 7f, heli.z - 9f), icons = new[] { PropIcon.Helipad, PropIcon.Beach, PropIcon.Bridge }, toward = new[] { V(heli.x, heli.z), V(60f, -100f), V(34f, -68f) } },
-                new Junction { at = V(tp.x - 3f, tp.z + 10f), icons = new[] { PropIcon.TidePools, PropIcon.Hut, PropIcon.Beach }, toward = new[] { V(tp.x, tp.z), V(134f, -62f), V(132f, -114f) } },
-                new Junction { at = V(rt.x + 4f, rt.z + 9f), icons = new[] { PropIcon.Radio, PropIcon.Bay, PropIcon.Bridge }, toward = new[] { V(rt.x, rt.z), V(-146f, -80f), V(-78f, -96f) } },
-                new Junction { at = V(sb.x + 8f, sb.z + 14f), icons = new[] { PropIcon.Beach, PropIcon.TidePools, PropIcon.Helipad }, toward = new[] { V(sb.x, sb.z), V(80f, -158f), V(52f, -130f) } },
+                // L.5 junctions at the 0.62 layout (every sign points along the first stretch of its trail)
+                new Junction { at = V(stepsX + 4.5f, hut.z + 4.5f), icons = new[] { PropIcon.Lighthouse, PropIcon.Dock, PropIcon.Helipad }, toward = new[] { I(110f, 36f), I(150f, 9.5f), I(112f, -8f) } },
+                new Junction { at = I(22f, 114f) + V(2.5f, -2.5f), icons = new[] { PropIcon.Lighthouse, PropIcon.Waterfall, PropIcon.Hut }, toward = new[] { I(2f, 131f), V(wt.x + 22f, wt.z + 20f), I(48f, 92f) } },
+                new Junction { at = I(72f, 70f) + V(2.5f, 1.5f), icons = new[] { PropIcon.Driftwood, PropIcon.Lighthouse, PropIcon.Hut }, toward = new[] { V(52f, 60f), I(48f, 92f), I(94f, 50f) } },
+                new Junction { at = rampFoot + V(2.5f, -2f), icons = new[] { PropIcon.Cave, PropIcon.Waterfall, PropIcon.Bridge }, toward = new[] { XZ(WorldFeatures.FallFoot) + XZ(WorldFeatures.FallDir) * 9f, XZ(WorldFeatures.FallRampTop), rampFoot + V(9f, -9f) } },
+                new Junction { at = XZ(WorldFeatures.PoolBeach) + V(2.5f, -1f), icons = new[] { PropIcon.Waterfall, PropIcon.Bridge }, toward = new[] { XZ(WorldLayout.WaterfallPool), I(-44f, 22f) } },
+                new Junction { at = V(rv.x + 4f, rv.z - 15f), icons = new[] { PropIcon.Bridge, PropIcon.Radio, PropIcon.Helipad }, toward = new[] { V(rv.x, rv.z), I(-48f, -76f), V(-1f, -45f) } },
+                new Junction { at = V(heli.x - 7f, heli.z - 9f), icons = new[] { PropIcon.Helipad, PropIcon.Village, PropIcon.Bridge }, toward = new[] { V(heli.x, heli.z), I(60f, -100f), V(14f, -47f) } },
+                new Junction { at = V(tp.x - 3f, tp.z + 10f), icons = new[] { PropIcon.TidePools, PropIcon.Hut, PropIcon.Village }, toward = new[] { V(tp.x, tp.z), I(134f, -62f), I(132f, -114f) } },
+                new Junction { at = V(rt.x + 4f, rt.z + 9f), icons = new[] { PropIcon.Radio, PropIcon.Bay, PropIcon.Bridge }, toward = new[] { V(rt.x, rt.z), XZ(WorldFeatures.BayGullyTop), I(-78f, -96f) } },
+                new Junction { at = V(sb.x + 8f, sb.z + 14f), icons = new[] { PropIcon.Village, PropIcon.TidePools, PropIcon.Helipad }, toward = new[] { V(sb.x, sb.z), I(80f, -158f), I(52f, -130f) } },
                 new Junction { at = XZ(WorldFeatures.BayGullyBottom) + V(3f, 1f), icons = new[] { PropIcon.Bay, PropIcon.Radio }, toward = new[] { V(bay.x, bay.z), XZ(WorldFeatures.BayGullyTop) } },
+                new Junction { at = V(dw.x + 1.5f, dw.z - 10f), icons = new[] { PropIcon.Driftwood, PropIcon.Hut }, toward = new[] { V(dw.x, dw.z), V(57f, 76f) } },
             };
         }
 

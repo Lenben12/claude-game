@@ -25,8 +25,12 @@ namespace Sealebrities
         readonly Texture2D dotTex, bubbleTex, sparkTex;
         readonly Material snowMat, bubbleMat, dropMat, sparkMat;
 
-        readonly ParticleSystem snow, bubbles, drops, sparks;
+        readonly ParticleSystem snow, bubbles, drops, sparks, streams;
         readonly Transform snowT, dropsT, sparksT;
+        readonly Material streamMat;
+        float streamAccum, glowAccum;
+        Vector3 lastCamPos;
+        bool lastCamValid;
 
         float tierScale = 1f;
         float snowRateFull;
@@ -57,11 +61,36 @@ namespace Sealebrities
             // HDR tint: the sparks feed the bloom a little
             sparkMat = FXAssets.ParticleMaterial("FX_Biolum", sparkTex, true, new Color(1.8f, 1.8f, 1.8f, 1f));
 
+            streamMat = FXAssets.ParticleMaterial("FX_CurrentStreams", dotTex, false, Color.white);
+
             snow = BuildSnow(out snowT);
             bubbles = BuildBubbles();
             drops = BuildDroplets(out dropsT);
             sparks = BuildSparks(out sparksT);
+            streams = BuildStreams();
             SetTier(GraphicsQuality.High);
+        }
+
+        /// K.3 current streaks: thin stretched specks drifting along the registered current lanes (FXCurrents).
+        ParticleSystem BuildStreams()
+        {
+            var ps = Create("FX_CurrentStreams", streamMat, out var r);
+            r.renderMode = ParticleSystemRenderMode.Stretch;
+            r.velocityScale = 0.18f;
+            r.lengthScale = 2.2f;
+            r.maxParticleSize = 0.02f;
+            var main = ps.main;
+            main.maxParticles = 360;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(1.6f, 2.8f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.012f, 0.03f);
+            main.startColor = new ParticleSystem.MinMaxGradient(new Color(0.92f, 0.97f, 1f, 0.32f));
+            var em = ps.emission;
+            em.enabled = false;
+            var col = ps.colorOverLifetime;
+            col.enabled = true;
+            col.color = new ParticleSystem.MinMaxGradient(FadeGradient(0.15f, 0.7f, 1f));
+            ps.Play();
+            return ps;
         }
 
         public void Dispose()
@@ -71,6 +100,7 @@ namespace Sealebrities
             if (bubbleMat != null) Object.Destroy(bubbleMat);
             if (dropMat != null) Object.Destroy(dropMat);
             if (sparkMat != null) Object.Destroy(sparkMat);
+            if (streamMat != null) Object.Destroy(streamMat);
             if (dotTex != null) Object.Destroy(dotTex);
             if (bubbleTex != null) Object.Destroy(bubbleTex);
             if (sparkTex != null) Object.Destroy(sparkTex);
@@ -230,7 +260,7 @@ namespace Sealebrities
 
             var main = ps.main;
             main.maxParticles = 400;
-            main.startLifetime = new ParticleSystem.MinMaxCurve(0.5f, 1.1f);
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.45f, 0.75f);   // Q9: ~0.6 s
             main.startSpeed = new ParticleSystem.MinMaxCurve(1.6f, 4.6f);
             main.startSize = new ParticleSystem.MinMaxCurve(0.015f, 0.06f);
             main.startColor = new ParticleSystem.MinMaxGradient(new Color(0.93f, 0.96f, 0.97f, 0.9f));
@@ -306,6 +336,93 @@ namespace Sealebrities
             TickSparks(f);
             TickBreathBubbles(f, breath);
             TickRemoteDivers(f);
+            TickCurrents(f);
+            TickNightGlow(f);
+            lastCamPos = f.camPos;
+            lastCamValid = true;
+        }
+
+        /// K.3: streaks drift along every current lane near the camera (the lanes come from FXCurrents).
+        void TickCurrents(FXFrame f)
+        {
+            var lanes = FXCurrents.Lanes;
+            if (!f.underwater || f.paused || lanes.Count == 0 || streams == null) { streamAccum = 0f; return; }
+            Vector3 c = f.camPos;
+            for (int li = 0; li < lanes.Count; li++)
+            {
+                var lane = lanes[li];
+                Vector3 ab = lane.end - lane.start;
+                float len = ab.magnitude;
+                if (len < 1f) continue;
+                Vector3 dir = ab / len;
+                float t = Mathf.Clamp(Vector3.Dot(c - lane.start, dir), 0f, len);
+                Vector3 closest = lane.start + dir * t;
+                float d = Vector3.Distance(c, closest);
+                if (d > lane.radius + 18f) continue;
+                streamAccum += 40f * tierScale * f.dt * Mathf.Lerp(0.6f, 1.4f, Mathf.InverseLerp(0.3f, 1.4f, lane.speed));
+                int guard = 0;
+                // a basis across the lane for the offsets
+                Vector3 side = Vector3.Cross(dir, Vector3.up);
+                if (side.sqrMagnitude < 0.01f) side = Vector3.Cross(dir, Vector3.right);
+                side.Normalize();
+                Vector3 up = Vector3.Cross(side, dir);
+                var ep = new ParticleSystem.EmitParams { applyShapeToPosition = false };
+                while (streamAccum >= 1f && guard++ < 12)
+                {
+                    streamAccum -= 1f;
+                    float tt = Mathf.Clamp(t + Random.Range(-16f, 10f), 0f, len);
+                    Vector2 o = Random.insideUnitCircle * lane.radius * 0.9f;
+                    Vector3 p = lane.start + dir * tt + side * o.x + up * o.y;
+                    if ((p - c).sqrMagnitude > 20f * 20f) continue;
+                    if (p.y > Waves.HeightAt(p.x, p.z) - 0.3f) continue;
+                    ep.position = p;
+                    ep.velocity = dir * lane.speed * Random.Range(0.8f, 1.25f) + Random.insideUnitSphere * 0.05f;
+                    ep.startSize = Random.Range(0.012f, 0.03f);
+                    ep.startLifetime = Random.Range(1.6f, 2.8f);
+                    streams.Emit(ep, 1);
+                }
+            }
+        }
+
+        /// K.3 "Leuchtnacht": at night in the lagoon, on the house reef and at the Fog Isle every movement of the diver
+        /// stirs up blue-green sparkles (much stronger while the night_glow event runs nearby).
+        void TickNightGlow(FXFrame f)
+        {
+            if (!f.underwater || f.paused || !lastCamValid || f.dt <= 0f) { glowAccum = 0f; return; }
+            Vector3 c = f.camPos;
+            float amount = 0f;
+            if (f.night01 > 0.3f && f.depth < 16f)
+            {
+                float r = Mathf.Sqrt(c.x * c.x + c.z * c.z);
+                var fog = WorldLayout.FogIsland;
+                float dFog = Mathf.Sqrt((c.x - fog.x) * (c.x - fog.x) + (c.z - fog.z) * (c.z - fog.z));
+                bool zone = r < WorldLayout.IslandRadius + 190f || dFog < 160f;
+                if (zone) amount = 0.35f * Mathf.InverseLerp(0.3f, 0.8f, f.night01);
+            }
+            if (FaunaEventInfo.IsActive && FaunaEventInfo.ActiveId == "night_glow" && (c - FaunaEventInfo.Center).sqrMagnitude < 90f * 90f)
+                amount = 1f;
+            if (amount <= 0f) { glowAccum = 0f; return; }
+
+            float speed = Mathf.Min(3f, (c - lastCamPos).magnitude / f.dt);
+            glowAccum += (6f + 34f * speed) * amount * tierScale * f.dt;
+            var ep = new ParticleSystem.EmitParams { applyShapeToPosition = false };
+            int guard = 0;
+            while (glowAccum >= 1f && guard++ < 16)
+            {
+                glowAccum -= 1f;
+                // around the hands and around the kicking fins
+                bool fins = Random.value < 0.45f;
+                Vector3 p = fins
+                    ? c - f.camUp * Random.Range(0.9f, 1.5f) - f.camFwd * Random.Range(0.4f, 1.2f) + Random.insideUnitSphere * 0.5f
+                    : c + f.camFwd * Random.Range(0.6f, 2.2f) + Random.insideUnitSphere * 0.7f;
+                if (p.y > Waves.HeightAt(p.x, p.z) - 0.2f) continue;
+                ep.position = p;
+                ep.velocity = Random.insideUnitSphere * 0.12f;
+                ep.startSize = Random.Range(0.025f, 0.06f);
+                ep.startLifetime = Random.Range(0.8f, 1.7f);
+                ep.startColor = Random.value < 0.6f ? (Color32)SparkCyan : (Color32)SparkGreen;
+                sparks.Emit(ep, 1);
+            }
         }
 
         void TickSnow(FXFrame f)
@@ -440,20 +557,27 @@ namespace Sealebrities
             return rootPos + avatar.up * 1.55f;
         }
 
-        void EmitBubble(Vector3 pos, Vector3 vel, float size, float riseSpeed)
+        void EmitBubble(Vector3 pos, Vector3 vel, float size, float riseSpeed, float maxLife = 12f)
         {
             float toSurface = Waves.HeightAt(pos.x, pos.z) - pos.y - 0.04f;
             if (toSurface <= 0.02f) return;
             emit.position = pos;
             emit.velocity = vel;
             emit.startSize = size;
-            emit.startLifetime = Mathf.Clamp(toSurface / Mathf.Max(0.2f, riseSpeed), 0.1f, 12f);
+            emit.startLifetime = Mathf.Clamp(toSurface / Mathf.Max(0.2f, riseSpeed), 0.1f, maxLife);
             emit.startColor = bubbleColor;
             emit.applyShapeToPosition = false;
             bubbles.Emit(emit, 1);
         }
 
-        /// Surface crossing: droplets spray at the waterline; diving in also wraps the camera in a bubble cloud.
+        Color DropColor(FXFrame f)
+        {
+            float lightAmt = Mathf.Lerp(0.35f, 1f, f.day01);
+            return new Color(0.93f * lightAmt, 0.96f * lightAmt, 0.97f * lightAmt, 0.9f);
+        }
+
+        /// Surface crossing of the lens (Q9). Diving in: a burst of 40 faceted bubbles rushing up past the mask for
+        /// ~1.2 s. Coming up: water drips off the mask (a few droplets).
         public void Splash(FXFrame f, bool under, float strength)
         {
             Vector3 c = f.camPos;
@@ -462,21 +586,51 @@ namespace Sealebrities
             if (flatFwd.sqrMagnitude < 0.001f) flatFwd = Vector3.forward;
             flatFwd.Normalize();
 
-            dropsT.position = new Vector3(c.x, surface, c.z) + flatFwd * 0.8f;
-            float lightAmt = Mathf.Lerp(0.35f, 1f, f.day01);
-            var dm = drops.main;
-            dm.startColor = new ParticleSystem.MinMaxGradient(new Color(0.93f * lightAmt, 0.96f * lightAmt, 0.97f * lightAmt, 0.9f));
-            drops.Emit((int)((under ? 45 : 70) * strength * Mathf.Lerp(0.6f, 1f, tierScale)));
-
-            if (!under) return;
-            int count = (int)(38 * strength);
+            if (!under)
+            {
+                dropsT.position = new Vector3(c.x, surface, c.z) + flatFwd * 0.8f;
+                var dm = drops.main;
+                dm.startColor = new ParticleSystem.MinMaxGradient(DropColor(f));
+                drops.Emit((int)(20 * strength * Mathf.Lerp(0.6f, 1f, tierScale)));
+                return;
+            }
+            int count = (int)(40 * strength);
             for (int i = 0; i < count; i++)
             {
-                Vector3 off = new Vector3(Random.Range(-0.9f, 0.9f), Random.Range(-1.6f, -0.1f), Random.Range(-0.9f, 0.9f));
+                Vector3 off = new Vector3(Random.Range(-0.8f, 0.8f), Random.Range(-1.5f, -0.1f), Random.Range(-0.8f, 0.8f));
                 Vector3 pos = c + flatFwd * 0.7f + off;
-                float vy = Random.Range(0.5f, 1.7f);
-                Vector3 vel = new Vector3(Random.Range(-0.5f, 0.5f), vy, Random.Range(-0.5f, 0.5f));
-                EmitBubble(pos, vel, Random.Range(0.015f, 0.07f), vy);
+                float vy = Random.Range(0.7f, 1.9f);
+                Vector3 vel = new Vector3(Random.Range(-0.45f, 0.45f), vy, Random.Range(-0.45f, 0.45f));
+                EmitBubble(pos, vel, Random.Range(0.015f, 0.07f), vy, Random.Range(1.0f, 1.4f));
+            }
+        }
+
+        /// The body hits the water from a jump or a dive (Q9): 32 droplets thrown up in a crown for ~0.6 s plus a few
+        /// bubbles under the entry point.
+        public void BodySplash(FXFrame f, Vector3 pos, float strength)
+        {
+            if (drops == null) return;
+            float surface = Waves.HeightAt(pos.x, pos.z);
+            var p = new Vector3(pos.x, surface, pos.z);
+            var ep = new ParticleSystem.EmitParams { applyShapeToPosition = false, startColor = DropColor(f) };
+            int n = Mathf.Clamp((int)(32f * Mathf.Lerp(0.6f, 1f, strength) * Mathf.Lerp(0.7f, 1f, tierScale)), 8, 40);
+            for (int i = 0; i < n; i++)
+            {
+                float a = (i + Random.value * 0.6f) / n * FXMath.TwoPi;
+                var d = new Vector2(Mathf.Cos(a), Mathf.Sin(a));
+                float r = Random.Range(0.15f, 0.45f);
+                ep.position = p + new Vector3(d.x * r, 0.03f, d.y * r);
+                float up = Random.Range(2.2f, 4.4f) * (0.7f + 0.3f * strength);
+                ep.velocity = new Vector3(d.x * Random.Range(0.8f, 1.8f), up, d.y * Random.Range(0.8f, 1.8f));
+                ep.startSize = Random.Range(0.02f, 0.06f);
+                ep.startLifetime = Random.Range(0.45f, 0.75f);
+                drops.Emit(ep, 1);
+            }
+            for (int i = 0; i < 10; i++)
+            {
+                float vy = Random.Range(0.6f, 1.4f);
+                EmitBubble(p + new Vector3(Random.Range(-0.4f, 0.4f), Random.Range(-1.2f, -0.2f), Random.Range(-0.4f, 0.4f)),
+                           new Vector3(Random.Range(-0.3f, 0.3f), vy, Random.Range(-0.3f, 0.3f)), Random.Range(0.02f, 0.06f), vy, 1.4f);
             }
         }
 

@@ -19,7 +19,7 @@ namespace Sealebrities
 
         void NewSlot()
         {
-            float spread = c.school != null ? c.school.spread : 0.6f;
+            float spread = c.school != null ? c.school.spread * c.school.spreadMul : 0.6f;
             slot = Random.insideUnitSphere * spread;
             slot.y *= 0.45f;
             slotTimer = Random.Range(2.5f, 6f);

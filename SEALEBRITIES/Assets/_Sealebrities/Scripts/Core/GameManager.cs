@@ -11,11 +11,17 @@ namespace Sealebrities
     /// SHARED-STATE MUTATIONS (co-op authority routing – every change of shared state goes through one of these;
     /// each begins with `if (Net.IsClient) { Net.Command(...); ... }` and CoreCommands.Execute applies them on the host):
     ///   GameManager.AddMoney / TrySpend / AddFollowers / SleepToMorning / HandleFaint (ApplyRescueFee) / SetQuestIndex
-    ///   Journal.RegisterFilmed · Footage.BankDive (host: Footage.BankClips) · Progression.CreateUpload
-    ///   Shop.Buy · Shop.Receive (host: Shop.ReceiveForRemote) · FishMarket.AddCatch / List / ListAt / ListAll
-    ///   Collectibles.Collect
-    /// Host-only automatic changes: StartNewDay, Progression.ResolvePendingUploads / CheckMilestones / CheckUnlocks,
-    /// FishMarket.Tick, sponsor income. Per-player (never routed): Hands, Gear.Equip, Gallery, Footage.AddClip/LoseDive, Settings.
+    ///   Journal.RegisterFilmed / RegisterPhoto / AddSightings · Footage.BankDive (host: Footage.BankClips) · Progression.CreateUpload
+    ///   Shop.Buy / BuyFood · Shop.Receive (host: Shop.ReceiveForRemote) · FishMarket.AddCatch / List / ListAt / ListAll
+    ///   Collectibles.Collect · BoatHome.Request · StoryFlags.Set/Clear · Missions.Set · Research.* · Achievements.Unlock
+    ///   Cosmetics.Unlock · Pantry.Add / TryEat / TryGrill / TryShakePalm / BuyAtKiosk · Finds.Take / Deliver / Sell / SellAll
+    ///   Challenges.Complete · Quests.Start / SetProgress / Complete / Drop / Track · Deals.Accept / Cancel
+    ///   Village.ReleaseLantern · SleepVote.SetLying (host evaluates) · PlayerRecords.SendLocal
+    /// Host-only automatic changes: StartNewDay (+ challenges, deal of the day, finds reset, sponsor deals, Toni trigger),
+    /// Progression.ResolvePendingUploads / CheckMilestones / CheckUnlocks, FishMarket.Tick, sponsor income,
+    /// Deals.AddOffer / Complete / Fail / SetProgress, Cosmetics.CheckRules.
+    /// Per-player (never routed): Hands, Gear.Equip, Gallery, Footage.AddClip/LoseDive, Settings, Buffs, Carry (the host
+    /// only mirrors it), SelfieState.
     public class GameManager : MonoBehaviour
     {
         public static GameManager I { get; private set; }
@@ -50,9 +56,48 @@ namespace Sealebrities
             Settings.Load();
             if (!Settings.FileExisted) MigrateLegacySettings();
             Settings.Apply();
+            Achievements.Hook();
+            if (!hooked)
+            {
+                hooked = true;
+                GameEvents.MilestoneReached += OnMilestone;
+            }
         }
 
+        static bool hooked;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStaticHooks() { hooked = false; }
+
         void OnDestroy() { if (I == this) I = null; }
+
+        /// The 1,000,000 milestone starts the finale (Q79: on Normal/Hard this PC unlocks Schwer – also via CompleteFinale).
+        static void OnMilestone(Milestone m)
+        {
+            var gm = I;
+            if (m == null || gm == null || m.followers < Progression.FinaleFollowers) return;
+            MarkFinaleOnThisPc(gm.State.difficulty);
+        }
+
+        static void MarkFinaleOnThisPc(Difficulty d)
+        {
+            if (DifficultySettings.Normalize(d) == Sealebrities.Difficulty.Snorkeler || Settings.Data.normalCompleted || AutomatedRun) return;
+            Settings.Data.normalCompleted = true;
+            Settings.Save();
+        }
+
+        /// The finale "Live aus der Tiefe" was finished (npc module). Host: shared flag + achievement for everyone.
+        public void CompleteFinale()
+        {
+            if (!InGame) return;
+            State.finaleReached = true;
+            StoryFlags.Set(StoryKeys.FinaleDone);
+            Achievements.Unlock("live_from_the_deep");
+            MarkFinaleOnThisPc(State.difficulty);
+        }
+
+        /// K.5: a new game starts with the prologue at the helipad (WorldLayout.NewGameSpawn) until StoryKeys.PrologueDone.
+        public bool NeedsPrologue => InGame && !State.prologueDone;
 
         // ------------------------------------------------------------------ game flow
         public void NewGame(Difficulty difficulty)
@@ -69,23 +114,60 @@ namespace Sealebrities
             State.unlockedSites.Add("house_reef");
             State.followerHistory.Add(0);
             State.EnsureValid();
+            ResetRuntimeState();
             InGame = true;
+            Challenges.RollForDay(State);
+            Shop.RollDealOfTheDay(State);
             Save();
             RaiseAllChanged();
             GameEvents.RaiseGameStarted();
             GameEvents.RaiseDayStarted(State.day);
         }
 
+        /// Per-session runtime facades (buffs, stream, sleep vote, quest line, viewfinder, selfie, animal event).
+        static void ResetRuntimeState()
+        {
+            Buffs.Clear();
+            LiveState.Reset();
+            SleepVote.Reset();
+            QuestTracker.Clear();
+            ViewfinderInfo.Clear();
+            SelfieState.Active = false;
+            FaunaEventInfo.End();
+        }
+
         public bool LoadGame()
         {
             if (!HasSave) return false;
+            string json;
+            try { json = File.ReadAllText(SavePath); }
+            catch (Exception e)
+            {
+                Debug.LogWarning("Sealebrities: could not read save: " + e.Message);
+                return false;
+            }
+            return LoadFromJson(json);
+        }
+
+        /// Loads a save from its JSON text – LoadGame reads the file; the automated co-op test reloads the host's world
+        /// from the same JSON in memory (it must never touch the player's save file).
+        public bool LoadFromJson(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return false;
             try
             {
-                var loaded = JsonUtility.FromJson<GameState>(File.ReadAllText(SavePath));
+                var loaded = JsonUtility.FromJson<GameState>(json);
                 if (loaded == null) return false;
                 loaded.EnsureValid();
                 loaded.difficulty = DifficultySettings.Normalize(loaded.difficulty);
                 if (loaded.saveSeed == 0) loaded.saveSeed = NewSeed();
+                // heavy salvage hooked on the winch / carried when the game was saved is not in anyone's hands after
+                // loading: put it back on the seabed (small finds go straight to foundItems and are never "delivered")
+                for (int i = 0; i < loaded.finds.Count; i++)
+                {
+                    var f = loaded.finds[i];
+                    if (f != null && f.taken && !f.delivered && FindsDatabase.TryResolve(f.id, loaded.saveSeed, out var sp) && sp.heavy) f.taken = false;
+                }
                 RebaseTimersForMorning(loaded);
                 // the gallery is per machine now (gallery/index.json): migrate photos stored in older saves
                 Gallery.ImportLegacy(loaded.photos);
@@ -93,14 +175,32 @@ namespace Sealebrities
                 State = loaded;
                 GearDatabase.GiveStartingGear(State);
                 if (!State.unlockedSites.Contains("house_reef")) State.unlockedSites.Add("house_reef");
+                // a story site in the list without its flag (hand-edited / old test saves) is locked again
+                for (int i = State.unlockedSites.Count - 1; i >= 0; i--)
+                {
+                    var site = DiveSites.Get(State.unlockedSites[i]);
+                    if (site != null && site.IsStorySite && !State.storyFlags.Contains(site.unlockFlag)) State.unlockedSites.RemoveAt(i);
+                }
                 State.timeOfDay = MorningTime;   // always wake up in the morning
                 State.diveFootage.Clear();
                 State.activeRight = -1;          // both hands empty after loading
                 State.activeLeft = -1;
+                State.carried = null;            // carried items are not saved in the hands
+                ResetRuntimeState();
                 InGame = true;
+                if (State.challengesToday.Count == 0) Challenges.RollForDay(State);
+                if (string.IsNullOrEmpty(State.dealOfDayItem)) Shop.RollDealOfTheDay(State);
                 RaiseAllChanged();
                 GameEvents.RaiseGameStarted();
                 GameEvents.RaiseDayStarted(State.day);
+                if (State.justGiftedCompressor)
+                {
+                    State.justGiftedCompressor = false;
+                    GameEvents.RaiseNotify(NotifyKind.Delivery, Loc.Tr("Geschenk von Gus", "A gift from Gus"), Loc.Tr("Boot-Kompressor", "Boat compressor"));
+                    Save();
+                }
+                Progression.CheckUnlocks();
+                Cosmetics.CheckRules();
                 return true;
             }
             catch (Exception e)
@@ -147,6 +247,7 @@ namespace Sealebrities
             try
             {
                 State.language = Loc.Current;
+                PlayerRecords.Store(PlayerRecords.CaptureLocal());   // F.3: the host's own record next to the guests'
                 string json = JsonUtility.ToJson(State);
                 string path = SavePath, tmp = path + ".tmp";
                 File.WriteAllText(tmp, json);
@@ -173,8 +274,11 @@ namespace Sealebrities
         public void ReturnToMenu()
         {
             SaveCoopPlayer(false);
+            Journal.FlushAllSightings();  // guests: the last seconds of Sealog counts / depths still reach the host
+            PlayerRecords.SendLocal();   // guests: the host keeps this machine's record (F.3)
             Save();
             InGame = false;
+            ResetRuntimeState();
             GameEvents.RaiseReturnedToMenu();
         }
 
@@ -227,9 +331,14 @@ namespace Sealebrities
             snapshot.activeRight = -1;
             snapshot.activeLeft = -1;
             snapshot.diveFootage.Clear();
+            snapshot.carried = null;
             State = snapshot;
             GearDatabase.GiveStartingGear(State);
+            ResetRuntimeState();
             InGame = true;
+            // channel cosmetics become visible on this machine's character screen; achievements are only those earned
+            // while present (ApplyHostSnapshot diff / Net message 95 / the stored PlayerRecord)
+            for (int i = 0; i < State.cosmetics.Count; i++) Cosmetics.RememberLocal(State.cosmetics[i], false);
             RaiseAllChanged();
             GameEvents.RaiseGameStarted();
             GameEvents.RaiseDayStarted(State.day);
@@ -247,6 +356,7 @@ namespace Sealebrities
             snapshot.EnsureValid();
             snapshot.CopyPerPlayerFrom(old);
             State = snapshot;
+            Journal.ReapplyPendingSightings();   // optimistic "×n" counts not yet batched to the host stay visible
 
             if (snapshot.money != old.money) GameEvents.RaiseMoneyChanged(snapshot.money);
             if (snapshot.followers != old.followers) GameEvents.RaiseFollowersChanged(snapshot.followers);
@@ -261,7 +371,7 @@ namespace Sealebrities
                 var m = Progression.Milestones.Find(x => x.id == id);
                 if (m == null) continue;
                 GameEvents.RaiseMilestoneReached(m);
-                GameEvents.RaiseBanner(m.Title + "\n" + m.Description, new Color(1f, 0.76f, 0.2f));
+                GameEvents.RaiseBanner(m.BannerText, new Color(1f, 0.76f, 0.2f));
             }
             for (int i = 0; i < snapshot.unlockedSites.Count; i++)
             {
@@ -274,8 +384,45 @@ namespace Sealebrities
                     GameEvents.RaiseBanner(Loc.Tr("Neuer Tauchplatz: ", "New dive site: ") + site.Name, new Color(0.18f, 0.77f, 0.75f));
             }
             for (int i = old.videos.Count; i < snapshot.videos.Count; i++) GameEvents.RaiseUploadResolved(snapshot.videos[i]);
+            if (Progression.RankIndex(snapshot.followers) != Progression.RankIndex(old.followers))
+                GameEvents.RaiseRankChanged(Progression.RankIndex(snapshot.followers));
+
+            // round 2: shared lists the client may have missed
+            for (int i = 0; i < snapshot.storyFlags.Count; i++)
+                if (!old.storyFlags.Contains(snapshot.storyFlags[i])) GameEvents.RaiseStoryFlagSet(snapshot.storyFlags[i]);
+            for (int i = 0; i < snapshot.achievements.Count; i++)
+                if (!old.achievements.Contains(snapshot.achievements[i])) Achievements.ApplyLocal(snapshot.achievements[i]);
+            for (int i = 0; i < snapshot.cosmetics.Count; i++)
+                Cosmetics.RememberLocal(snapshot.cosmetics[i], !old.cosmetics.Contains(snapshot.cosmetics[i]));
+            if (!SamePantry(old, snapshot)) Pantry.RaiseChanged();
+            if (snapshot.finds.Count != old.finds.Count || snapshot.foundItems.Count != old.foundItems.Count) Finds.RaiseChanged();
+            if (snapshot.sponsor.offers.Count != old.sponsor.offers.Count || snapshot.sponsor.active.Count != old.sponsor.active.Count) Deals.RaiseChanged();
+            if (snapshot.challengesToday.Count != old.challengesToday.Count || snapshot.challengesDone.Count != old.challengesDone.Count) Challenges.RaiseChanged();
+            for (int i = 0; i < snapshot.sideQuests.Count; i++)
+            {
+                var q = snapshot.sideQuests[i];
+                if (q == null) continue;
+                QuestState o = null;
+                for (int k = 0; k < old.sideQuests.Count; k++) if (old.sideQuests[k] != null && old.sideQuests[k].id == q.id) { o = old.sideQuests[k]; break; }
+                if (o == null || o.step != q.step || o.progress != q.progress || o.done != q.done) GameEvents.RaiseSideQuestChanged(q.id);
+            }
+            if (snapshot.trackedQuest != old.trackedQuest) QuestTracker.Resolve();
+            // no SleepVote.Reset here: players lying down before midnight stay in bed over the rollover; the sleep paths
+            // reset every machine through EvSleep
             if (snapshot.day != old.day) GameEvents.RaiseDayStarted(snapshot.day);
             Net.RaiseStateSynced();
+        }
+
+        static bool SamePantry(GameState a, GameState b)
+        {
+            if (a.pantry.Count != b.pantry.Count) return false;
+            for (int i = 0; i < a.pantry.Count; i++)
+            {
+                var x = a.pantry[i];
+                var y = b.pantry[i];
+                if (x == null || y == null || x.foodId != y.foodId || x.count != y.count) return false;
+            }
+            return true;
         }
 
         /// Host: JSON of the shared state for clients (per-player fields are included but ignored by clients).
@@ -368,8 +515,11 @@ namespace Sealebrities
         {
             if (amount == 0) return;
             if (Net.IsClient) { Net.Command(NetCommand.Custom, CoreCommands.AddFollowersKey, amount.ToString(CultureInfo.InvariantCulture)); return; }
+            int rank = Progression.RankIndex(State.followers);
             State.followers = Math.Max(0, State.followers + amount);
             GameEvents.RaiseFollowersChanged(State.followers);
+            int newRank = Progression.RankIndex(State.followers);
+            if (newRank != rank) GameEvents.RaiseRankChanged(newRank);
             Progression.CheckMilestones();
         }
 
@@ -411,7 +561,11 @@ namespace Sealebrities
                 coopPlayerTimer += Time.unscaledDeltaTime;
                 if (coopPlayerTimer >= 2f) { coopPlayerTimer = 0f; SaveCoopPlayer(false); }
             }
+            Journal.TickSightings(Time.unscaledDeltaTime);
+            SleepVote.Tick(Time.unscaledDeltaTime);
             if (UIState.PauseOpen && !Net.IsOnline) return;   // offline the pause menu stops the clock; online the world runs on
+            Buffs.Tick(Time.deltaTime);
+            PlayerRecords.Tick(Time.deltaTime);
             State.timeOfDay += Time.deltaTime / DayLengthSeconds;
             if (State.timeOfDay >= 1f)
             {
@@ -430,15 +584,31 @@ namespace Sealebrities
         public const float SleepGuardSeconds = 8f;
         float lastSleepStart = -100f;
 
-        /// Bed interaction: fade, skip to the next morning, resolve uploads, save. In co-op one sleeps = everybody sleeps
-        /// (the Net module mirrors SleepStarted as a fade on the clients). After midnight the clock rollover already
-        /// started the new day, so only the morning is skipped to (uploads still resolve, same day number).
+        /// E.3: the bed works from 18:00 (and after midnight until the morning).
+        public const float SleepFromTime = 0.75f;
+
+        /// E.3 rule for the bed / sleep spots: true from 18:00 until MorningTime. Otherwise show the reason
+        /// „Schlafen ab 18:00“ / "Sleep from 6 pm" (SleepRuleHint).
+        public bool CanSleepNow => InGame && (State.timeOfDay >= SleepFromTime || State.timeOfDay < MorningTime);
+
+        public static string SleepRuleHint => Loc.Tr("Schlafen ab 18:00", "Sleep from 6 pm");
+
+        /// Bed interaction: fade, skip to the next morning, resolve uploads, save. Co-op beds go through SleepVote (L.9:
+        /// everybody must lie down – the host calls this when the vote is complete); the Net module mirrors
+        /// SleepStarted as a fade on the clients. After midnight the clock rollover already started the new day, so only
+        /// the morning is skipped to (uploads still resolve, same day number). Programmatic callers (tests, the
+        /// vote) are not bound to the 18:00 rule – the bed checks CanSleepNow.
         public void SleepToMorning()
         {
             if (Net.IsClient) { Net.Command(NetCommand.Sleep); return; }
             if (!InGame) return;
             if (Time.unscaledTime - lastSleepStart < SleepGuardSeconds && lastSleepStart > 0f) return;
             lastSleepStart = Time.unscaledTime;
+            SleepVote.Reset();
+            // E.2 "Gemütlich": grilled a fish today (before midnight: this day; after midnight: yesterday) + slept in bed
+            bool afterMidnight = State.timeOfDay < MorningTime;
+            int sleepDay = afterMidnight ? State.day - 1 : State.day;
+            bool cozy = State.lastGrillDay >= 0 && State.lastGrillDay >= sleepDay;
             GameEvents.RaiseSleepStarted();
             Fader.FadeThrough(() =>
             {
@@ -446,6 +616,7 @@ namespace Sealebrities
                 if (State.timeOfDay < MorningTime)
                 {
                     State.timeOfDay = MorningTime;
+                    if (cozy) GrantCozy();
                     Progression.ResolvePendingUploads();
                     GameEvents.RaiseDayStarted(State.day);
                     Save();
@@ -453,21 +624,37 @@ namespace Sealebrities
                 }
                 State.timeOfDay = MorningTime;
                 StartNewDay(true);
+                if (cozy) GrantCozy();
             }, 2f);
+        }
+
+        void GrantCozy()
+        {
+            State.cozyBonusDay = State.day;
+            GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Gut gegessen, gut geschlafen", "Ate well, slept well"), Loc.Tr("+5 % Aufrufe heute", "+5 % views today"));
         }
 
         void StartNewDay(bool slept)
         {
             State.day++;
             if (slept) State.timeOfDay = MorningTime;
+            // SleepVote is reset by SleepToMorning / ForceSleep only – the midnight rollover keeps lying players in bed
             Progression.ResolvePendingUploads();
             long sponsor = Progression.DailySponsorIncome();
             if (sponsor > 0)
             {
                 AddMoney(sponsor);
-                GameEvents.RaiseToast(Loc.Tr($"Sponsoren zahlen {Loc.Money(sponsor)}", $"Sponsors pay {Loc.Money(sponsor)}"));
+                GameEvents.RaiseNotify(NotifyKind.Sponsor, Loc.Tr("Sponsoren zahlen", "Sponsors pay"), "+" + Loc.Money(sponsor));
             }
             State.followerHistory.Add(State.followers);
+            // round 2 daily resets (host)
+            State.dailyUsed.Clear();
+            Finds.OnNewDay(State);
+            Challenges.RollForDay(State);
+            Shop.RollDealOfTheDay(State);
+            Deals.OnNewDay(State);
+            StoryRules.OnNewDay(State);
+            Cosmetics.CheckRules();
             FishMarket.Tick();   // listings sell overnight
             GameEvents.RaiseDayStarted(State.day);
             Save();
@@ -478,6 +665,8 @@ namespace Sealebrities
         public void HandleFaint()
         {
             Footage.LoseDive();
+            var rec = PlayerRecords.Local;
+            if (rec != null) rec.faints++;
             if (Net.IsClient)
             {
                 Net.Command(NetCommand.Faint);
@@ -510,7 +699,7 @@ namespace Sealebrities
             if (fee <= 0) return;
             LastRescueFee = fee;
             AddMoney(-fee);
-            GameEvents.RaiseToast(Loc.Tr($"Rettung: −{Loc.Money(fee)}", $"Rescue: −{Loc.Money(fee)}"));
+            GameEvents.RaiseNotify(NotifyKind.Money, Loc.Tr("Rettung", "Rescue"), "−" + Loc.Money(fee));
         }
 
         /// An alt-tabbed window does not need full frame rate: cap it (30 online so the session stays smooth, 15 offline)

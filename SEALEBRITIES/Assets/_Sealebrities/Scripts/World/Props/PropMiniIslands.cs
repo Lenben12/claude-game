@@ -73,6 +73,7 @@ namespace Sealebrities
                 new Isle { siteId = "wreck", c = WorldLayout.WreckIsland, seed = 53, top = 3.6f },
                 new Isle { siteId = "blue_drop", c = WorldLayout.BlueDropIsland, seed = 67, top = 5.0f },
                 new Isle { siteId = "deep_trench", c = WorldLayout.TrenchIsland, seed = 79, top = 6.0f },
+                new Isle { siteId = "fog_isle", c = WorldLayout.FogIsland, seed = 91, top = 9.0f },
             };
             PropInfo.MiniIslandTops.Clear();
             PropInfo.MiniLandmarks.Clear();
@@ -127,6 +128,7 @@ namespace Sealebrities
                 case "kelp_forest": lm = StiltHut(root, batch, cols, isle, toSite, spacing); break;
                 case "wreck": lm = AnchorAndSign(batch, cols, isle, toSite, spacing); break;
                 case "blue_drop": lm = Pillar(batch, cols, isle, spacing, rng); break;
+                case "fog_isle": lm = new Vector3(c.x, topY, c.z); break;   // Toni's camp: PropIslandExtras
                 default: lm = Antenna(batch, cols, isle, spacing, rng); break;
             }
             PropInfo.MiniLandmarks[isle.siteId] = lm;
@@ -220,6 +222,10 @@ namespace Sealebrities
                 Vector3 la = lq * Vector3.up;
                 batch.W(PropMats.Driftwood, p).Cylinder(p + Vector3.up * 0.13f - la * 1.2f, lq, 0.16f, 0.11f, 2.4f, 6, true, true);
             }
+
+            // ---- Q54 rest spot, shells, the island secret (and Toni's camp on the Fog Isle)
+            try { PropIslandExtras.Build(root, batch, cols, isle.siteId, c, isle.R, isle.Height, isle.ShoreRadius, spacing, rng); }
+            catch (System.Exception e) { Debug.LogError("Sealebrities props: island extras " + isle.siteId + " failed: " + e); }
 
             batch.Flush(root, "IslandProps", ShadowCastingMode.On, 900f);
             under.Flush(root, "IslandPlants", ShadowCastingMode.On, 120f);

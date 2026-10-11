@@ -10,11 +10,18 @@ namespace Sealebrities
     ///                           add -save to save it anyway.
     ///   -continue               with -host: continue the save instead (saves normally).
     ///   -join ip[:port]         connect automatically after boot (retries for 60 s while the host is still booting).
-    ///   -netname Name           co-op name for this window (not written to the settings).
+    ///   -netname Name           co-op name for this window (not written to the settings); also derives this window's
+    ///                           own player key (Settings.PlayerKey) so two windows on one PC keep separate guest records.
+    ///   -playerkey X            explicit player key for this window (F.3 tests: rejoin and find the record again).
     ///   -netbind ip             host listens only on this address (e.g. 127.0.0.1 for a same-PC test).
     ///   -netdifficulty X        Snorkeler|OpenWater|Advanced (also Entspannt|Normal|Schwer / Relaxed|Hard).
+    ///   +connect_lobby <id>     (Steam) join that Steam lobby once the main menu is up – Steam passes it for
+    ///                           "Spiel beitreten" / accepted invites (handled by SteamLobby).
+    ///   -nosteam                do not initialize Steam (co-op per IP / LAN only).
+    ///   -steamselftest <folder> Steam check without a second PC (Debug/SteamSelfTest): writes steam_selftest.json, quits.
     /// Two windows on one PC: SEALEBRITIES.exe -host -netname Anna -screen-fullscreen 0 -screen-width 1280 -screen-height 720
     ///                        SEALEBRITIES.exe -join 127.0.0.1 -netname Ben -screen-fullscreen 0 -screen-width 1280 -screen-height 720
+    /// The -host / -join test runs always use TCP; Steam co-op starts from the lobby screen ("Über Steam").
     public static class NetBoot
     {
         public static string NameOverride { get; private set; }
@@ -47,6 +54,9 @@ namespace Sealebrities
             installed = true;
             try { ParseCommandLine(Environment.GetCommandLineArgs()); }
             catch (Exception e) { Debug.LogWarning("[Net] command line: " + e.Message); }
+            // Steam first (GameBootstrap already did it; this is the safety net for scenes without the bootstrap)
+            try { SteamService.Init(); }
+            catch (Exception e) { Debug.LogException(e); }
             NetCoreRunner.Ensure();
             NetSession.Install();
             NetCommands.Install();

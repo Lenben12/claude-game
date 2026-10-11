@@ -65,36 +65,101 @@ namespace Sealebrities
         static void ResetStatics() { cached = null; frame = -1; valid = false; planesFrame = -1; planesValid = false; }
     }
 
-    /// The hut bed: sleep until the next morning.
+    /// A sleep spot (E.3 / L.9): the hut bed, the two porch hammocks and the sofa bunk (one per possible player).
+    /// From 18:00 (GameManager.CanSleepNow) „E – Hinlegen“ lies the local player down: SleepVote.SetLying(true) – solo
+    /// sleeps at once, in co-op everybody must lie down („1/2 · 2/2“, the host skips the night). Moving away, jumping,
+    /// E again or – for guests – opening the pause menu gets up (SetLying(false)); the host stays lying in its pause menu
+    /// so „Schlafen erzwingen“ keeps working. PropInfo.LocalSleepSpot tells the Player module
+    /// which spot to lie the camera down on.
     public class PropBed : MonoBehaviour, IInteractable
     {
+        /// Index into PropInfo.SleepSpots (−1 = not registered).
+        public int spotIndex = -1;
+        public byte kind;
         float lastUse = -100f;
+        bool lyingHere;
+        Vector3 anchor;
+
+        /// Registers a sleep spot and returns its index.
+        public static int Register(string id, Vector3 lie, float yaw, Vector3 stand, float standYaw, byte kind)
+        {
+            PropInfo.SleepSpots.Add(new SleepSpotInfo { id = id, lie = lie, yaw = yaw, stand = stand, standYaw = standYaw, kind = kind });
+            return PropInfo.SleepSpots.Count - 1;
+        }
+
+        bool Lying => lyingHere && SleepVote.LocalLying;
 
         public string GetPrompt()
         {
             if (!CanInteract()) return null;
-            return PropPrompt.Interact("Schlafen (bis morgen früh)", "Sleep (until morning)");
+            if (Lying) return PropPrompt.Interact("Aufstehen", "Get up");
+            if (!GameManager.I.CanSleepNow) return GameManager.SleepRuleHint;
+            switch (kind)
+            {
+                case SleepSpotInfo.Hammock: return PropPrompt.Interact("In die Hängematte legen", "Lie in the hammock");
+                case SleepSpotInfo.Bunk: return PropPrompt.Interact("Aufs Sofa legen", "Lie down on the sofa");
+                default: return PropPrompt.Interact("Hinlegen", "Lie down");
+            }
         }
 
-        public bool CanInteract() => GameManager.I != null && GameManager.I.InGame && Time.unscaledTime - lastUse > 3f;
+        public bool CanInteract() => GameManager.I != null && GameManager.I.InGame && Time.unscaledTime - lastUse > 0.6f;
 
         public void Interact()
         {
             if (!CanInteract()) return;
-            // sleep only in the evening/night, or when something is waiting for "tomorrow morning"
-            // (an upload, or an order that is not due yet) – otherwise the bed would farm sponsor income
-            var s = GameManager.I.State;
-            bool evening = s.timeOfDay >= 0.75f || s.timeOfDay < GameManager.MorningTime;
-            bool waiting = s.pendingUploads.Count > 0 || s.deliveries.Exists(d => !d.dropped && !Shop.IsDue(d));
-            if (!evening && !waiting)
+            lastUse = Time.unscaledTime;
+            if (Lying) { GetUp(); return; }
+            var gm = GameManager.I;
+            if (!gm.CanSleepNow)
             {
-                GameEvents.RaiseToast(Loc.Tr("Noch zu früh zum Schlafen (ab 18 Uhr).", "Too early to sleep (from 6 pm)."));
+                GameEvents.RaiseNotify(NotifyKind.Info, GameManager.SleepRuleHint);
                 return;
             }
-            lastUse = Time.unscaledTime;
-            // GameManager.SleepToMorning handles both cases (before midnight: next day; after midnight: only skip to
-            // the morning of the already started day) and co-op (a guest's sleep is sent to the host, everybody sleeps).
-            GameManager.I.SleepToMorning();
+            if (!Net.IsOnline || Net.PlayerCount <= 1)
+            {
+                // solo: unchanged – lying down sleeps until the morning (E.3)
+                SleepVote.SetLying(true);
+                return;
+            }
+            var p = Refs.Player;
+            anchor = p != null && p.Root != null ? p.Root.position : transform.position;
+            lyingHere = true;
+            PropInfo.LocalSleepSpot = spotIndex;
+            SleepVote.SetLying(true);
+        }
+
+        void GetUp()
+        {
+            lyingHere = false;
+            if (PropInfo.LocalSleepSpot == spotIndex) PropInfo.LocalSleepSpot = -1;
+            if (SleepVote.LocalLying) SleepVote.SetLying(false);
+        }
+
+        void Update()
+        {
+            if (!lyingHere) return;
+            if (!SleepVote.LocalLying)
+            {
+                // the night was skipped (vote reset) or the vote was cancelled elsewhere
+                lyingHere = false;
+                if (PropInfo.LocalSleepSpot == spotIndex) PropInfo.LocalSleepSpot = -1;
+                return;
+            }
+            var p = Refs.Player;
+            // the host stays in bed with the pause menu open: that is where „Schlafen erzwingen“ (ForceSleep) lives
+            bool up = p == null || p.Root == null || p.IsFainting || (UIState.PauseOpen && !Net.HasAuthority) || GameInput.JumpPressed;
+            if (!up)
+            {
+                Vector3 d = p.Root.position - anchor;
+                d.y = 0f;
+                up = d.sqrMagnitude > 1.3f * 1.3f;
+            }
+            if (up) GetUp();
+        }
+
+        void OnDisable()
+        {
+            if (lyingHere) GetUp();
         }
     }
 

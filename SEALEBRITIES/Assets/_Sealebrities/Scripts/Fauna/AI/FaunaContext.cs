@@ -94,11 +94,31 @@ namespace Sealebrities
             remote.Remove(root);
         }
 
+        // ------------------------------------------------------------------ round 2: time of day, co-op danger (F.4)
+        public static DayMask DayNow = DayMask.Day;
+        public static bool NightNow;
+        /// Players in the session (1 offline).
+        public static int Players = 1;
+        /// F.4 multipliers for the player count: predator count, predator aggression, jelly count, bump air loss.
+        public static float PredatorCountMul = 1f, PredatorAggressionMul = 1f, JellyCountMul = 1f, BumpAirMul = 1f;
+
+        static readonly float[] PredCount = { 1f, 1f, 1.25f, 1.5f, 1.75f };
+        static readonly float[] PredAggr = { 1f, 1f, 1.1f, 1.2f, 1.3f };
+        static readonly float[] JellyCount = { 1f, 1f, 1.2f, 1.4f, 1.6f };
+        static readonly float[] BumpAir = { 1f, 1f, 1f, 1.1f, 1.2f };
+
         public static void Capture()
         {
             Time = UnityEngine.Time.time;
             var gm = GameManager.I;
-            Aggression = gm != null ? gm.Difficulty.predatorAggression : 1f;
+            DayNow = gm != null ? DayPhase.Of(gm.State.timeOfDay) : DayMask.Day;
+            NightNow = DayNow == DayMask.Night;
+            Players = Net.IsOnline ? Mathf.Clamp(Net.PlayerCount, 1, 4) : 1;
+            PredatorCountMul = PredCount[Players];
+            PredatorAggressionMul = PredAggr[Players];
+            JellyCountMul = JellyCount[Players];
+            BumpAirMul = BumpAir[Players];
+            Aggression = (gm != null ? gm.Difficulty.predatorAggression : 1f) * PredatorAggressionMul;
 
             var pl = Refs.Player;
             if (pl == null) { Clear(); return; }

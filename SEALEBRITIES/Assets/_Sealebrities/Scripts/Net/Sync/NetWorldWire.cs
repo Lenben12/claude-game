@@ -20,6 +20,22 @@ namespace Sealebrities
         public const byte CreatureDespawn = 81;  // reliable: ids
         public const byte CreatureSnap = 82;     // unreliable 10 Hz: quantized poses of the creatures near that client
         public const byte CreatureResync = 83;   // reliable client → host: forget what I know, send everything again
+        // round 2 (Design_Runde2 J.3 / J.3b) – shared game systems (NetGameSync)
+        // 90–92: reserved for the KRILL.tv livestream – registered by the livestream module itself (Livestream/StreamNet.cs),
+        // never by the Net module (one handler per id). 176–178: the npc module's NPC sync (Npc/NpcNet.cs).
+        public const byte StreamState = 90;      // (livestream) reliable host → all: LiveState 2 Hz + stream summary (C.8)
+        public const byte StreamFeed = 91;       // (livestream) unreliable client → host 2 Hz: that player's camera (C.8)
+        public const byte StreamChat = 92;       // (livestream) reliable host → all: chat bubble line id + args
+        public const byte TowState = 93;         // reliable client → host (start/stop) and host → all (every tow pair) – F.1
+        public const byte Unconscious = 94;      // reliable any → host → all: unconscious on/off (+ rescuer on revive) – F.1
+        public const byte Achievement = 95;      // reliable host → all: achievement id unlocked for everybody present (F.6)
+        public const byte LookChanged = 96;      // reliable any → host (validates) → all via the player list: name + DiverLook (1c)
+        public const byte NpcState = 97;         // unreliable host → all 4 Hz: poses of NPC-like characters that opt in (INetNpc)
+        public const byte StoryLine = 98;        // reliable host → all: a Dialogue.Say line (id + args, + position of a bodied speaker)
+        public const byte SleepVote = 99;        // reliable client → host: lying 1 / 0 (L.9)
+        public const byte SleepState = 100;      // reliable host → all: lying, total, last player who lay down (L.9)
+        public const byte FaunaEvent = 101;      // reliable host → all: animal event start / end (K.3)
+        public const byte CarryState = 102;      // reliable any → host → all: carried quest item / salvage id (K.3, L.7)
         // voice
         public const byte VoiceFrame = 128;      // unreliable: originId, seq, flags, 40 ms µ-law @ 16 kHz
     }
@@ -79,6 +95,12 @@ namespace Sealebrities
             UInt(b.u);
         }
 
+        public void Long(long v)
+        {
+            UInt(unchecked((uint)v));
+            UInt(unchecked((uint)(v >> 32)));
+        }
+
         public void Vec3(Vector3 v) { Float(v.x); Float(v.y); Float(v.z); }
         public void Quat(Quaternion q) { Float(q.x); Float(q.y); Float(q.z); Float(q.w); }
 
@@ -99,6 +121,25 @@ namespace Sealebrities
 
         /// Overwrites one already written byte (e.g. a count placeholder).
         public void PatchByte(int at, byte v) { if (at >= 0 && at < len) buf[at] = v; }
+
+        /// UTF-8 string with a ushort byte length (max 4 KB – longer strings are cut). For rare reliable messages only.
+        public void Str(string s)
+        {
+            if (string.IsNullOrEmpty(s)) { UShort(0); return; }
+            int max = System.Text.Encoding.UTF8.GetMaxByteCount(s.Length);
+            if (max > 4096) { s = s.Substring(0, 1024); max = System.Text.Encoding.UTF8.GetMaxByteCount(s.Length); }
+            Ensure(2 + max);
+            int n = System.Text.Encoding.UTF8.GetBytes(s, 0, s.Length, buf, len + 2);
+            buf[len] = (byte)n;
+            buf[len + 1] = (byte)(n >> 8);
+            len += 2 + n;
+        }
+
+        /// Colour as 4 bytes (alpha kept: DiverLook uses α 0 for "default").
+        public void Color32(Color c)
+        {
+            Byte(SyncQuant.To01(c.r)); Byte(SyncQuant.To01(c.g)); Byte(SyncQuant.To01(c.b)); Byte(SyncQuant.To01(c.a));
+        }
 
         public byte[] ToArray()
         {
@@ -161,6 +202,13 @@ namespace Sealebrities
             return float.IsNaN(f) || float.IsInfinity(f) ? 0f : f;
         }
 
+        public long Long()
+        {
+            ulong lo = UInt();
+            ulong hi = UInt();
+            return unchecked((long)(lo | (hi << 32)));
+        }
+
         public Vector3 Vec3() => new Vector3(Float(), Float(), Float());
 
         public Quaternion Quat()
@@ -181,6 +229,22 @@ namespace Sealebrities
             Buffer.BlockCopy(buf, pos, dst, 0, count);
             pos += count;
             return true;
+        }
+
+        /// String written by SyncWriter.Str (allocates – rare reliable messages only). "" when short / empty.
+        public string Str()
+        {
+            int n = UShort();
+            if (n == 0 || !Need(n)) return "";
+            string s = System.Text.Encoding.UTF8.GetString(buf, pos, n);
+            pos += n;
+            return s;
+        }
+
+        public Color Color32()
+        {
+            float r = SyncQuant.From01(Byte()), g = SyncQuant.From01(Byte()), b = SyncQuant.From01(Byte()), a = SyncQuant.From01(Byte());
+            return new Color(r, g, b, a);
         }
     }
 
@@ -215,6 +279,44 @@ namespace Sealebrities
             w.UShort(Pack(p.x, XZMin, XZRange));
             w.UShort(Pack(p.y, YMin, YRange));
             w.UShort(Pack(p.z, XZMin, XZRange));
+        }
+
+        /// The quantized values WritePos would send (for change detection before sending).
+        public static void PackPos(Vector3 p, out ushort x, out ushort y, out ushort z)
+        {
+            x = Pack(p.x, XZMin, XZRange);
+            y = Pack(p.y, YMin, YRange);
+            z = Pack(p.z, XZMin, XZRange);
+        }
+
+        public static void WritePackedPos(SyncWriter w, ushort x, ushort y, ushort z) { w.UShort(x); w.UShort(y); w.UShort(z); }
+
+        /// The 4 bytes WriteRot would send, packed into one uint (yaw | pitch << 16 | roll << 24).
+        public static uint PackRot(Quaternion q)
+        {
+            Vector3 e = q.eulerAngles;
+            float pitch = e.x > 180f ? e.x - 360f : e.x;
+            float roll = e.z > 180f ? e.z - 360f : e.z;
+            uint yaw = (ushort)Mathf.RoundToInt(Mathf.Repeat(e.y, 360f) / 360f * 65535f);
+            uint p = (byte)(sbyte)Mathf.Clamp(Mathf.RoundToInt(pitch / 90f * 127f), -127, 127);
+            uint r = (byte)(sbyte)Mathf.Clamp(Mathf.RoundToInt(roll / 180f * 127f), -127, 127);
+            return yaw | (p << 16) | (r << 24);
+        }
+
+        public static void WritePackedRot(SyncWriter w, uint packed)
+        {
+            w.UShort((ushort)(packed & 0xFFFF));
+            w.Byte((byte)((packed >> 16) & 0xFF));
+            w.Byte((byte)(packed >> 24));
+        }
+
+        /// True when two packed rotations differ by more than ~1° of yaw or one pitch / roll step.
+        public static bool RotChanged(uint a, uint b)
+        {
+            if (a == b) return false;
+            int dy = Mathf.Abs((int)(a & 0xFFFF) - (int)(b & 0xFFFF));
+            if (dy > 32767) dy = 65536 - dy;
+            return dy > 180 || ((a >> 16) & 0xFF) != ((b >> 16) & 0xFF) || (a >> 24) != (b >> 24);
         }
 
         public static Vector3 ReadPos(ref SyncReader r)

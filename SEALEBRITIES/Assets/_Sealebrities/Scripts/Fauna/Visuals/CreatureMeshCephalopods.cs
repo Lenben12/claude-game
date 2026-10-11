@@ -245,7 +245,8 @@ namespace Sealebrities
         {
             var s = ctx.S;
             var b = ctx.B;
-            ctx.EyeStyle = CreatureMeshEyeStyle.Cuttle;
+            bool flamboyant = (s.variant ?? "") == "flamboyant";
+            ctx.EyeStyle = flamboyant ? CreatureMeshEyeStyle.Friendly : CreatureMeshEyeStyle.Cuttle;
             ctx.Facet(true, true);
             float hw = 0.5f * CreatureMeshMath.Clamp(s.bodyWidth, 0.2f, 0.5f);
             float hh = 0.5f * CreatureMeshMath.Clamp(s.bodyHeight, 0.18f, 0.45f);
@@ -294,8 +295,9 @@ namespace Sealebrities
                 float phi = (k + 0.5f) / 8f * CreatureMeshMath.TwoPi;
                 Vector3 d = new Vector3(CreatureMeshMath.Cos(phi), CreatureMeshMath.Sin(phi) * 0.8f, 0f);
                 Vector3 p0 = crown + d * 0.04f;
-                float L = 0.145f * (0.9f + 0.2f * Rnd(s.id, k, 4)) * (d.y < -0.3f ? 1.12f : 1f);
-                var path = CreatureMeshParts.GrowPath(p0, Vector3.forward + d * 0.4f, L, 8, i => Vector3.forward * 0.6f + Vector3.down * 0.45f + d * 0.1f, 0.18f,
+                bool walkArm = flamboyant && d.y < -0.3f;   // flamboyant cuttlefish: the lowest arms are its "legs"
+                float L = 0.145f * (0.9f + 0.2f * Rnd(s.id, k, 4)) * (d.y < -0.3f ? (walkArm ? 1.7f : 1.12f) : 1f);
+                var path = CreatureMeshParts.GrowPath(p0, Vector3.forward + d * 0.4f, L, 8, i => walkArm ? Vector3.forward * 0.25f + Vector3.down * 1.4f + d * 0.15f : Vector3.forward * 0.6f + Vector3.down * 0.45f + d * 0.1f, 0.18f,
                     Vector3.Cross(Vector3.forward, d), f => 0.05f + 0.08f * f);
                 Arm(ctx, "Arm" + k + "_", head, path, t => 0.021f * CreatureMeshMath.Pow(1f - t, 0.75f) + 0.005f, d, 3, 5, 5);
             }

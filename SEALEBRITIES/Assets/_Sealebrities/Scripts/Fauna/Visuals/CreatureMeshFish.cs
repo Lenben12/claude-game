@@ -27,6 +27,12 @@ namespace Sealebrities
             public float PelT = 0.31f, PelLen = 0.11f;
             public Tail Caudal = Tail.Emarginate; public float CLen = 0.2f, CSpread = 0.42f;
             public bool Brows;   // lionfish supraocular tentacles
+            // round 2 extras
+            public bool Wings;          // flying fish: huge pectoral "wings" spread sideways
+            public int Finlets;         // tuna: little yellow finlets in front of the tail (per side of the tail stock)
+            public int Photophores;     // lanternfish: glowing dots along the belly
+            public bool Lobed;          // coelacanth: fleshy lobes at the fin bases + tail tuft
+            public float LowerLobe = 1f;   // forked tail: lower lobe length multiplier (flying fish)
         }
 
         static Spec SpecFor(SpeciesDef s)
@@ -101,6 +107,83 @@ namespace Sealebrities
                     p.PecT = 0.26f; p.PecLen = 0.15f; p.PelT = 0.31f; p.PelLen = 0.1f;
                     p.Caudal = Tail.Lunate; p.CLen = 0.2f; p.CSpread = 0.42f;
                     break;
+                case "slender":   // sardine: streamlined schooling fish
+                case "cleaner":   // cleaner wrasse: slim cigar with a long low dorsal
+                {
+                    bool cleaner = v == "cleaner";
+                    p.Lb = cleaner ? 0.82f : 0.8f;
+                    p.Top = new CreatureMeshCurve(0f, 0.03f, 0.07f, 0.17f, 0.16f, 0.32f, 0.3f, 0.43f, 0.45f, 0.46f, 0.6f, 0.4f, 0.76f, 0.26f, 0.9f, 0.15f, 1f, 0.13f);
+                    p.Bot = new CreatureMeshCurve(0f, -0.03f, 0.07f, -0.16f, 0.16f, -0.3f, 0.3f, -0.42f, 0.45f, -0.44f, 0.6f, -0.37f, 0.76f, -0.24f, 0.9f, -0.14f, 1f, -0.12f);
+                    p.Wid = new CreatureMeshCurve(0f, 0.3f, 0.08f, 0.65f, 0.2f, 0.9f, 0.38f, 1f, 0.6f, 0.82f, 0.82f, 0.45f, 1f, 0.3f);
+                    p.Nose = cleaner ? 0.035f : 0.05f;
+                    p.EyeT = 0.11f; p.EyeTheta = 0.28f; p.EyeR = cleaner ? 0.13f : 0.14f;
+                    if (cleaner) { p.D0 = 0.28f; p.D1 = 0.86f; p.DH = 0.14f; p.DRake = 0.25f; p.DCols = 7; p.A0 = 0.55f; p.A1 = 0.86f; p.AH = 0.12f; p.ARake = 0.25f; p.Caudal = Tail.Truncate; p.CLen = 0.17f; p.CSpread = 0.36f; }
+                    else { p.D0 = 0.4f; p.D1 = 0.58f; p.DH = 0.28f; p.DRake = 0.5f; p.DCols = 4; p.A0 = 0.7f; p.A1 = 0.82f; p.AH = 0.18f; p.ARake = 0.6f; p.Caudal = Tail.Forked; p.CLen = 0.2f; p.CSpread = 0.62f; }
+                    p.PecT = 0.24f; p.PecLen = 0.13f; p.PelT = 0.42f; p.PelLen = 0.08f;
+                    break;
+                }
+                case "flying":
+                    p.Lb = 0.8f;
+                    p.Top = new CreatureMeshCurve(0f, 0.04f, 0.07f, 0.2f, 0.16f, 0.36f, 0.3f, 0.46f, 0.45f, 0.48f, 0.62f, 0.4f, 0.8f, 0.24f, 0.92f, 0.15f, 1f, 0.13f);
+                    p.Bot = new CreatureMeshCurve(0f, -0.04f, 0.07f, -0.2f, 0.16f, -0.36f, 0.3f, -0.46f, 0.45f, -0.48f, 0.62f, -0.4f, 0.8f, -0.24f, 0.92f, -0.14f, 1f, -0.12f);
+                    p.Wid = new CreatureMeshCurve(0f, 0.35f, 0.08f, 0.75f, 0.2f, 1f, 0.45f, 0.95f, 0.75f, 0.5f, 1f, 0.3f);
+                    p.Nose = 0.05f; p.EyeT = 0.1f; p.EyeTheta = 0.3f; p.EyeR = 0.17f;
+                    p.D0 = 0.62f; p.D1 = 0.78f; p.DH = 0.18f; p.DRake = 0.5f; p.DCols = 3;
+                    p.A0 = 0.64f; p.A1 = 0.78f; p.AH = 0.16f; p.ARake = 0.5f;
+                    p.Wings = true; p.PecT = 0.22f; p.PecLen = 0.46f; p.PelT = 0.48f; p.PelLen = 0.2f;
+                    p.Caudal = Tail.Forked; p.CLen = 0.24f; p.CSpread = 0.7f; p.LowerLobe = 1.35f;
+                    break;
+                case "tuna":
+                    p.Lb = 0.86f;
+                    p.Top = new CreatureMeshCurve(0f, 0.05f, 0.06f, 0.22f, 0.14f, 0.38f, 0.28f, 0.48f, 0.42f, 0.5f, 0.58f, 0.42f, 0.74f, 0.25f, 0.86f, 0.12f, 0.94f, 0.07f, 1f, 0.06f);
+                    p.Bot = new CreatureMeshCurve(0f, -0.06f, 0.06f, -0.22f, 0.14f, -0.38f, 0.28f, -0.48f, 0.42f, -0.5f, 0.58f, -0.42f, 0.74f, -0.25f, 0.86f, -0.12f, 0.94f, -0.07f, 1f, -0.06f);
+                    p.Wid = new CreatureMeshCurve(0f, 0.4f, 0.08f, 0.75f, 0.2f, 0.95f, 0.4f, 1f, 0.62f, 0.85f, 0.82f, 0.5f, 0.94f, 0.55f, 1f, 0.4f);
+                    p.Nose = 0.05f; p.EyeT = 0.1f; p.EyeTheta = 0.32f; p.EyeR = 0.1f;
+                    p.D0 = 0.3f; p.D1 = 0.42f; p.DH = 0.22f; p.DRake = 0.6f; p.DCols = 3;
+                    p.SecondDorsal = true; p.D2a = 0.5f; p.D2b = 0.6f; p.D2H = 0.5f;
+                    p.A0 = 0.52f; p.A1 = 0.62f; p.AH = 0.48f; p.ARake = 0.7f;
+                    p.PecT = 0.24f; p.PecLen = 0.3f; p.PelT = 0.3f; p.PelLen = 0.08f;
+                    p.Caudal = Tail.Lunate; p.CLen = 0.2f; p.CSpread = 0.9f;
+                    p.Finlets = 6;
+                    break;
+                case "lantern":
+                    p.Lb = 0.8f;
+                    p.Top = new CreatureMeshCurve(0f, 0.05f, 0.06f, 0.24f, 0.15f, 0.4f, 0.28f, 0.46f, 0.45f, 0.44f, 0.62f, 0.36f, 0.8f, 0.22f, 0.92f, 0.14f, 1f, 0.13f);
+                    p.Bot = new CreatureMeshCurve(0f, -0.05f, 0.06f, -0.24f, 0.15f, -0.4f, 0.28f, -0.46f, 0.45f, -0.44f, 0.62f, -0.36f, 0.8f, -0.22f, 0.92f, -0.13f, 1f, -0.12f);
+                    p.Wid = new CreatureMeshCurve(0f, 0.4f, 0.1f, 0.85f, 0.25f, 1f, 0.5f, 0.85f, 0.8f, 0.45f, 1f, 0.3f);
+                    p.Nose = 0.06f; p.EyeT = 0.12f; p.EyeTheta = 0.2f; p.EyeR = 0.22f;
+                    p.D0 = 0.38f; p.D1 = 0.56f; p.DH = 0.22f; p.DCols = 4;
+                    p.A0 = 0.58f; p.A1 = 0.78f; p.AH = 0.16f;
+                    p.Caudal = Tail.Forked; p.CLen = 0.2f; p.CSpread = 0.5f;
+                    p.Photophores = 7;
+                    break;
+                case "mandarin":
+                    p.Lb = 0.78f;
+                    p.Top = new CreatureMeshCurve(0f, 0.08f, 0.07f, 0.28f, 0.17f, 0.42f, 0.32f, 0.46f, 0.5f, 0.4f, 0.68f, 0.3f, 0.84f, 0.2f, 1f, 0.16f);
+                    p.Bot = new CreatureMeshCurve(0f, -0.1f, 0.07f, -0.3f, 0.17f, -0.4f, 0.32f, -0.42f, 0.5f, -0.38f, 0.68f, -0.28f, 0.84f, -0.18f, 1f, -0.15f);
+                    p.Wid = new CreatureMeshCurve(0f, 0.55f, 0.08f, 0.9f, 0.2f, 1f, 0.45f, 0.85f, 0.75f, 0.5f, 1f, 0.35f);
+                    p.Nose = 0.07f; p.EyeT = 0.13f; p.EyeTheta = 0.7f; p.EyeR = 0.13f;
+                    p.D0 = 0.24f; p.D1 = 0.38f; p.DH = 0.55f; p.DSpines = 4; p.DMembrane = 0.55f; p.DRake = 0.3f;
+                    p.SecondDorsal = true; p.D2a = 0.42f; p.D2b = 0.86f; p.D2H = 0.32f;
+                    p.A0 = 0.5f; p.A1 = 0.86f; p.AH = 0.24f; p.ARake = 0.4f;
+                    p.PecT = 0.28f; p.PecLen = 0.24f; p.PecFan = true; p.PecRays = 6;
+                    p.PelT = 0.26f; p.PelLen = 0.18f;
+                    p.Caudal = Tail.Rounded; p.CLen = 0.24f; p.CSpread = 0.5f;
+                    break;
+                case "coelacanth":
+                    p.Lb = 0.78f;
+                    p.Top = new CreatureMeshCurve(0f, 0.05f, 0.06f, 0.2f, 0.15f, 0.36f, 0.3f, 0.46f, 0.45f, 0.48f, 0.62f, 0.42f, 0.78f, 0.3f, 0.9f, 0.2f, 1f, 0.17f);
+                    p.Bot = new CreatureMeshCurve(0f, -0.08f, 0.06f, -0.24f, 0.16f, -0.38f, 0.32f, -0.46f, 0.5f, -0.45f, 0.66f, -0.36f, 0.8f, -0.24f, 0.9f, -0.17f, 1f, -0.15f);
+                    p.Wid = new CreatureMeshCurve(0f, 0.4f, 0.08f, 0.8f, 0.2f, 1f, 0.45f, 0.95f, 0.7f, 0.6f, 0.9f, 0.35f, 1f, 0.3f);
+                    p.Nose = 0.05f; p.EyeT = 0.1f; p.EyeTheta = 0.42f; p.EyeR = 0.09f;
+                    p.Jaw = new CreatureMeshJaw { HingeT = 0.13f, MouthFrac = 0.2f, GapeDeg = 6f, Extend = 0.006f, JawWidth = 1.02f };
+                    p.D0 = 0.3f; p.D1 = 0.4f; p.DH = 0.3f; p.DSpines = 5; p.DMembrane = 0.7f; p.DRake = 0.35f;
+                    p.SecondDorsal = true; p.D2a = 0.62f; p.D2b = 0.72f; p.D2H = 0.32f;
+                    p.A0 = 0.64f; p.A1 = 0.74f; p.AH = 0.3f; p.ARake = 0.4f;
+                    p.PecT = 0.25f; p.PecLen = 0.2f; p.PelT = 0.48f; p.PelLen = 0.16f;
+                    p.Caudal = Tail.Rounded; p.CLen = 0.2f; p.CSpread = 0.55f;
+                    p.Lobed = true;
+                    break;
                 default:
                 {
                     bool banded = s.pattern == PatternType.VerticalBands;
@@ -161,6 +244,80 @@ namespace Sealebrities
             }
 
             BuildFins(ctx, body, chain, sp, H, F, head, tail, ped);
+            BuildExtras(ctx, body, chain, sp, H, F, tail, ped);
+        }
+
+        /// Round-2 details: tuna finlets, lanternfish photophores, coelacanth fin lobes and tail tuft.
+        static void BuildExtras(CreatureMeshContext ctx, CreatureMeshSweep body, CreatureMeshChain chain, Spec sp, float H, float F, int tail, Vector3 ped)
+        {
+            var b = ctx.B;
+            if (sp.Finlets > 0)
+            {
+                for (int k = 0; k < sp.Finlets; k++)
+                {
+                    float t = CreatureMeshMath.Lerp(0.66f, 0.95f, k / (float)(sp.Finlets - 1));
+                    for (int side = 0; side < 2; side++)
+                    {
+                        bool top = side == 0;
+                        float h = 0.022f * F;
+                        CreatureMeshAnatomy.MedianFin(ctx, body, t - 0.012f, t + 0.012f, top, q => h * CreatureMeshMath.Sin(Pi * q), q => h * 0.6f * q, 1, 0, chain.ByAnchor, 0.003f);
+                    }
+                }
+                // keel on the tail stock
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    Vector3 p = body.Point(0.95f, Pi * 0.5f);
+                    if (side < 0) p = CreatureMeshMath.MirrorX(p);
+                    CreatureMeshParts.Ellipsoid(b, CreatureMeshSlot.Skin, p, Vector3.forward, Vector3.up, 0.008f, 0.004f, 0.03f, 3, 5,
+                        new Vector2(0.95f, 0.5f), new Vector2(0.95f, 0.5f), chain.ByAnchor);
+                }
+            }
+            if (sp.Photophores > 0)
+            {
+                // two rows of glowing dots along the belly (the Glow slot pulses in the deep, G.2)
+                for (int row = 0; row < 2; row++)
+                    for (int k = 0; k < sp.Photophores; k++)
+                    {
+                        float t = CreatureMeshMath.Lerp(0.16f, 0.82f, k / (float)(sp.Photophores - 1));
+                        float th = Pi * 0.5f - (row == 0 ? 0.55f : 0.95f);
+                        Vector3 p = body.Point(t, th);
+                        Vector3 nrm = body.Normal(t, th);
+                        float r = 0.012f * (row == 0 ? 1f : 0.8f);
+                        for (int side = -1; side <= 1; side += 2)
+                        {
+                            Vector3 c = side > 0 ? p : CreatureMeshMath.MirrorX(p);
+                            Vector3 nn = side > 0 ? nrm : CreatureMeshMath.MirrorX(nrm);
+                            CreatureMeshParts.Ellipsoid(b, CreatureMeshSlot.Glow, c - nn * (r * 0.3f), nn, Vector3.forward, r, r, r * 0.7f, 3, 5,
+                                Vector2.zero, Vector2.zero, chain.ByAnchor);
+                        }
+                    }
+            }
+            if (sp.Lobed)
+            {
+                // fleshy lobes at the bases of the paired fins, the second dorsal and the anal fin
+                var lobeUv = new Vector2(0.5f, 0.3f);
+                float lr = 0.045f * H / 0.3f;
+                Vector3[] at =
+                {
+                    body.Point(sp.PecT + 0.015f, Pi * 0.5f - 0.3f), body.Point(sp.PelT, 0.4f),
+                };
+                for (int k = 0; k < at.Length; k++)
+                    for (int side = -1; side <= 1; side += 2)
+                    {
+                        Vector3 c = side > 0 ? at[k] : CreatureMeshMath.MirrorX(at[k]);
+                        CreatureMeshParts.Ellipsoid(b, CreatureMeshSlot.Skin, c + new Vector3(side * lr * 0.4f, -lr * 0.2f, -lr * 0.5f), Vector3.back, Vector3.up, lr * 0.7f, lr * 0.7f, lr * 1.3f, 4, 6,
+                            lobeUv, lobeUv, chain.ByAnchor);
+                    }
+                Vector3 d2 = body.Point((sp.D2a + sp.D2b) * 0.5f, Pi), an = body.Point((sp.A0 + sp.A1) * 0.5f, 0f);
+                CreatureMeshParts.Ellipsoid(b, CreatureMeshSlot.Skin, d2, Vector3.back, Vector3.up, lr * 0.55f, lr * 0.9f, lr * 1.4f, 4, 6, lobeUv, lobeUv, chain.ByAnchor);
+                CreatureMeshParts.Ellipsoid(b, CreatureMeshSlot.Skin, an, Vector3.back, Vector3.up, lr * 0.55f, lr * 0.9f, lr * 1.4f, 4, 6, lobeUv, lobeUv, chain.ByAnchor);
+                // the famous tail tuft: a small extra fin at the tip of the tail
+                float L = sp.CLen * (0.85f + 0.15f * F);
+                Vector3 tuftBase = ped + Vector3.back * (L * 0.82f);
+                CreatureMeshAnatomy.CaudalFin(ctx, tuftBase, 0.012f, q => L * 0.35f * (1f - 0.4f * (2f * q - 1f) * (2f * q - 1f)), q => (2f * q - 1f) * L * 0.18f, tail, 3, 0.005f);
+                CreatureMeshParts.Ellipsoid(b, CreatureMeshSlot.Skin, ped + Vector3.back * (L * 0.45f), Vector3.back, Vector3.up, 0.012f, 0.02f, L * 0.45f, 4, 6,
+                    lobeUv, lobeUv, CreatureMeshSkin.Fixed(tail));
+            }
         }
 
         static void BuildFins(CreatureMeshContext ctx, CreatureMeshSweep body, CreatureMeshChain chain, Spec sp, float H, float F, int head, int tail, Vector3 ped)
@@ -218,7 +375,21 @@ namespace Sealebrities
                 int pl = ctx.Bone("PectoralL", CreatureMeshContext.DominantBone(chain, mid), midL);
                 ctx.Pectorals.Add(pr);
                 ctx.Pectorals.Add(pl);
-                if (sp.PecFan)
+                if (sp.Wings)
+                {
+                    // flying fish: long glider wings spread sideways (slightly swept back), several rays
+                    float len = sp.PecLen * F * 0.8f;
+                    CreatureMeshAnatomy.PairedFin(ctx,
+                        q => Vector3.Lerp(pa, pbp, q) - n * 0.003f,
+                        q =>
+                        {
+                            Vector3 d = CreatureMeshMath.Norm(new Vector3(1f, 0.1f, -0.15f - 0.6f * q));
+                            float l = len * (0.45f + 0.55f * CreatureMeshMath.Sin(Pi * (0.18f + 0.62f * q))) * CreatureMeshAnatomy.Spikes(q, 5, 0.9f, 6f);
+                            return Vector3.Lerp(pa, pbp, q) + d * l;
+                        },
+                        pr, pl, 8, 1, 2, 0.005f, (q, r) => Vector3.up * (0.01f * r * r));
+                }
+                else if (sp.PecFan)
                 {
                     // lionfish: huge striped fan with free ray tips, spread from down-back to back
                     float len = sp.PecLen * F;
@@ -265,7 +436,8 @@ namespace Sealebrities
                         cols = 4;
                         break;
                     case Tail.Forked:
-                        len = q => L * (0.42f + 0.58f * CreatureMeshMath.Pow(CreatureMeshMath.Abs(2f * q - 1f), 0.9f));
+                        float lower = sp.LowerLobe;
+                        len = q => L * (0.42f + 0.58f * CreatureMeshMath.Pow(CreatureMeshMath.Abs(2f * q - 1f), 0.9f)) * (q < 0.5f ? CreatureMeshMath.Lerp(1f, lower, CreatureMeshMath.Abs(2f * q - 1f)) : 1f);
                         lift = q => (2f * q - 1f) * spread * (0.5f + 0.5f * CreatureMeshMath.Abs(2f * q - 1f));
                         cols = 4;
                         break;

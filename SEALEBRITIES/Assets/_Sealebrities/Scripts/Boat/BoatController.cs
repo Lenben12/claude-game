@@ -74,6 +74,24 @@ namespace Sealebrities
         bool lastRemoteValid;
         float remoteThrottle, remoteSteer, remoteControlsTime = -10f;
 
+        // round 2: fog bank (K.8), compass, compressor (E.4), winch davit (K.3), flag (L.7 / K.7)
+        /// K.8: without Toni's map the fog bank pushes the boat outward (m/s it reaches against the bow).
+        public const float FogDriftSpeed = 2f;
+        bool fogMap, inFogBank, fogToastShown;
+        float compassAngle, compassSpinVel, compressorRpm, flagPoll, flagWave;
+        AudioSource chugSrc;
+        bool compressorOwned, winchOwned;
+        int flagShown = -1, pennantShown = -1;
+        GameObject flagGo;
+
+        /// Model anchor points (winch pulley, foredeck crate spot …) for the Boat module's helpers.
+        public BoatParts Parts => parts;
+        /// The crew owns the boat compressor (E.4): the tank refills on deck (Player module asks BoatAirStation).
+        public bool HasCompressor => compressorOwned;
+        public bool HasWinch => winchOwned;
+        /// The boat is inside the Fog Isle's fog bank right now (K.8).
+        public bool InFogBank => inFogBank;
+
         // ------------------------------------------------------------------ IBoat
         public Transform Root => transform;
         public bool PlayerDriving => driving;
@@ -98,15 +116,53 @@ namespace Sealebrities
                 if (p == null || p.IsInWater) return false;
                 Transform r = p.Root;
                 if (r == null) return false;
-                Vector3 wp = r.position;
-                Vector3 lp = transform.InverseTransformPoint(wp);
-                if (lp.y < BoatHull.DeckY - 0.6f || lp.y > BoatHull.DeckY + 3.2f) return false;
-                if (lp.z < -4.3f || lp.z > 3.75f) return false;
-                float hw = lp.z < -3.74f ? 1.15f : BoatHull.DeckHalfAtZ(lp.z) + 0.15f;
-                if (Mathf.Abs(lp.x) > hw) return false;
-                return wp.y > Waves.HeightAt(wp.x, wp.z) - 0.2f;
+                return IsOnDeck(r.position);
             }
         }
+
+        /// A diver's feet position is on the deck (between the rails, bow to stern, above the water).
+        public bool IsOnDeck(Vector3 wp)
+        {
+            Vector3 lp = transform.InverseTransformPoint(wp);
+            if (lp.y < BoatHull.DeckY - 0.6f || lp.y > BoatHull.DeckY + 3.2f) return false;
+            if (lp.z < -4.3f || lp.z > 3.75f) return false;
+            float hw = lp.z < -3.74f ? 1.15f : BoatHull.DeckHalfAtZ(lp.z) + 0.15f;
+            if (Mathf.Abs(lp.x) > hw) return false;
+            return wp.y > Waves.HeightAt(wp.x, wp.z) - 0.2f;
+        }
+
+        // ------------------------------------------------------------------ mooring ("Zur Hütte", see BoatHome)
+        /// The boat's spot at the dock (where every game starts and every slept morning puts it).
+        public Vector3 MooringPosition => WorldInfo.BoatSpawn != Vector3.zero ? WorldInfo.BoatSpawn : spawnPos;
+        public float MooringYaw => WorldInfo.BoatSpawn != Vector3.zero ? WorldInfo.BoatSpawnYaw : spawnYaw;
+
+        /// Lying at (or right next to) its mooring already: nothing to bring back.
+        public bool AtMooring
+        {
+            get
+            {
+                Vector3 d = transform.position - MooringPosition;
+                d.y = 0f;
+                return d.sqrMagnitude < 8f * 8f;
+            }
+        }
+
+        /// Back to the mooring at the dock: stopped, anchored at the dock, no tow pending, nobody at the wheel.
+        /// Only where this machine simulates the boat (offline, or the co-op host while nobody drives) – BoatHome decides.
+        public bool ReturnToMooring()
+        {
+            if (remote || NetFlags.BoatRemote) return false;
+            if (driving) ExitHelm();
+            towing = false;
+            towToken++;
+            beachedTimer = 0f;
+            anchored = true;
+            PlaceAt(MooringPosition, MooringYaw);   // zeroes the velocities and re-drops the anchor at the dock
+            GameEvents.RaiseBoatReturnedHome();
+            return true;
+        }
+
+        int towToken;
 
         public void PlaceAt(Vector3 position, float yawDegrees)
         {
@@ -185,10 +241,19 @@ namespace Sealebrities
             rope.receiveShadows = false;
             rope.enabled = false;
 
+            if (parts.compressor != null)
+            {
+                chugSrc = BoatSynth.LoopSource(parts.compressor.gameObject, BoatSynth.Chug, 2f, 25f, AudioRolloffMode.Linear);
+                chugSrc.dopplerLevel = 0f;
+            }
+            gameObject.AddComponent<BoatDisembark>().Init(this);
+
             GameEvents.GameStarted += OnGameStarted;
             GameEvents.ReturnedToMenu += OnReturnedToMenu;
             GameEvents.GearChanged += OnGearChanged;
             GameEvents.DayStarted += OnDayStarted;
+            GameEvents.StoryFlagSet += OnStoryFlag;
+            Net.StateSynced += OnStateSynced;
             BoatSurface.BoatBody = rb;
 
             PlaceAt(spawnPos, spawnYaw);
@@ -201,6 +266,9 @@ namespace Sealebrities
             GameEvents.ReturnedToMenu -= OnReturnedToMenu;
             GameEvents.GearChanged -= OnGearChanged;
             GameEvents.DayStarted -= OnDayStarted;
+            GameEvents.StoryFlagSet -= OnStoryFlag;
+            Net.StateSynced -= OnStateSynced;
+            BoatTelemetry.Valid = false;
             ClearDrivePrompt();
             if (rope != null) Destroy(rope.gameObject);
             if (parts != null && parts.anchor != null && parts.anchor.parent != transform) Destroy(parts.anchor.gameObject);
@@ -256,7 +324,30 @@ namespace Sealebrities
 
         void OnGearChanged()
         {
-            boatSpeedMult = GameManager.I != null ? Mathf.Max(0.5f, GameManager.I.Gear.boatSpeed) : 1f;
+            var gm = GameManager.I;
+            GearStats g = gm != null && gm.State != null ? gm.Gear : default;
+            boatSpeedMult = gm != null ? Mathf.Max(0.5f, g.boatSpeed) : 1f;
+            // crew equipment shows on the boat as soon as somebody opened its crate
+            compressorOwned = gm != null && g.hasBoatCompressor;
+            winchOwned = gm != null && g.hasBoatWinch;
+            if (parts != null)
+            {
+                if (parts.compressor != null && parts.compressor.gameObject.activeSelf != compressorOwned) parts.compressor.gameObject.SetActive(compressorOwned);
+                if (parts.davit != null && parts.davit.gameObject.activeSelf != winchOwned) parts.davit.gameObject.SetActive(winchOwned);
+            }
+            fogMap = StoryFlags.Has(StoryKeys.FogMap);
+        }
+
+        void OnStoryFlag(string flag)
+        {
+            if (flag == StoryKeys.FogMap) fogMap = true;
+        }
+
+        void OnStateSynced()
+        {
+            // a guest learns about bought equipment / Toni's map from the host's snapshot
+            OnGearChanged();
+            flagPoll = 0f;
         }
 
         // ------------------------------------------------------------------ helm / ladder / anchor (called by interactables)
@@ -302,15 +393,16 @@ namespace Sealebrities
             // the controls are shown as the centre prompt while seated – no duplicate toast on the first sit
             if (anchored)
             {
-                GameEvents.RaiseToast(AnchorHint());
+                AnchorHint();
                 anchorHintShown = true;
             }
         }
 
-        string AnchorHint()
+        /// L.10: "Anker ist unten" + key chip.
+        void AnchorHint()
         {
             string q = GameInput.BindingLabel(GameAction.Anchor);
-            return Loc.Tr($"Der Anker ist unten – {q} zum Lichten", $"The anchor is down – {q} to raise it");
+            GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Der Anker ist unten", "The anchor is down"), Loc.Tr(q + " – lichten", q + " – raise"));
         }
 
         public void ExitHelm()
@@ -342,6 +434,8 @@ namespace Sealebrities
             // no instant refill: the tank is refilled by resting on the deck (Player module, feedback #17)
             if (GameManager.I != null && GameManager.I.InGame) Footage.BankDive();
             BoatSynth.PlayAt(BoatSynth.Splash, pos, 0.35f, 1.2f, 30f);
+            // K.3: heavy salvage carried up the ladder is delivered on deck
+            SalvageDelivery.DeliverCarried(pos);
         }
 
         /// Walking on land/dock next to the boat (the dock edge is ~6 m from the moored hull: too far to jump).
@@ -428,12 +522,16 @@ namespace Sealebrities
         /// Co-op: pose from the simulating machine (alternative to setting Root directly). Keeps the kinematic body in sync.
         public void ApplyRemotePose(Vector3 position, Quaternion rotation)
         {
+            Vector3 prev = transform.position;
             if (rb != null && rb.isKinematic)
             {
                 rb.position = position;
                 rb.rotation = rotation;
             }
             transform.SetPositionAndRotation(position, rotation);
+            // the owner teleported the boat (home to the dock via "Zur Hütte", towed free, slept morning): an anchor
+            // lying on the old seabed spot is re-dropped under the roller at once (the stream only heals it beyond 60 m)
+            if (anchored && anchorState == AnchorState.Down && (position - prev).sqrMagnitude > 6f * 6f) DropAnchor(true);
         }
 
         /// Follows NetFlags.BoatRemote. The Net module (NetBoatSync) normally switches the rigidbody itself (it also
@@ -489,7 +587,7 @@ namespace Sealebrities
             {
                 anchorState = AnchorState.Lowering;
                 float depth = Mathf.Max(0f, Waves.SeaLevel - ground);
-                GameEvents.RaiseToast(Loc.Tr($"Anker geworfen ({Loc.Meters(depth)} tief)", $"Anchor dropped ({Loc.Meters(depth)} deep)"));
+                GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Anker geworfen", "Anchor dropped"), Loc.Meters(depth));
                 BoatSynth.PlayAt(BoatSynth.Splash, roller, 0.6f, 0.8f, 50f);
             }
         }
@@ -500,7 +598,7 @@ namespace Sealebrities
             anchorState = AnchorState.Raising;
             raiseStowValid = false;
             anchorHintShown = false;
-            GameEvents.RaiseToast(Loc.Tr("Anker gelichtet", "Anchor raised"));
+            GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Anker gelichtet", "Anchor raised"));
         }
 
         // ------------------------------------------------------------------ input + animation
@@ -524,7 +622,7 @@ namespace Sealebrities
                     if (Time.time - lastSpeedHint > 2f)
                     {
                         lastSpeedHint = Time.time;
-                        GameEvents.RaiseToast(Loc.Tr("Zu schnell zum Aufstehen – erst Gas weg!", "Too fast to get up – ease off the throttle first!"));
+                        GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Zu schnell zum Aufstehen", "Too fast to get up"), Loc.Tr("Gas weg", "Ease off"));
                     }
                 }
                 else
@@ -546,7 +644,7 @@ namespace Sealebrities
             if (anchored && canControl && Mathf.Abs(tThr) > 0.1f && !anchorHintShown)
             {
                 anchorHintShown = true;
-                GameEvents.RaiseToast(AnchorHint());
+                AnchorHint();
             }
             if (anchored) tThr *= 0.15f;
             if (remote && Time.time - remoteControlsTime < 0.75f)
@@ -608,6 +706,101 @@ namespace Sealebrities
                 parts.propeller.localRotation = Quaternion.Euler(0f, 0f, propAngle);
                 parts.radar.localRotation = Quaternion.Euler(0f, radarAngle, 0f);
             }
+            AnimateCompass(dt);
+            AnimateCompressor(dt);
+            AnimateFlag(dt);
+        }
+
+        /// The dashboard compass points north – and spins wildly in the fog bank without Toni's map (K.8). With the map
+        /// a gold course marker points the way to the Fog Isle (the buoy lane start first, then the island).
+        void AnimateCompass(float dt)
+        {
+            if (parts.compassNeedle == null) return;
+            float yaw = transform.eulerAngles.y;
+            bool lostInFog = inFogBank && !fogMap;
+            if (lostInFog)
+            {
+                compassSpinVel = Mathf.MoveTowards(compassSpinVel, 520f + Mathf.Sin(Time.time * 1.7f) * 260f, 900f * dt);
+                compassAngle += compassSpinVel * dt;
+            }
+            else
+            {
+                compassSpinVel = 0f;
+                float north = -yaw;
+                float k = 1f - Mathf.Exp(-5f * dt);
+                compassAngle = Mathf.LerpAngle(compassAngle, north + Mathf.Sin(Time.time * 2.1f) * 4f, k);
+            }
+            parts.compassNeedle.localRotation = Quaternion.Euler(0f, compassAngle, 0f);
+
+            Vector3 target = Vector3.zero;
+            bool course = fogMap && FogRoute.HasCourse(transform.position, out target);
+            if (parts.compassCourse != null)
+            {
+                if (parts.compassCourse.gameObject.activeSelf != course) parts.compassCourse.gameObject.SetActive(course);
+                if (course)
+                {
+                    Vector3 d = target - transform.position;
+                    float bearing = Mathf.Atan2(d.x, d.z) * Mathf.Rad2Deg;
+                    parts.compassCourse.localRotation = Quaternion.Euler(0f, bearing - yaw, 0f);
+                }
+            }
+        }
+
+        /// E.4: the compressor chugs and its flywheel spins while the local player's tank refills on deck.
+        void AnimateCompressor(float dt)
+        {
+            if (!compressorOwned || parts.compressor == null)
+            {
+                if (chugSrc != null && chugSrc.isPlaying) chugSrc.Stop();
+                return;
+            }
+            bool running = BoatAirStation.LocalRefillingHere(this);
+            compressorRpm = Mathf.MoveTowards(compressorRpm, running ? 1f : 0f, dt * (running ? 1.5f : 0.6f));
+            if (parts.compressorWheel != null && compressorRpm > 0.001f) parts.compressorWheel.Rotate(0f, 0f, 900f * compressorRpm * dt, Space.Self);
+            // a little shake on its straps
+            float shake = compressorRpm * 0.006f;
+            parts.compressor.localRotation = Quaternion.Euler(Mathf.Sin(Time.time * 57f) * shake * 60f, 0f, Mathf.Sin(Time.time * 43f) * shake * 60f);
+            if (chugSrc != null)
+            {
+                chugSrc.volume = compressorRpm * 0.45f * Settings.SfxVolume;
+                chugSrc.pitch = 0.8f + compressorRpm * 0.25f;
+                if (chugSrc.volume > 0.001f) { if (!chugSrc.isPlaying) chugSrc.Play(); }
+                else if (chugSrc.isPlaying) chugSrc.Stop();
+            }
+        }
+
+        /// CosmeticsDatabase ids of the boat flags (Mira's rewards M2 / M3).
+        static readonly string FlagWavesId = CosmeticsDatabase.Id(CosmeticsDatabase.BoatFlag, 1), FlagAltriffId = CosmeticsDatabase.Id(CosmeticsDatabase.BoatFlag, 2);
+
+        /// L.7 boat flag reward (highest unlocked "boatflag:n") + K.7 a sponsor pennant while a deal runs.
+        void AnimateFlag(float dt)
+        {
+            if (parts.flag == null) return;
+            flagPoll -= dt;
+            if (flagPoll <= 0f)
+            {
+                flagPoll = 2f;
+                int want = Cosmetics.IsUnlocked(FlagAltriffId) ? 2 : Cosmetics.IsUnlocked(FlagWavesId) ? 1 : 0;
+                int pennant = -1;
+                var act = Deals.Active;
+                if (act != null && act.Count > 0 && act[0] != null && !string.IsNullOrEmpty(act[0].sponsorId))
+                    pennant = (int)(HeliService.HashString(act[0].sponsorId) % 6u);
+                if (want != flagShown || pennant != pennantShown)
+                {
+                    flagShown = want;
+                    pennantShown = pennant;
+                    if (flagGo != null) Destroy(flagGo);
+                    flagGo = BoatFlags.Build(parts.flag, want, pennant);
+                    bool show = flagGo != null;
+                    var pole = parts.flag.parent;
+                    if (pole != null && pole.gameObject.activeSelf != show) pole.gameObject.SetActive(show);
+                }
+            }
+            if (flagGo == null) return;
+            // flutter: faster with speed / wind
+            float speed = Mathf.Abs(forwardSpeed);
+            flagWave += dt * (2.5f + speed * 0.6f);
+            parts.flag.localRotation = Quaternion.Euler(0f, 180f + Mathf.Sin(flagWave) * (12f - Mathf.Min(8f, speed)), Mathf.Sin(flagWave * 1.7f) * 4f);
         }
 
         void UpdateFx(float dt)
@@ -658,11 +851,40 @@ namespace Sealebrities
         {
             float dt = Time.deltaTime;
             if (remote && dt > 0f) TrackRemoteMotion(dt);
+            PublishTelemetry();
+            UpdateFogState();
             // wake emitter sits on the water behind the stern
             Vector3 w = transform.TransformPoint(parts.sternWakeLocal);
             w.y = Waves.HeightAt(w.x, w.z) + 0.05f;
             wakeEmitter.position = w;
             UpdateAnchor(dt);
+        }
+
+        /// BoatTelemetry (J.3): read by fauna (dolphins at the bow wave from 6 m/s), livestream (signal), wrist computer.
+        void PublishTelemetry()
+        {
+            Vector3 v = remote ? remoteVel : (rb != null && !rb.isKinematic ? rb.linearVelocity : Vector3.zero);
+            BoatTelemetry.Valid = GameManager.I != null && GameManager.I.InGame;
+            BoatTelemetry.Position = transform.position;
+            BoatTelemetry.Speed = new Vector2(v.x, v.z).magnitude;
+            BoatTelemetry.Anchored = anchored;
+        }
+
+        /// K.8 fog bank: inside FogBankRadius around the Fog Isle. Without Toni's map the boat drifts out (FixedUpdate)
+        /// and the compass spins; a short notification when somebody on board enters it.
+        void UpdateFogState()
+        {
+            Vector3 d = transform.position - WorldLayout.FogIsland;
+            d.y = 0f;
+            bool inside = d.sqrMagnitude < WorldLayout.FogBankRadius * WorldLayout.FogBankRadius;
+            if (inside == inFogBank) return;
+            inFogBank = inside;
+            if (!inside) { fogToastShown = false; return; }
+            if (!fogMap && !fogToastShown && (driving || PlayerAboard))
+            {
+                fogToastShown = true;
+                GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Dichter Nebel – kein Durchkommen", "Thick fog – no way through"), Loc.Tr("Karte fehlt", "No map"));
+            }
         }
 
         /// Remote-driven boat: estimate the velocity from the pose stream (effects + a smooth hand-over to local physics).
@@ -823,6 +1045,25 @@ namespace Sealebrities
                 rb.AddTorque(Vector3.up * (-rb.angularVelocity.y * 1.5f + Mathf.Sin(Time.time * 0.11f) * 0.015f), ForceMode.Acceleration);
             }
 
+            // K.8 fog bank without Toni's map: a current pushes the boat back out (no headway toward the island, at
+            // least 2 m/s outward) and the bow is shoved around – you simply cannot find the way through
+            if (!fogMap && sub01 > 0f)
+            {
+                Vector3 fromIsle = pos - WorldLayout.FogIsland;
+                fromIsle.y = 0f;
+                float r = fromIsle.magnitude;
+                if (r < WorldLayout.FogBankRadius && r > 1f)
+                {
+                    Vector3 outward = fromIsle / r;
+                    float vr = Vector3.Dot(v, outward);
+                    float deep = Mathf.Clamp01((WorldLayout.FogBankRadius - r) / 60f);   // full strength 60 m into the bank
+                    float acc = Mathf.Clamp((FogDriftSpeed - vr) * (0.8f + 2.2f * deep), 0f, 4f + 6f * deep);
+                    if (anchored) anchorPoint = Vector3.MoveTowards(anchorPoint, pos + outward * 3f, FogDriftSpeed * dt);   // the anchor drags
+                    rb.AddForce(outward * (acc * sub01), ForceMode.Acceleration);
+                    rb.AddTorque(Vector3.up * (Mathf.Sin(Time.time * 0.9f + r * 0.05f) * 0.35f * deep * sub01), ForceMode.Acceleration);
+                }
+            }
+
             // stuck on a beach while driving: tow back to deep water after a while
             if (driving && sub <= 1) beachedTimer += dt; else beachedTimer = 0f;
             if (beachedTimer > 6f && !towing) StartTow();
@@ -840,14 +1081,16 @@ namespace Sealebrities
         {
             towing = true;
             beachedTimer = 0f;
+            int token = ++towToken;
             Fader.FadeThrough(() =>
             {
+                if (token != towToken || this == null || rb == null) return;   // brought home in the meantime
                 towing = false;
                 Vector3 from = rb.position;
                 if (FindDeepWater(from, out Vector3 p, out float yaw))
                 {
                     PlaceAt(p, yaw);
-                    GameEvents.RaiseToast(Loc.Tr("Festgefahren! Ein Fischer hat dich freigeschleppt.", "Stuck! A fisherman towed you free."));
+                    GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Festgefahren – freigeschleppt", "Stuck – towed free"), Loc.Tr("Fischer", "Fisherman"));
                 }
             }, 1.5f);
         }

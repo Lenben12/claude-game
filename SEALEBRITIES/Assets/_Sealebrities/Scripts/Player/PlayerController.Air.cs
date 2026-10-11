@@ -18,6 +18,8 @@ namespace Sealebrities
         float airCapacity = Progression.BreathHoldSeconds, airLeft = Progression.BreathHoldSeconds;
         float outOfWaterTimer, notUnderTimer, refillFrom;
         bool tooDeepWarned, lowAirWarned, emptyWarned, rescueActive, sprintingUnderwater, refilling;
+        /// The faint fade is running (IsFainting = fainting || unconscious).
+        bool fainting;
 
         // fade safety net: if the UI's fader never calls back, run the action ourselves
         System.Action pendingFade;
@@ -46,6 +48,7 @@ namespace Sealebrities
                 notUnderTimer = 0f;
                 float rate = Progression.AirRate(depth);
                 if (sprintingUnderwater) rate *= 1.4f;
+                if (IsTowing) rate *= NetRescue.TowerAirMultiplier;   // F.1: towing a friend costs air
                 if (depth > gear.maxDepth)
                 {
                     rate *= 3f;
@@ -60,7 +63,7 @@ namespace Sealebrities
                 if (!lowAirWarned && airLeft > 0f && Air01 < 0.25f)
                 {
                     lowAirWarned = true;
-                    GameEvents.RaiseToast(Loc.Tr("Luft knapp – auftauchen!", "Low air – surface!"));
+                    GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Luft knapp", "Low air"), Loc.Tr("Auftauchen!", "Surface!"));
                 }
             }
             else
@@ -74,24 +77,38 @@ namespace Sealebrities
                 if (gear.hasTank && isInWater && airLeft <= 0.05f && !emptyWarned)
                 {
                     emptyWarned = true;
-                    GameEvents.RaiseToast(Loc.Tr("Flasche leer – an Land oder aufs Boot!", "Tank empty – back to land or the boat!"));
+                    GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Flasche leer", "Tank empty"), Loc.Tr("Hütte · Steg · Boot", "Hut · Dock · Boat"));
                 }
             }
 
-            // resting on land / on the boat deck refills the tank gradually
+            // E.4: a tank refills only at an air station – hut zone, dock, the boat with the compressor, the landmark
+            // islands' old stations; a snorkeler (no tank) simply breathes again anywhere
             if (!isInWater)
             {
                 outOfWaterTimer += dt;
                 if (outOfWaterTimer >= RefillDelay && airLeft < airCapacity)
                 {
-                    if (!refilling) { refilling = true; refillFrom = Air01; }
-                    airLeft = Mathf.Min(airCapacity, airLeft + airCapacity / RefillSeconds * dt);
-                    if (airLeft >= airCapacity)
+                    float secondsToFull = RefillSeconds;
+                    if (gear.hasTank && !InRefillZone(out secondsToFull))
                     {
                         refilling = false;
-                        lowAirWarned = false;
-                        emptyWarned = false;
-                        if (gear.hasTank && refillFrom < 0.7f) GameEvents.RaiseToast(Loc.Tr("Flasche voll", "Tank full"));
+                        if (!noStationWarned && Air01 < 0.95f)
+                        {
+                            noStationWarned = true;
+                            GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Keine Luftstation", "No air station"), Loc.Tr("Hütte · Steg · Boot", "Hut · Dock · Boat"));
+                        }
+                    }
+                    else
+                    {
+                        if (!refilling) { refilling = true; refillFrom = Air01; }
+                        airLeft = Mathf.Min(airCapacity, airLeft + airCapacity / Mathf.Max(0.5f, secondsToFull) * dt);
+                        if (airLeft >= airCapacity)
+                        {
+                            refilling = false;
+                            lowAirWarned = false;
+                            emptyWarned = false;
+                            if (gear.hasTank && refillFrom < 0.7f) GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Flasche voll", "Tank full"));
+                        }
                     }
                 }
                 else refilling = false;
@@ -100,6 +117,7 @@ namespace Sealebrities
             {
                 outOfWaterTimer = 0f;
                 refilling = false;
+                noStationWarned = false;   // one warning per dive
             }
 
             // out of air below the surface: faint (or the rescue drone on the relaxed difficulty)
@@ -109,14 +127,55 @@ namespace Sealebrities
                 {
                     if (Air01 <= 0.08f) StartDroneRescue();
                 }
-                else if (airLeft <= 0f) StartFaint();
+                else if (airLeft <= 0f)
+                {
+                    // F.1: in a session a friend can tow you up before the faint
+                    if (CanGoUnconscious()) StartUnconscious();
+                    else StartFaint();
+                }
             }
         }
+
+        bool noStationWarned;
+
+        /// E.4 refill zones for a tank: hut zone (≤ 18 m from the hut), the dock (deck or ≤ 4 m from the dock line),
+        /// the boat deck with the crew's compressor (6 s to full), next to an old air station (≤ 3 m, 4 s).
+        bool InRefillZone(out float secondsToFull)
+        {
+            secondsToFull = RefillSeconds;
+            Vector3 p = transform.position;
+            Vector3 hut = WorldLayout.Hut;
+            float hx = p.x - hut.x, hz = p.z - hut.z;
+            if (hx * hx + hz * hz <= 18f * 18f) return true;
+            Vector2 a = new Vector2(WorldLayout.DockStart.x, WorldLayout.DockStart.z), b = new Vector2(WorldLayout.DockEnd.x, WorldLayout.DockEnd.z);
+            Vector2 q = new Vector2(p.x, p.z), d = b - a;
+            float t = Mathf.Clamp01(Vector2.Dot(q - a, d) / Mathf.Max(1e-4f, d.sqrMagnitude));
+            if ((q - (a + d * t)).sqrMagnitude <= 4f * 4f) return true;
+            if (BoatAirStation.LocalCanRefill)
+            {
+                secondsToFull = BoatAirStation.SecondsToFull;
+                return true;
+            }
+            var stations = PropInfo.AirStations;
+            for (int i = 0; i < stations.Count; i++)
+            {
+                if ((stations[i] - p).sqrMagnitude <= 3f * 3f)
+                {
+                    secondsToFull = 4f;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// The local tank can refill where the player stands right now (E.4) – for the HUD / tests.
+        public bool AtAirStation => !gear.hasTank || InRefillZone(out _);
 
         void OnBumped(float airLost)
         {
             if (!initialized || menuMode || IsFainting || rescueActive) return;
-            airLeft = Mathf.Max(0f, airLeft - Mathf.Max(0f, airLost));
+            // E.2 shark gummies: predator bumps cost less air
+            airLeft = Mathf.Max(0f, airLeft - Mathf.Max(0f, airLost) * Buffs.Multiplier(BuffType.BumpResist));
             trauma = Mathf.Min(1f, trauma + 0.65f);
             if (isInWater && !seated) vel += Random.onUnitSphere * 1.4f;
         }
@@ -124,8 +183,8 @@ namespace Sealebrities
         // ------------------------------------------------------------------ faint / rescue
         void StartFaint()
         {
-            if (IsFainting) return;
-            IsFainting = true;
+            if (fainting) return;
+            fainting = true;
             sprintingUnderwater = false;
             Hands.StowAll();
             RunFade(() =>
@@ -140,12 +199,12 @@ namespace Sealebrities
                         pitch = 0f;
                         TeleportTo(p, y);
                         RefillAir();
-                        GameEvents.RaiseToast(Loc.Tr("Ohnmächtig! Das Boot hat dich rausgezogen.", "You blacked out! The boat pulled you out."));
+                        GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Ohnmächtig!", "Blacked out!"), Loc.Tr("Zurück am Boot", "Back at the boat"));
                     }
                 }
                 finally
                 {
-                    IsFainting = false;
+                    fainting = false;
                     faintAnim = 0f;
                     trauma = 0f;
                 }
@@ -159,7 +218,7 @@ namespace Sealebrities
             rescueActive = true;
             sprintingUnderwater = false;
             Hands.StowAll();
-            GameEvents.RaiseToast(Loc.Tr("Luft fast leer – die Rettungsdrohne holt dich!", "Almost out of air – the rescue drone is coming!"));
+            GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Rettungsdrohne kommt", "Rescue drone coming"), Loc.Tr("Luft fast leer", "Air almost out"));
             RunFade(() =>
             {
                 try
@@ -171,7 +230,7 @@ namespace Sealebrities
                         pitch = 0f;
                         TeleportTo(p, y);
                         RefillAir();
-                        GameEvents.RaiseToast(Loc.Tr("Die Drohne hat dich aufs Boot gebracht.", "The drone carried you back to the boat."));
+                        GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Zurück an Bord", "Back aboard"), Loc.Tr("Drohne", "Drone"));
                     }
                 }
                 finally

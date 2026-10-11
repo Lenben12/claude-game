@@ -13,8 +13,8 @@ namespace Sealebrities
     public static class FXVisibility
     {
         /// Distance in meters at which an object keeps ~10 % of its own colour (the fog limit) for the current
-        /// camera. Under water ≈ 19 m in the bright shallows, ≈ 13 m at 25 m, ≈ 8 m in the deep, ~1.5x less at
-        /// night. Above water ≈ 1400 m by day.
+        /// camera. Under water ≈ 19 m in the bright shallows, ≈ 13 m at 25 m, ≈ 10 m in the deep, ~1.5x less at
+        /// night. Above water ≈ 1400 m by day (≈ 90 m inside the Fog Isle's fog bank).
         public static float Meters = 1400f;
         /// Distance in meters at which an object still keeps half of its own colour (clearly recognisable).
         public static float ClearMeters = 430f;
@@ -136,23 +136,68 @@ namespace Sealebrities
         static void ResetStatics() { Handler = null; }
     }
 
-    /// State of the procedural music (ukulele loop in the main menu / launch intro). Read-only for other modules,
-    /// e.g. the intro can cut its shots on the beat: FXMusic.Playing && FXMusic.BeatPhase < 0.1f.
+    /// State of the procedural background music (K.6: menu, island day / evening / night, under water, deep). Read-only
+    /// for other modules, e.g. the intro can cut its shots on the beat: FXMusic.Playing && FXMusic.BeatPhase < 0.1f.
     public static class FXMusic
     {
-        public const float Bpm = 104f;
-        public static float BeatSeconds => 60f / Bpm;
-        /// True while the music loop is audible.
+        /// Tempo of the track that plays (the menu track: 104 BPM).
+        public static float Bpm { get; internal set; } = 104f;
+        public static float BeatSeconds => 60f / Mathf.Max(1f, Bpm);
+        /// True while a music track is audible.
         public static bool Playing;
         /// Seconds into the current loop.
         public static float Time;
-        /// Beat index inside the loop (4 beats per bar, 8 bars).
+        /// The track that plays (None while resting / silent).
+        public static FXMusicTrack Current { get; internal set; }
+        /// Beat index inside the loop (4 beats per bar, 32 bars).
         public static int Beat => (int)(Time / BeatSeconds);
         /// 0..1 position inside the current beat.
         public static float BeatPhase => Time / BeatSeconds - Beat;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { Playing = false; Time = 0f; }
+        static void ResetStatics() { Playing = false; Time = 0f; Bpm = 104f; Current = FXMusicTrack.None; }
+    }
+
+    /// K.8 fog bank around the Fog Isle, published by the FX module every frame (read-only for other modules).
+    public static class FXFogBank
+    {
+        /// 0..1 how deep the camera is inside the fog (0 outside the ring; thinned in the buoy lane once the map is known).
+        public static float Thick01 { get; internal set; }
+        /// The camera is inside the fog ring (WorldLayout.FogBankRadius around WorldLayout.FogIsland).
+        public static bool CameraInside { get; internal set; }
+        /// Toni's map is known (StoryKeys.FogMap): the fog is only a light haze and the lane is clear.
+        public static bool Map { get; internal set; }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { Thick01 = 0f; CameraInside = false; Map = false; }
+    }
+
+    /// K.3 currents: whoever builds a current volume (props: Riffkanal, kelp surge, the wreck hull, the blue-drop drift,
+    /// the Fog Isle channel) registers it once as a lane – the FX module then shows streaming particles along it while
+    /// the camera is near and under water. The push itself is the player module's (CurrentZone force).
+    public static class FXCurrents
+    {
+        public struct Lane
+        {
+            public Vector3 start, end;
+            public float radius, speed;
+        }
+
+        internal static readonly System.Collections.Generic.List<Lane> Lanes = new System.Collections.Generic.List<Lane>();
+
+        /// A current flowing from start to end (world positions, centre line), radius in metres, speed in m/s.
+        public static void Add(Vector3 start, Vector3 end, float radius, float speed)
+        {
+            if ((end - start).sqrMagnitude < 1f || radius <= 0.1f || float.IsNaN(speed)) return;
+            if (Lanes.Count >= 32) return;
+            Lanes.Add(new Lane { start = start, end = end, radius = Mathf.Min(radius, 40f), speed = Mathf.Clamp(speed, 0.05f, 3f) });
+        }
+
+        /// Removes every registered lane (world rebuilt).
+        public static void Clear() { Lanes.Clear(); }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { Lanes.Clear(); }
     }
 
     /// World-space particle effects other modules can spawn (fishing float splash, co-op divers, boat …).

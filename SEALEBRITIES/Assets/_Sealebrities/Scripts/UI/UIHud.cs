@@ -30,6 +30,13 @@ namespace Sealebrities
 
         readonly VisualElement root;
         public readonly UIHotbar Hotbar;
+        public readonly UIFoodPanel Food;
+        float hotbarAlpha = 1f;
+        readonly UIRankBadge rankBadge;
+        readonly VisualElement camHint;
+        readonly Label camAimKey, camAimLabel, camSelfieKey, camSelfieLabel;
+        bool camHintShown;
+        int camHintVersion = -1;
 
         // bottom-right
         readonly Label moneyLabel, followerLabel;
@@ -46,7 +53,7 @@ namespace Sealebrities
         readonly UIRing airRing;
         readonly Label airSeconds, depthLabel, maxLabel, siteLabel, clipsSaved, clipsUnsaved, clipsSep;
         readonly UIHudGlyph tooDeepIcon;
-        float bumpFlash, clipPulse, siteTimer;
+        float bumpFlash, clipPulse, siteTimer, siteFlash;
         DiveSite lastSite;
         bool lastSiteValid;
 
@@ -70,10 +77,14 @@ namespace Sealebrities
             UIKit.FillParent(root);
             layer.Add(root);
 
-            // ---------------- top-left: dive block
+            // ---------------- top-left: dive block + food buffs (E)
+            var leftCol = UIKit.Col();
+            UIKit.Abs(leftCol, Margin, Margin, null, null);
+            root.Add(leftCol);
             diveBlock = UIKit.Col();
-            UIKit.Abs(diveBlock, Margin, Margin, null, null);
-            root.Add(diveBlock);
+            leftCol.Add(diveBlock);
+            Food = new UIFoodPanel();
+            leftCol.Add(Food.Root);
             var diveTop = UIKit.Row();
             diveTop.style.alignItems = Align.Center;
             diveBlock.Add(diveTop);
@@ -174,6 +185,10 @@ namespace Sealebrities
             fRow.Add(person);
             followerLabel = UIKit.HudText("0", 34f);
             fRow.Add(followerLabel);
+            // Q50 channel rank badge next to the follower line
+            rankBadge = new UIRankBadge(0, 34f);
+            rankBadge.style.marginLeft = 10f;
+            fRow.Add(rankBadge);
             br.Add(fRow);
 
             // ---------------- bottom-centre: hotbar
@@ -181,6 +196,23 @@ namespace Sealebrities
             UIKit.Abs(hotbarWrap, 0f, null, 0f, 28f - 26f);
             hotbarWrap.style.alignItems = Align.Center;
             root.Add(hotbarWrap);
+            // camera in hand: the two key hints of the K.2 / K.4 flow („[RMB] Foto fürs Sealog · [H] Selfie“)
+            camHint = UIKit.Row();
+            camHint.style.marginBottom = 8f;
+            camAimKey = UIKit.HudKeyCap("", 28f);
+            camHint.Add(camAimKey);
+            var camAimText = UIKit.HudText(" ", 18f);
+            camAimText.style.marginLeft = 6f;
+            camAimText.style.marginRight = 16f;
+            camAimLabel = camAimText;
+            camHint.Add(camAimText);
+            camSelfieKey = UIKit.HudKeyCap("", 28f);
+            camHint.Add(camSelfieKey);
+            camSelfieLabel = UIKit.HudText(" ", 18f);
+            camSelfieLabel.style.marginLeft = 6f;
+            camHint.Add(camSelfieLabel);
+            camHint.style.display = DisplayStyle.None;
+            hotbarWrap.Add(camHint);
             Hotbar = new UIHotbar();
             hotbarWrap.Add(Hotbar.Root);
 
@@ -221,10 +253,84 @@ namespace Sealebrities
             waypoint.style.display = DisplayStyle.None;
             root.Add(waypoint);
 
+            // ---------------- F.1 unconscious: red vignette + countdown (a friend can tow you up)
+            koOverlay = new VisualElement { name = "sb-ko" };
+            UIKit.FillParent(koOverlay);
+            koOverlay.style.backgroundImage = new StyleBackground(VignetteTexture());
+            koOverlay.style.unityBackgroundImageTintColor = new Color(0.78f, 0.08f, 0.12f, 1f);
+            koOverlay.style.alignItems = Align.Center;
+            koOverlay.style.display = DisplayStyle.None;
+            var koCol = UIKit.Col();
+            koCol.style.position = Position.Absolute;
+            koCol.style.top = Length.Percent(34f);
+            koCol.style.left = 0f;
+            koCol.style.right = 0f;
+            koCol.style.alignItems = Align.Center;
+            koLabel = UIKit.HudText("", 40f);
+            koCol.Add(koLabel);
+            koHint = UIKit.HudText("", 22f, new Color(1f, 0.86f, 0.86f, 1f));
+            koHint.style.marginTop = 6f;
+            koCol.Add(koHint);
+            koOverlay.Add(koCol);
+            root.Insert(0, koOverlay);
+
             UIKit.IgnorePicking(root);
             root.style.display = DisplayStyle.None;
             UIKit.Show(diveBlock, false);
             RefreshTexts();
+        }
+
+        // F.1 unconscious overlay
+        readonly VisualElement koOverlay;
+        readonly Label koLabel, koHint;
+        int koSec = -1;
+        bool koShown;
+        Language koLang;
+        static Texture2D vignette;
+
+        static Texture2D VignetteTexture()
+        {
+            if (vignette != null) return vignette;
+            const int n = 64;
+            var px = new Color32[n * n];
+            for (int y = 0; y < n; y++)
+                for (int x = 0; x < n; x++)
+                {
+                    float dx = (x + 0.5f) / n * 2f - 1f, dy = (y + 0.5f) / n * 2f - 1f;
+                    float d = Mathf.Sqrt(dx * dx + dy * dy) / 1.4142f;
+                    float a = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((d - 0.32f) / 0.68f));
+                    px[y * n + x] = new Color32(255, 255, 255, (byte)Mathf.RoundToInt(a * 235f));
+                }
+            vignette = new Texture2D(n, n, TextureFormat.RGBA32, false) { name = "SB_KoVignette", wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear };
+            vignette.SetPixels32(px);
+            vignette.Apply(false, true);
+            return vignette;
+        }
+
+        /// F.1: while the local diver is unconscious (co-op, Normal/Hard) – red pulsing vignette + seconds left.
+        void TickUnconscious()
+        {
+            var pc = Refs.Player as PlayerController;
+            float left = pc != null ? pc.UnconsciousSecondsLeft : 0f;
+            bool on = left > 0f && pc.IsUnconscious;
+            if (on != koShown)
+            {
+                koShown = on;
+                UIKit.Show(koOverlay, on);
+                koSec = -1;
+            }
+            if (!on) return;
+            int sec = Mathf.CeilToInt(left);
+            if (sec != koSec || koLang != Loc.Current)
+            {
+                koSec = sec;
+                koLang = Loc.Current;
+                koLabel.text = Loc.Tr("Bewusstlos · ", "Passed out · ") + sec + " s";
+                koHint.text = Loc.Tr("Ein Freund kann dich hochziehen", "A friend can tow you up");
+            }
+            // heartbeat pulse
+            float beat = Mathf.Pow(Mathf.Abs(Mathf.Sin(Time.unscaledTime * 2.6f)), 6f);
+            koOverlay.style.opacity = 0.62f + 0.38f * beat;
         }
 
         // ------------------------------------------------------------------ events
@@ -264,6 +370,13 @@ namespace Sealebrities
                 SpawnPopup(followerAnchor, UIKit.Signed(v - followers), v > followers ? UIPalette.Turquoise : UIPalette.Coral);
             followers = v;
             followerLabel.text = Loc.Number(v);
+            rankBadge.SetRank(Progression.RankIndex(v));
+        }
+
+        /// Q50: refresh the rank badge (GameEvents.RankChanged).
+        public void OnRankChanged()
+        {
+            if (followers >= 0) rankBadge.SetRank(Progression.RankIndex(followers));
         }
 
         /// Kept for older callers: quests now live in the phone app "Aufgaben" (notification on change).
@@ -338,7 +451,7 @@ namespace Sealebrities
         public void Tick(float dt, bool aiming)
         {
             var gm = GameManager.I;
-            bool show = gm != null && gm.InGame && !UIState.MainMenuOpen && !UIState.LoadingOpen;
+            bool show = gm != null && gm.InGame && !UIState.MainMenuOpen && !UIState.LoadingOpen && !UIState.CharacterOpen;
             if (show != visible)
             {
                 visible = show;
@@ -348,6 +461,7 @@ namespace Sealebrities
             if (!show) return;
 
             TickPopups(dt);
+            TickUnconscious();
             TickClock(gm);
             bool mic = Net.IsOnline && NetVoice.LocalTransmitting;
             if (mic != micShown) { micShown = mic; UIKit.Show(micGlyph, mic); }
@@ -355,12 +469,36 @@ namespace Sealebrities
             TickPrompt(aiming);
             TickWaypoint();
 
-            // no hotbar under the viewfinder or at the wheel (selection is ignored while seated anyway)
-            var pl = Refs.Player;
-            bool seated = pl != null && !(pl is Object po && po == null) && pl.IsSeated;
-            bool hb = !UIState.InventoryOpen && !UIState.PhoneOpen && !aiming && !seated;
-            if (hb != hotbarShown) { hotbarShown = hb; UIKit.Show(hotbarWrap, hb); }
-            if (hb) Hotbar.Tick();
+            Food.Tick();
+
+            // Q39: the hotbar is always visible (empty hands, land, water, viewfinder, at the wheel) – hidden only while
+            // the phone or a menu is open; idle after 4 s → 60 % alpha, full again on any change
+            bool hb = !UIState.InventoryOpen && !UIState.PhoneOpen && !UIState.PauseOpen && !UIState.SelfieOpen && !SelfieState.Active;
+            if (hb != hotbarShown) { hotbarShown = hb; UIKit.Show(hotbarWrap, hb); if (hb) Hotbar.MarkDirty(); }
+            bool cam = hb && !aiming && Hands.Active(Hand.Right) == HoldItem.Camera;
+            if (cam != camHintShown) { camHintShown = cam; UIKit.Show(camHint, cam); }
+            if (cam)
+            {
+                int v = GameInput.BindingsVersion * 31 + (int)Loc.Current;
+                if (v != camHintVersion)
+                {
+                    camHintVersion = v;
+                    camAimKey.text = GameInput.BindingLabel(GameAction.Aim);
+                    camAimLabel.text = Loc.Tr("Foto fürs Sealog", "Photo for the Sealog");
+                    camSelfieKey.text = GameInput.BindingLabel(GameAction.Selfie);
+                    camSelfieLabel.text = "Selfie";
+                }
+            }
+            if (hb)
+            {
+                Hotbar.Tick();
+                float target = Hotbar.IdleSeconds > 4f || aiming ? 0.6f : 1f;
+                if (Mathf.Abs(target - hotbarAlpha) > 0.001f)
+                {
+                    hotbarAlpha = Mathf.MoveTowards(hotbarAlpha, target, dt * (target > hotbarAlpha ? 6f : 1.5f));
+                    hotbarWrap.style.opacity = hotbarAlpha;
+                }
+            }
 
             bool dot = !aiming && !UIState.BlocksGameplay;
             if (dot != dotShown) { dotShown = dot; UIKit.Show(centerDot, dot); }
@@ -402,7 +540,9 @@ namespace Sealebrities
             UIKit.Show(airBox, divePart);
             UIKit.Show(depthRow, inWater);
             UIKit.Show(maxLabel, inWater);
-            UIKit.Show(siteRow, inWater || aboard);
+            // Q40: depth lives on the wrist computer – the site name shows for 4 s when a site is entered (always on the boat)
+            if (siteFlash > 0f) siteFlash -= dt;
+            UIKit.Show(siteRow, aboard || (inWater && siteFlash > 0f));
 
             if (dc != diveClips || bc != bankedClips)
             {
@@ -473,6 +613,7 @@ namespace Sealebrities
                     lastSiteValid = true;
                     lastSite = site;
                     siteLabel.text = site != null ? site.Name : Loc.Tr("Offenes Meer", "Open sea");
+                    siteFlash = 4f;
                 }
             }
         }

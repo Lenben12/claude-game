@@ -20,9 +20,14 @@ namespace Sealebrities
 
     /// The only object in Main.unity. Boot order:
     ///   Awake  – GameManager (Settings.Load + Settings.Apply: frame cap, vSync, volumes, language, key bindings),
-    ///            co-op module (NetBoot: transport pump, session, lobby, command line -host/-join) and net-sync
-    ///            (avatars, boat, creatures, voice), debug cheats, world root, loading camera.
-    ///   Boot() – behind the loading screen: UI, World, Player, Boat, Fauna, Filming, FX, creature prewarm.
+    ///            Steam (SteamService.Init: SteamAPI.InitEx without RestartAppIfNecessary, relay network warm-up,
+    ///            callbacks pumped every frame; fails quietly when Steam is not running – co-op per IP still works),
+    ///            co-op module (NetBoot: transport pump, session, lobby, command line -host/-join, Steam join requests)
+    ///            and net-sync (avatars, boat, creatures, voice), world root, loading camera.
+    ///            (The test cheats are gone – player decision Q100. Test harnesses only run with their own flags:
+    ///            -autoplaytest, -autoplaytest-mp, -autoshot, -steamselftest, -voiceloopback.)
+    ///   Boot() – behind the loading screen: UI, World, Player, Boat, Fauna, Filming, FX, Npc (story cast),
+    ///            Livestream (KRILL.tv + sponsor deals), creature prewarm.
     ///   Then   – UIModule.ShowMainMenu: on the first menu after launch the UI runs the launch intro
     ///            (UIIntro → PlayerIntro.Play, skippable, captions) and opens the menu when it ends; the Player module
     ///            shows the bean-diver crew on the dock behind the menu. PlayerIntro skips itself for -host, -join,
@@ -60,11 +65,14 @@ namespace Sealebrities
                 Step("Settings.Apply", Settings.Apply);
             }
 
+            // Steam before co-op: the lobby screen offers "Über Steam" only when Steam is up, and Steam join requests
+            // (+connect_lobby, accepted invites) are registered before the menu opens. Skipped for automated test runs.
+            Step("SteamService.Init", SteamService.Init);
+
             // Co-op early, so the lobby, the command line (-host / -join) and the replication handlers exist before
             // any module installs. Both are idempotent (they also self-install after the scene load).
             Step("NetBoot.EnsureInstalled", NetBoot.EnsureInstalled);
             Step("NetWorldSync.Install", () => NetWorldSync.Install());
-            Step("DebugCheats.Install", DebugCheats.Install);
 
             var world = new GameObject("World");
             root = world.transform;
@@ -135,6 +143,13 @@ namespace Sealebrities
             Progress(0.92f, "Wasser wird nass gemacht …", "Making the water wet …");
             yield return null;
             Step("FXModule.Install", () => FXModule.Install(root));
+
+            // 8. Story NPCs (Horst, Wanda, Gus' radio, the village, visitors) and the livestream / sponsor services.
+            //    Both also install themselves; installing here makes the cast exist before the menu opens.
+            Progress(0.92f, "Horst sucht seine Sonnenbrille …", "Horst is looking for his sunglasses …");
+            yield return null;
+            Step("NpcModule.Install", () => NpcModule.Install(root));
+            Step("LivestreamModule.Install", () => LivestreamModule.Install(root));
 
             // Warm-up: build every creature model + journal icon now instead of mid-dive or on the first Sealog open.
             yield return PrewarmCreatures(0.92f, 0.98f);
@@ -296,8 +311,9 @@ namespace Sealebrities
             if (WorldInfo.LighthousePosition == Vector3.zero) WorldInfo.LighthousePosition = WorldLayout.Lighthouse;
             if (WorldInfo.MenuCameraPosition == Vector3.zero)
             {
-                WorldInfo.MenuCameraPosition = new Vector3(300f, 55f, -230f);
-                WorldInfo.MenuCameraLookAt = new Vector3(60f, 10f, 20f);
+                // L.5: the TV3 fallback (300, 55, −230) → (60, 10, 20) scaled to the 0.62 island (heights × 0.62 as well)
+                WorldInfo.MenuCameraPosition = new Vector3(186f, 34f, -143f);
+                WorldInfo.MenuCameraLookAt = new Vector3(37f, 6f, 12f);
             }
         }
     }

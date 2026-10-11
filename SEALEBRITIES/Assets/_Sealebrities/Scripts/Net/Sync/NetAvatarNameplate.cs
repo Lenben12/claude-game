@@ -106,9 +106,25 @@ namespace Sealebrities
             return t;
         }
 
+        string plainName = "", status;
+
         public void SetName(string name)
         {
-            string s = string.IsNullOrEmpty(name) ? "" : name.ToLowerInvariant();
+            plainName = string.IsNullOrEmpty(name) ? "" : name.ToLowerInvariant();
+            Refresh();
+        }
+
+        /// Short state after the name, e.g. "anna · bewusstlos" (null = none). Cheap when unchanged (every frame).
+        public void SetStatus(string s)
+        {
+            if (string.Equals(s, status, System.StringComparison.Ordinal)) return;
+            status = s;
+            Refresh();
+        }
+
+        void Refresh()
+        {
+            string s = string.IsNullOrEmpty(status) ? plainName : plainName + " · " + status.ToLowerInvariant();
             main.text = s;
             for (int i = 0; i < outline.Length; i++) outline[i].text = s;
             textWidth = MeasureWidth(s);

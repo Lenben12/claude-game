@@ -62,6 +62,8 @@ namespace Sealebrities
 
     /// Custom horizontal slider (theme independent): track, fill and a round knob, dragged with pointer capture.
     /// onChanged fires while dragging, onReleased once when the pointer is let go (save settings there).
+    /// Only finite values inside [min, max] ever leave the slider: a pointer outside the 3D phone screen maps to NaN
+    /// (UIPhone's panel mapping), and a captured drag over it once wrote NaN into the volume ("-2147483648 %").
     public class UISlider : VisualElement
     {
         readonly VisualElement track, fill, knob;
@@ -72,7 +74,10 @@ namespace Sealebrities
 
         public UISlider(float min, float max, float value, Action<float> onChanged, Color accent, Action<float> onReleased = null, float height = 32f)
         {
+            if (!IsFinite(min)) min = 0f;
+            if (!IsFinite(max) || max <= min) max = min + 1f;
             this.min = min; this.max = max; this.onChanged = onChanged; this.onReleased = onReleased;
+            this.value = min;
             style.height = height;
             style.flexGrow = 1;
             style.justifyContent = Justify.Center;
@@ -107,15 +112,31 @@ namespace Sealebrities
             RegisterCallback<PointerMoveEvent>(OnMove);
             RegisterCallback<PointerUpEvent>(OnUp);
             RegisterCallback<PointerCaptureOutEvent>(OnCaptureOut);
+            // the settings page rebuilds its content while a drag may still hold the pointer: let go on detach so a
+            // detached slider (layout NaN) never keeps receiving moves
+            RegisterCallback<DetachFromPanelEvent>(OnDetach);
             SetValue(value, false);
+        }
+
+        void OnDetach(DetachFromPanelEvent e)
+        {
+            for (int id = 0; id < PointerId.maxPointers; id++)
+                if (this.HasPointerCapture(id)) this.ReleasePointer(id);
         }
 
         public float Value => value;
 
+        public float Min => min;
+        public float Max => max;
+
+        static bool IsFinite(float v) => !float.IsNaN(v) && !float.IsInfinity(v);
+
         public void SetValue(float v, bool notify)
         {
+            // NaN / ±∞ never reach the setting: keep the last valid value
+            if (!IsFinite(v)) v = IsFinite(value) ? value : min;
             value = Mathf.Clamp(v, min, max);
-            float f = Mathf.InverseLerp(min, max, value);
+            float f = Mathf.Clamp01(Mathf.InverseLerp(min, max, value));
             fill.style.width = Length.Percent(f * 100f);
             knob.style.left = Length.Percent(f * 100f);
             if (notify) onChanged?.Invoke(value);
@@ -124,7 +145,8 @@ namespace Sealebrities
         void FromPointer(Vector3 local)
         {
             float w = layout.width;
-            if (w <= 1f) return;
+            // not laid out (NaN) or the pointer is off the panel (NaN, e.g. beside the 3D phone): ignore the event
+            if (!(w > 1f) || !IsFinite(w) || !IsFinite(local.x) || panel == null) return;
             SetValue(Mathf.Lerp(min, max, Mathf.Clamp01(local.x / w)), true);
         }
 
