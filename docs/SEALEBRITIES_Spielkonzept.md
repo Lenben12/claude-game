@@ -40,7 +40,7 @@ Co-op-Tauch-Vlog-Spiel (1–4 Spieler) für Steam, gebaut in Unity. Vorbild ist 
 | Luft leer (Standard) | Ohnmacht, Boot zieht dich hoch, Aufnahmen des Tauchgangs weg, Rettungsgebühr |
 | Anreise | Selbst Boot fahren |
 | Insel | Mittelgroß mit Dschungelweg, Leuchtturm, Felsen, versteckter Bucht |
-| Spieltag | ca. 25 Minuten (Tag + Nacht) |
+| Spieltag | ca. 40 Minuten (Tag + Nacht; Fischmarkt ~1 echte Minute, Lieferung 2–3 Spielstunden ≈ 3–5 echte Minuten) |
 | Tiere | Gemischt: kleine fliehen, manche neugierig, Raubtiere rempeln (Luftverlust, Kamera wackelt) |
 | Tiermodelle | Erst im Code erzeugt, später durch bessere Modelle ersetzt |
 | Filmen | Kamera in der Hand: rechte Maustaste Sucher, linke Maustaste Aufnahme, Mausrad Zoom |
@@ -59,7 +59,7 @@ Co-op-Tauch-Vlog-Spiel (1–4 Spieler) für Steam, gebaut in Unity. Vorbild ist 
 | Preis | Noch offen |
 | Veröffentlichung | Erst Early Access (vorher Steam-Seite und Demo) |
 
-## 3. Spielablauf (ein Spieltag, ca. 25 Min.)
+## 3. Spielablauf (ein Spieltag, ca. 40 Min.)
 1. **Morgen auf der Insel:** Handy checken (Buchungen, Wetter, Sponsoren), Heli-Pakete am Landeplatz abholen.
 2. **Bootsfahrt** zum Tauchplatz (Physik-Boot aus Schrott, später ausbaubar).
 3. **Tauchgang (8–12 Min.):** Luft im Blick, Tiere finden und filmen, Gäste beschützen (ab 1.000 Followern).
@@ -315,6 +315,32 @@ Chopper Shop (Heli-Lieferung) · FinTube (Videos) · KRILL.tv (Livestream) · Fo
 | 38 | UI-Farben | Hell & sonnig (Weiß, Sand, Türkis, Koralle) |
 | 39 | Namen im Co-op | Ja, mit Lautsprecher-Symbol |
 | 40 | Ladebildschirm | Unterwasser-Animation mit Fakten und Tipps |
+
+## 16. Spieltest-Feedback Testversion 2 + Nachtschicht (11.10.2026)
+Feedback zur Testversion 2 (alle 22 Punkte gehen in die Nachtschicht):
+- Wirtschaft: Fische bringen weniger Geld, Fische werden in der Handy-App „Fischmarkt“ verkauft, Preise höher, langsamere Wirtschaft.
+- Angel: Wurf-Animation.
+- Hotbar wie How to Fish: rechte Hand und linke Hand mit je 3 Slots, die Angel ist zweihändig, Inventar mit Drag & Drop.
+- Kamera: nur noch Hotbar-Item, scannt nur noch, was richtig im Bild ist.
+- Luft: erste Flasche ca. 90 s, Auffüllen nur an Land oder auf dem Boot.
+- Lieferung am selben Tag (nach 2–3 Spielstunden).
+- Boot startet nur am Steuer.
+- Fehler: Steg-Leiter, Kollisionen von Dach und Reifenschaukel.
+- Wasser: hell, aber begrenzte Sicht.
+- Neu: Galerie.
+- Nur 3 Schwierigkeiten: Entspannt, Normal, Schwer.
+- Weniger Text, mehr Symbole.
+- Start-Trailer, aufgeräumtes Menü.
+- Einstellungen: Lautstärken, FPS, Grafikstufen, Tastenbelegung, Voice-Modus.
+
+Zusätzlicher Auftrag für die Nacht:
+- **Komplett spielbar** von Tag 1 bis 1 Mio. Follower und Finale.
+- **Multiplayer schon testbar:**
+  - Koop für 1–4 Spieler mit gemeinsamem Kanal.
+  - Host/Join per IP, LAN-Liste, Sprachchat in der Nähe, unter Wasser gedämpft.
+  - Steam-Anbindung folgt später.
+- **Grafik genau wie How to Fish:** verbindlicher Stil-Leitfaden in `docs/ArtBible_HowToFish.md`.
+- **Morgen:** Testbericht (`docs/Testbericht_Nacht_1.md`), Testversion 3 und **100 Fragen**.
 
 ## 12. Offene Punkte
 Werden in den nächsten Frage-Runden geklärt.

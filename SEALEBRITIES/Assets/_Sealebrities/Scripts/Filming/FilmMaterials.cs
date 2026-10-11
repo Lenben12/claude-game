@@ -84,6 +84,14 @@ namespace Sealebrities
         public static Material Surface(Color c, float smoothness, float metallic = 0f, float tiling = 1f)
             => ViewModel(LowPoly.Mat(FlatColor(c, metallic)));
 
+        /// Flat matte material with EXACTLY this color (art-bible colors such as the glove #343849 or the cuff), on the
+        /// view-model queue. No palette mapping.
+        public static Material Flat(Color c)
+        {
+            c.a = 1f;
+            return ViewModel(LowPoly.Mat(c));
+        }
+
         /// Like Surface but rendered from both sides (open shells such as a matte box).
         public static Material SurfaceTwoSided(Color c, float smoothness, float metallic = 0f)
         {
@@ -101,18 +109,23 @@ namespace Sealebrities
             return m;
         }
 
-        /// Maps a semi-realistic camera color to the flat toy palette: dark neutrals are lifted a bit so the facets
-        /// still read, colors get a touch brighter and more saturated, metals become plain light grey.
+        /// Maps a semi-realistic camera color to the flat toy palette (art bible §1.7): darks lean violet
+        /// (#1E1B2B … #3A3650, never pure black), metals become the cool palette grey (#8E949C family), greys get a
+        /// faint violet tint, colors get a touch brighter and more saturated. Nothing is lighter than #F4EFE6.
         public static Color FlatColor(Color c, float metallic)
         {
             Color.RGBToHSV(c, out float h, out float s, out float v);
+            Color r;
             if (metallic > 0.5f && s < 0.25f && v > 0.35f)
-                return Color.HSVToRGB(h, s * 0.5f, Mathf.Clamp(v * 0.85f + 0.1f, 0.6f, 0.82f));   // chrome / alu
-            if (v < 0.3f && s < 0.3f)
-                return Color.HSVToRGB(h, Mathf.Min(s, 0.25f), Mathf.Lerp(0.15f, 0.3f, v / 0.3f));    // rubber, neoprene, black plastic
-            if (s < 0.15f)
-                return Color.HSVToRGB(h, s, Mathf.Max(v, 0.3f));                                       // greys / whites
-            return Color.HSVToRGB(h, Mathf.Min(1f, s * 1.08f), Mathf.Lerp(Mathf.Max(v, 0.5f), 1f, 0.2f)); // colors
+                r = Color.HSVToRGB(0.6f, 0.08f, Mathf.Clamp(v * 0.8f + 0.1f, 0.58f, 0.78f));              // chrome / alu
+            else if (v < 0.3f && s < 0.3f)
+                r = Color.HSVToRGB(0.7f, 0.24f, Mathf.Lerp(0.17f, 0.31f, v / 0.3f));                        // rubber, neoprene, black plastic
+            else if (s < 0.15f)
+                r = Color.HSVToRGB(Mathf.Lerp(0.7f, h, s / 0.15f), Mathf.Max(s, 0.05f), Mathf.Clamp(v, 0.3f, 0.93f)); // greys / whites
+            else
+                r = Color.HSVToRGB(h, Mathf.Min(1f, s * 1.08f), Mathf.Min(0.95f, Mathf.Lerp(Mathf.Max(v, 0.5f), 1f, 0.2f))); // colors
+            r.a = 1f;
+            return r;
         }
 
         /// Transparent two-sided glass/plastic (bags, housings, dome ports).

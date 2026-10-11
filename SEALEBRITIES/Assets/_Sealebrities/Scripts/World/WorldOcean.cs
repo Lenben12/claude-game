@@ -4,11 +4,13 @@ using UnityEngine.Rendering;
 
 namespace Sealebrities
 {
-    /// Low-poly ocean. A faceted near grid (3 m triangles, unwelded, flat normals from Waves.HeightAt) follows the camera,
-    /// snapped to 12 m so every vertex always samples the same world position; a flat 12 m far ring and plain outer rings reach
-    /// the horizon. Each triangle is colored from the world-anchored WorldWaterMap (shallow turquoise lagoons .. deep blue sea),
-    /// re-sorted into four submeshes only when the grid snaps. Waves fade out toward the near grid edge so it joins the flat
-    /// far ring seamlessly. No colliders: boats and players sample Waves directly.
+    /// Low-poly ocean ("How to Fish": steel-blue faceted sea, turquoise only in the last metre at the shore).
+    /// A faceted near grid (3 m triangles, unwelded, flat normals from Waves.HeightAt) follows the camera, snapped to 12 m
+    /// so every vertex always samples the same world position; a flat 12 m far ring and plain outer rings reach the horizon.
+    /// Colour and opacity come from ONE small ramp texture: every vertex gets uv.x = WorldWaterMap ramp coordinate of the
+    /// seafloor depth at its own position (smooth depth colour, no classes, no squares) and every near triangle a
+    /// world-anchored uv.y row (±8 % facet brightness). UVs are refreshed only when the grid snaps. No colliders: boats and
+    /// players sample Waves directly.
     [DefaultExecutionOrder(100)]
     public class WorldOcean : MonoBehaviour
     {
@@ -28,21 +30,24 @@ namespace Sealebrities
         public const float FarHalf = FarCells * FarCell * 0.5f;
         public const float FarLevel = -0.05f;
         public const int RenderQueue = 2980;                // before regular transparents (particles above water stay on top)
+        public const int RampWidth = 64;
 
         const float FadeStart = 64f, FadeEnd = 112f;        // wave amplitude fade (meters from grid center)
+        const float FacetFadeStart = 78f, FacetFadeEnd = 112f;
         const float InnerRadius = 58f;                      // displaced every frame; the rest every second frame
-        const int Classes = WorldWaterMap.Classes;
+        const float Smoothness = 0.55f;
 
-        static readonly float[] TopAlpha = { 0.8f, 0.86f, 0.9f, 0.92f };
-        static readonly Color UnderColor = new Color(0.50f, 0.86f, 0.88f, 0.62f);
-        static readonly Color UnderGlow = new Color(0.16f, 0.46f, 0.52f);
+        // seen from below: a bright but saturated turquoise ceiling (the old #9FE4EC α 0.70 read milky, #A9E2EC on screen)
+        // (second pass: #6CCFDD α 0.58 still measured #93DBDF – darker, more saturated)
+        static readonly Color UnderColor = new Color(0.298f, 0.737f, 0.816f, 0.52f);   // #4CBCD0
+        static readonly Color UnderGlow = new Color(0.078f, 0.416f, 0.471f);           // #146A78
 
         WorldWaterMap water;
         Mesh nearMesh, farMesh, outerMesh;
         Transform nearT, farT, outerT;
         MeshRenderer nearR, farR, outerR;
-        Material underMat, nearDeepMat;
-        Material[] topMats, nearTop, farTop, nearUnder, outerTop, outerUnder;
+        Material topMat, underMat;
+        Texture2D ramp;
 
         // near grid: welded heights + unwelded, flat-shaded render vertices
         float[] gridY, fade;
@@ -51,17 +56,15 @@ namespace Sealebrities
         int dynTris;            // triangles with at least one displaced corner
         float[] triLX, triLZ;   // local x/z per render vertex
         OceanVertex[] vbuf;     // interleaved position + normal, uploaded in place (dynamic range only)
+        Vector2[] nearUv;       // stream 1, refreshed on snap
+        float[] gridU;          // ramp coordinate per near grid vertex (scratch)
         int[] triCellI, triCellJ, triHalf;
-        ushort[] nearIdx;
-        byte[] nearCls;
+        float[] triFacetKeep;   // 1 = full facet brightness variation .. 0 = average (grid edge)
 
-        // far ring
-        int[] farTriCell;       // packed cell index (j * FarCells + i) per triangle
-        int[] farTriVerts;      // 3 vertex indices per triangle
-        ushort[] farIdx;
-        byte[] farCls;
+        // far ring (welded)
+        Vector3[] farLocal;
+        Vector2[] farUv;
 
-        readonly int[] counts = new int[Classes], starts = new int[Classes], fills = new int[Classes];
         float snapX = float.NaN, snapZ = float.NaN;
         int frame;
         bool under;
@@ -69,6 +72,8 @@ namespace Sealebrities
         Camera cam;
 
         public bool CameraUnderwater => under;
+        /// The colour ramp (64 x 4: depth along x, facet brightness rows along y) – also usable by other modules.
+        public Texture2D Ramp => ramp;
 
         public static WorldOcean Create(Transform parent, WorldWaterMap waterMap)
         {
@@ -85,24 +90,17 @@ namespace Sealebrities
         {
             idEmission = Shader.PropertyToID("_EmissionColor");
 
-            // shallow turquoise .. deep blue (water map classes 0..3). The lagoon class is pushed a little toward
-            // Water so the shallows read as saturated turquoise over the pale sand instead of a milky mint.
-            var topColors = new[] { Color.Lerp(LowPoly.WaterShallow, LowPoly.Water, 0.3f), LowPoly.Water, Color.Lerp(LowPoly.Water, LowPoly.WaterDeep, 0.55f), LowPoly.WaterDeep };
-            topMats = new Material[Classes];
-            for (int k = 0; k < Classes; k++)
-            {
-                var c = topColors[k];
-                c.a = TopAlpha[k];
-                var m = new Material(MaterialLibrary.Lit) { name = "SB_OceanTop" + k };
-                m.SetColor("_BaseColor", c);
-                // moderate gloss: soft sun glints, but the grazing-angle sky reflection no longer bleaches the
-                // distant sea to white (the toy look keeps the water clearly blue up to the horizon haze)
-                m.SetFloat("_Smoothness", 0.34f);
-                m.SetFloat("_Metallic", 0f);
-                MaterialLibrary.MakeTransparent(m, true);
-                m.renderQueue = RenderQueue;
-                topMats[k] = m;
-            }
+            ramp = BuildRamp();
+            topMat = new Material(MaterialLibrary.Lit) { name = "SB_OceanTop" };
+            topMat.SetTexture("_BaseMap", ramp);
+            topMat.SetColor("_BaseColor", Color.white);
+            topMat.SetFloat("_Smoothness", Smoothness);
+            topMat.SetFloat("_Metallic", 0f);
+            topMat.SetFloat("_EnvironmentReflections", 1f);
+            topMat.SetFloat("_SpecularHighlights", 1f);
+            MaterialLibrary.MakeTransparent(topMat, true);
+            topMat.renderQueue = RenderQueue;
+
             underMat = new Material(MaterialLibrary.Lit) { name = "SB_OceanUnder" };
             underMat.SetColor("_BaseColor", UnderColor);
             underMat.SetFloat("_Smoothness", 0.3f);
@@ -113,30 +111,47 @@ namespace Sealebrities
             MaterialLibrary.MakeTransparent(underMat, true);
             underMat.renderQueue = RenderQueue;
 
-            // the camera-following near grid shows deep water a little lighter than the far ring: the open sea
-            // darkens gently toward the distance (the step sits at ~115 m where the waves are already flat)
-            nearDeepMat = new Material(topMats[Classes - 1]) { name = "SB_OceanTopNearDeep" };
-            var nd = Color.Lerp(LowPoly.Water, LowPoly.WaterDeep, 0.78f);
-            nd.a = TopAlpha[Classes - 1];
-            nearDeepMat.SetColor("_BaseColor", nd);
-            nearDeepMat.renderQueue = RenderQueue;
-            nearTop = (Material[])topMats.Clone();
-            nearTop[Classes - 1] = nearDeepMat;
-            farTop = (Material[])topMats.Clone();
-            nearUnder = new[] { underMat, underMat, underMat, underMat };
-            outerTop = new[] { topMats[Classes - 1] };
-            outerUnder = new[] { underMat };
-
             BuildNear();
             BuildFar();
             BuildOuter();
             ApplyMaterials(false);
         }
 
+        /// 64 x 4 sRGB ramp: x = sqrt(depth / 35 m) (shore turquoise-blue → steel blue → navy, alpha 0.58 → 0.96),
+        /// y = facet brightness rows (0.915 / 0.97 / 1.03 / 1.085). Built once.
+        static Texture2D BuildRamp()
+        {
+            int rows = WorldWaterMap.FacetRows.Length;
+            var px = new Color32[RampWidth * rows];
+            for (int i = 0; i < RampWidth; i++)
+            {
+                float u = (i + 0.5f) / RampWidth;
+                Color c = WorldWaterMap.RampColor(WorldWaterMap.DepthOfU(u));
+                for (int r = 0; r < rows; r++)
+                {
+                    float k = WorldWaterMap.FacetRows[r];
+                    px[r * RampWidth + i] = new Color(Mathf.Clamp01(c.r * k), Mathf.Clamp01(c.g * k), Mathf.Clamp01(c.b * k), c.a);
+                }
+            }
+            var t = new Texture2D(RampWidth, rows, TextureFormat.RGBA32, false, false)
+            {
+                name = "SB_OceanRamp",
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+                anisoLevel = 0,
+            };
+            t.SetPixels32(px);
+            t.Apply(false, true);
+            return t;
+        }
+
+        static float RowV(int row) => (row + 0.5f) / WorldWaterMap.FacetRows.Length;
+
         void BuildNear()
         {
             int n = Cells + 1;
             gridY = new float[n * n];
+            gridU = new float[n * n];
             fade = new float[n * n];
             int innerCount = 0, outerCount = 0;
             for (int j = 0; j < n; j++)
@@ -189,6 +204,7 @@ namespace Sealebrities
             // dynamic triangles first so only the front of the vertex buffer is re-uploaded each frame
             triGrid = new int[triCount * 3];
             triCellI = new int[triCount]; triCellJ = new int[triCount]; triHalf = new int[triCount];
+            triFacetKeep = new float[triCount];
             int w = 0;
             for (int pass = 0; pass < 2; pass++)
                 for (int s = 0; s < triCount; s++)
@@ -196,12 +212,15 @@ namespace Sealebrities
                     if (dynamic[s] != (pass == 0)) continue;
                     triGrid[w * 3] = tmpGrid[s * 3]; triGrid[w * 3 + 1] = tmpGrid[s * 3 + 1]; triGrid[w * 3 + 2] = tmpGrid[s * 3 + 2];
                     triCellI[w] = tmpI[s]; triCellJ[w] = tmpJ[s]; triHalf[w] = tmpH[s];
+                    float cx = (tmpI[s] + 0.5f) * Spacing - HalfSize, cz = (tmpJ[s] + 0.5f) * Spacing - HalfSize;
+                    triFacetKeep[w] = 1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(FacetFadeStart, FacetFadeEnd, Mathf.Sqrt(cx * cx + cz * cz)));
                     if (pass == 0) dynTris = w + 1;
                     w++;
                 }
 
             int vc = triCount * 3;
             vbuf = new OceanVertex[vc];
+            nearUv = new Vector2[vc];
             triLX = new float[vc];
             triLZ = new float[vc];
             for (int v = 0; v < vc; v++)
@@ -210,24 +229,25 @@ namespace Sealebrities
                 float lx = (g % n) * Spacing - HalfSize, lz = (g / n) * Spacing - HalfSize;
                 triLX[v] = lx; triLZ[v] = lz;
                 vbuf[v] = new OceanVertex { pos = new Vector3(lx, FarLevel, lz), nrm = Vector3.up };
+                nearUv[v] = new Vector2(1f, 0.5f);
             }
 
-            nearIdx = new ushort[vc];
-            nearCls = new byte[triCount];
-            for (int v = 0; v < vc; v++) nearIdx[v] = (ushort)v;
+            var idx = new ushort[vc];
+            for (int v = 0; v < vc; v++) idx[v] = (ushort)v;
 
             nearMesh = new Mesh { name = "SB_OceanNear" };
             nearMesh.MarkDynamic();
             nearMesh.SetVertexBufferParams(vc,
-                new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3),
-                new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3));
+                new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3, 0),
+                new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3, 0),
+                new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2, 1));
             nearMesh.SetVertexBufferData(vbuf, 0, 0, vc, 0, MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontValidateIndices);
+            nearMesh.SetVertexBufferData(nearUv, 0, 0, vc, 1, MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontValidateIndices);
             nearMesh.SetIndexBufferParams(vc, IndexFormat.UInt16);
-            nearMesh.SetIndexBufferData(nearIdx, 0, 0, vc, MeshUpdateFlags.DontValidateIndices);
-            nearMesh.subMeshCount = Classes;
+            nearMesh.SetIndexBufferData(idx, 0, 0, vc, MeshUpdateFlags.DontValidateIndices);
+            nearMesh.subMeshCount = 1;
             var bounds = new Bounds(Vector3.zero, new Vector3(HalfSize * 2f + 4f, 8f, HalfSize * 2f + 4f));
-            for (int k = 0; k < Classes; k++)
-                nearMesh.SetSubMesh(k, Sub(0, k == 1 ? vc : 0, vc, bounds), SubFlags);
+            nearMesh.SetSubMesh(0, new SubMeshDescriptor(0, vc, MeshTopology.Triangles) { firstVertex = 0, vertexCount = vc, bounds = bounds }, SubFlags);
             nearMesh.bounds = bounds;
 
             var near = new GameObject("OceanNear");
@@ -241,50 +261,37 @@ namespace Sealebrities
         void BuildFar()
         {
             int n = FarCells + 1;
-            var v = new Vector3[n * n];
+            farLocal = new Vector3[n * n];
+            farUv = new Vector2[n * n];
             var nrm = new Vector3[n * n];
             for (int j = 0; j < n; j++)
                 for (int i = 0; i < n; i++)
                 {
-                    v[j * n + i] = new Vector3(i * FarCell - FarHalf, FarLevel, j * FarCell - FarHalf);
+                    farLocal[j * n + i] = new Vector3(i * FarCell - FarHalf, FarLevel, j * FarCell - FarHalf);
                     nrm[j * n + i] = Vector3.up;
+                    farUv[j * n + i] = new Vector2(1f, 0.5f);
                 }
             int hole0 = Mathf.RoundToInt((FarHalf - HalfSize) / FarCell), hole1 = FarCells - hole0;
             int cells = FarCells * FarCells - (hole1 - hole0) * (hole1 - hole0);
-            farTriCell = new int[cells * 2];
-            farTriVerts = new int[cells * 6];
+            var tris = new int[cells * 6];
             int t = 0;
             for (int j = 0; j < FarCells; j++)
                 for (int i = 0; i < FarCells; i++)
                 {
                     if (i >= hole0 && i < hole1 && j >= hole0 && j < hole1) continue;
                     int a = j * n + i, b = a + 1, c = a + n, e = c + 1;
-                    for (int h = 0; h < 2; h++)
-                    {
-                        // one diagonal direction everywhere: the ring snaps by single cells, so an alternating
-                        // pattern would flip against the world on every snap (the ring is flat, only colors show)
-                        int p0, p1, p2;
-                        if (h == 0) { p0 = a; p1 = c; p2 = e; } else { p0 = a; p1 = e; p2 = b; }
-                        farTriVerts[t * 3] = p0; farTriVerts[t * 3 + 1] = p1; farTriVerts[t * 3 + 2] = p2;
-                        farTriCell[t] = (j * FarCells + i) * 2 + h;
-                        t++;
-                    }
+                    // one diagonal direction everywhere: the ring snaps by single cells
+                    tris[t++] = a; tris[t++] = c; tris[t++] = e;
+                    tris[t++] = a; tris[t++] = e; tris[t++] = b;
                 }
-            int ic = t * 3;
-            farIdx = new ushort[ic];
-            farCls = new byte[t];
-            for (int k = 0; k < ic; k++) farIdx[k] = (ushort)farTriVerts[k];
 
             farMesh = new Mesh { name = "SB_OceanFar" };
-            farMesh.SetVertices(v);
+            farMesh.MarkDynamic();
+            farMesh.SetVertices(farLocal);
             farMesh.SetNormals(nrm);
-            farMesh.SetIndexBufferParams(ic, IndexFormat.UInt16);
-            farMesh.SetIndexBufferData(farIdx, 0, 0, ic, MeshUpdateFlags.DontValidateIndices);
-            farMesh.subMeshCount = Classes;
-            var bounds = new Bounds(Vector3.zero, new Vector3(FarHalf * 2f + 4f, 4f, FarHalf * 2f + 4f));
-            for (int k = 0; k < Classes; k++)
-                farMesh.SetSubMesh(k, Sub(0, k == Classes - 1 ? ic : 0, v.Length, bounds), SubFlags);
-            farMesh.bounds = bounds;
+            farMesh.SetUVs(0, farUv);
+            farMesh.SetTriangles(tris, 0, false);
+            farMesh.bounds = new Bounds(Vector3.zero, new Vector3(FarHalf * 2f + 4f, 4f, FarHalf * 2f + 4f));
 
             var far = new GameObject("OceanFar");
             far.transform.SetParent(transform, false);
@@ -299,6 +306,7 @@ namespace Sealebrities
             float[] rings = { FarHalf, 1800f, 3500f, 6000f };
             var v = new Vector3[rings.Length * 4];
             var nrm = new Vector3[v.Length];
+            var uv = new Vector2[v.Length];
             for (int r = 0; r < rings.Length; r++)
             {
                 float s = rings[r];
@@ -307,7 +315,7 @@ namespace Sealebrities
                 v[r * 4 + 2] = new Vector3(s, FarLevel, s);
                 v[r * 4 + 3] = new Vector3(-s, FarLevel, s);
             }
-            for (int i = 0; i < v.Length; i++) nrm[i] = Vector3.up;
+            for (int i = 0; i < v.Length; i++) { nrm[i] = Vector3.up; uv[i] = new Vector2(1f, 0.5f); }
             var tris = new int[(rings.Length - 1) * 4 * 6];
             int t = 0;
             for (int r = 0; r < rings.Length - 1; r++)
@@ -319,7 +327,7 @@ namespace Sealebrities
                     tris[t++] = a; tris[t++] = b; tris[t++] = d;
                 }
             outerMesh = new Mesh { name = "SB_OceanOuter" };
-            outerMesh.vertices = v; outerMesh.normals = nrm; outerMesh.triangles = tris;
+            outerMesh.vertices = v; outerMesh.normals = nrm; outerMesh.uv = uv; outerMesh.triangles = tris;
             outerMesh.bounds = new Bounds(Vector3.zero, new Vector3(12000f, 4f, 12000f));
 
             var outer = new GameObject("OceanOuter");
@@ -332,11 +340,6 @@ namespace Sealebrities
 
         const MeshUpdateFlags SubFlags = MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontNotifyMeshUsers;
 
-        static SubMeshDescriptor Sub(int start, int count, int vertexCount, Bounds b)
-        {
-            return new SubMeshDescriptor(start, count, MeshTopology.Triangles) { firstVertex = 0, vertexCount = vertexCount, bounds = b };
-        }
-
         static void SetupRenderer(MeshRenderer r)
         {
             r.shadowCastingMode = ShadowCastingMode.Off;
@@ -348,9 +351,10 @@ namespace Sealebrities
 
         void ApplyMaterials(bool underwater)
         {
-            nearR.sharedMaterials = underwater ? nearUnder : nearTop;
-            farR.sharedMaterials = underwater ? nearUnder : farTop;
-            outerR.sharedMaterials = underwater ? outerUnder : outerTop;
+            var m = underwater ? underMat : topMat;
+            nearR.sharedMaterial = m;
+            farR.sharedMaterial = m;
+            outerR.sharedMaterial = m;
         }
 
         Camera ActiveCamera()
@@ -368,7 +372,7 @@ namespace Sealebrities
             if (c == null) return;
             Vector3 cp = c.transform.position;
 
-            // ---- follow the camera, snapped (re-color the triangles only when the grid moves)
+            // ---- follow the camera, snapped (refresh the depth UVs only when the grid moves)
             float sx = Mathf.Round(cp.x / SnapStep) * SnapStep;
             float sz = Mathf.Round(cp.z / SnapStep) * SnapStep;
             bool snapped = sx != snapX || sz != snapZ;
@@ -379,14 +383,36 @@ namespace Sealebrities
                 nearT.position = p;
                 farT.position = p;
                 outerT.position = p;
-                ClassifyNear();
-                ClassifyFar();
+                RefreshNearUv();
+                RefreshFarUv();
             }
 
-            // ---- displace the welded grid, then rebuild the flat-shaded dynamic triangles
+            // ---- deep below the surface (wreck, drop-off, trench) it lies far beyond the underwater fog: freeze the
+            // waves (no displacement, no triangle rebuild, no upload) until the camera comes back up
+            float surfaceY = Waves.HeightAt(cp.x, cp.z);
+            bool frozen = surfaceY - cp.y > Mathf.Min(c.farClipPlane * 0.9f, FXVisibility.Meters * 1.5f);
+            if (!frozen) UpdateSurface(snapped || wavesFrozen);
+            wavesFrozen = frozen;
+
+            // ---- above / below the surface
+            bool u = cp.y < surfaceY;
+            if (u != under) { under = u; ApplyMaterials(u); }
+            if (under)
+            {
+                // the surface seen from below glows with the daylight above
+                float day = Mathf.Lerp(0.06f, 1f, EnvState.SunIntensity01);
+                underMat.SetColor(idEmission, UnderGlow * day);
+            }
+        }
+
+        bool wavesFrozen;
+
+        /// Displaces the welded grid, then rebuilds and uploads the flat-shaded dynamic triangles.
+        void UpdateSurface(bool full)
+        {
             frame++;
             Displace(innerIdx);
-            if (snapped || (frame & 1) == 0) Displace(outerIdx);
+            if (full || (frame & 1) == 0) Displace(outerIdx);
 
             for (int t = 0; t < dynTris; t++)
             {
@@ -405,16 +431,6 @@ namespace Sealebrities
             }
             const MeshUpdateFlags vf = MeshUpdateFlags.DontRecalculateBounds | MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontNotifyMeshUsers;
             nearMesh.SetVertexBufferData(vbuf, 0, 0, dynTris * 3, 0, vf);
-
-            // ---- above / below the surface
-            bool u = cp.y < Waves.HeightAt(cp.x, cp.z);
-            if (u != under) { under = u; ApplyMaterials(u); }
-            if (under)
-            {
-                // the surface seen from below glows with the daylight above
-                float day = Mathf.Lerp(0.06f, 1f, EnvState.SunIntensity01);
-                underMat.SetColor(idEmission, UnderGlow * day);
-            }
         }
 
         void Displace(int[] idx)
@@ -429,69 +445,38 @@ namespace Sealebrities
             }
         }
 
-        // ------------------------------------------------------------------ coloring (on snap only)
-        void ClassifyNear()
+        // ------------------------------------------------------------------ depth UVs (on snap only)
+        void RefreshNearUv()
         {
-            int triCount = nearCls.Length;
+            int n = Cells + 1;
             int baseI = Mathf.RoundToInt((snapX - HalfSize) / Spacing), baseJ = Mathf.RoundToInt((snapZ - HalfSize) / Spacing);
-            for (int k = 0; k < Classes; k++) counts[k] = 0;
+            for (int k = 0; k < gridU.Length; k++)
+                gridU[k] = water != null ? water.UAt(baseI + k % n, baseJ + k / n) : 1f;
+
+            int rows = WorldWaterMap.FacetRows.Length;
+            int triCount = triCellI.Length;
             for (int t = 0; t < triCount; t++)
             {
                 int wi = baseI + triCellI[t], wj = baseJ + triCellJ[t];
-                float cv = water != null ? water.ClassAt(wi, wj) : 1f;
-                int k = WorldWaterMap.Pick(cv, WorldTerrainData.Hash(wi, wj, 77 + triHalf[t]));
-                nearCls[t] = (byte)k;
-                counts[k]++;
+                int row = (int)(WorldTerrainData.Hash(wi, wj, 31 + triHalf[t]) % (uint)rows);
+                float v = Mathf.Lerp(0.5f, RowV(row), triFacetKeep[t]);
+                int o = t * 3;
+                nearUv[o] = new Vector2(gridU[triGrid[o]], v);
+                nearUv[o + 1] = new Vector2(gridU[triGrid[o + 1]], v);
+                nearUv[o + 2] = new Vector2(gridU[triGrid[o + 2]], v);
             }
-            int acc = 0;
-            for (int k = 0; k < Classes; k++) { starts[k] = acc; fills[k] = 0; acc += counts[k] * 3; }
-            for (int t = 0; t < triCount; t++)
-            {
-                int k = nearCls[t];
-                int o = starts[k] + fills[k];
-                fills[k] += 3;
-                int v = t * 3;
-                nearIdx[o] = (ushort)v; nearIdx[o + 1] = (ushort)(v + 1); nearIdx[o + 2] = (ushort)(v + 2);
-            }
-            nearMesh.SetIndexBufferData(nearIdx, 0, 0, nearIdx.Length, SubFlags);
-            var b = nearMesh.bounds;
-            for (int k = 0; k < Classes; k++) nearMesh.SetSubMesh(k, Sub(starts[k], counts[k] * 3, vbuf.Length, b), SubFlags);
+            nearMesh.SetVertexBufferData(nearUv, 0, 0, nearUv.Length, 1, SubFlags);
         }
 
-        void ClassifyFar()
+        void RefreshFarUv()
         {
-            int triCount = farCls.Length;
-            // world 3 m cell of each 12 m far cell center
-            float ox = snapX - FarHalf, oz = snapZ - FarHalf;
-            int baseI = Mathf.RoundToInt(ox / FarCell), baseJ = Mathf.RoundToInt(oz / FarCell);
-            for (int k = 0; k < Classes; k++) counts[k] = 0;
-            for (int t = 0; t < triCount; t++)
-            {
-                int packed = farTriCell[t];
-                int h = packed & 1, cell = packed >> 1;
-                int i = cell % FarCells, j = cell / FarCells;
-                float wx = ox + (i + 0.5f) * FarCell, wz = oz + (j + 0.5f) * FarCell;
-                float cv = water != null
-                    ? water.ClassAt(Mathf.FloorToInt(wx / WorldWaterMap.CellSize), Mathf.FloorToInt(wz / WorldWaterMap.CellSize))
-                    : 3f;
-                int k = WorldWaterMap.Pick(cv, WorldTerrainData.Hash(baseI + i, baseJ + j, 91 + h));
-                farCls[t] = (byte)k;
-                counts[k]++;
-            }
-            int acc = 0;
-            for (int k = 0; k < Classes; k++) { starts[k] = acc; fills[k] = 0; acc += counts[k] * 3; }
-            for (int t = 0; t < triCount; t++)
-            {
-                int k = farCls[t];
-                int o = starts[k] + fills[k];
-                fills[k] += 3;
-                int s = t * 3;
-                farIdx[o] = (ushort)farTriVerts[s]; farIdx[o + 1] = (ushort)farTriVerts[s + 1]; farIdx[o + 2] = (ushort)farTriVerts[s + 2];
-            }
-            farMesh.SetIndexBufferData(farIdx, 0, 0, farIdx.Length, SubFlags);
-            var b = farMesh.bounds;
-            int vc = farMesh.vertexCount;
-            for (int k = 0; k < Classes; k++) farMesh.SetSubMesh(k, Sub(starts[k], counts[k] * 3, vc, b), SubFlags);
+            int n = FarCells + 1;
+            int step = Mathf.RoundToInt(FarCell / WorldWaterMap.CellSize);
+            int baseI = Mathf.RoundToInt((snapX - FarHalf) / WorldWaterMap.CellSize), baseJ = Mathf.RoundToInt((snapZ - FarHalf) / WorldWaterMap.CellSize);
+            for (int j = 0; j < n; j++)
+                for (int i = 0; i < n; i++)
+                    farUv[j * n + i] = new Vector2(water != null ? water.UAt(baseI + i * step, baseJ + j * step) : 1f, 0.5f);
+            farMesh.SetUVs(0, farUv);
         }
 
         void OnDestroy()
@@ -499,9 +484,9 @@ namespace Sealebrities
             if (nearMesh != null) Destroy(nearMesh);
             if (farMesh != null) Destroy(farMesh);
             if (outerMesh != null) Destroy(outerMesh);
-            if (topMats != null) foreach (var m in topMats) if (m != null) Destroy(m);
-            if (nearDeepMat != null) Destroy(nearDeepMat);
+            if (topMat != null) Destroy(topMat);
             if (underMat != null) Destroy(underMat);
+            if (ramp != null) Destroy(ramp);
         }
     }
 }

@@ -5,8 +5,8 @@ namespace Sealebrities
     /// Movement state of the first-person player.
     public enum PlayerMoveMode { Land, Surface, Dive }
 
-    /// First-person diver: mouse look, walking, surface swimming, diving, boat seats, air and fainting.
-    /// Created and registered as Refs.Player by PlayerFactory.
+    /// First-person diver: mouse look, walking, surface swimming, diving, ladders, boat seats, air and fainting.
+    /// Created and registered as Refs.Player by PlayerFactory; the root is listed in Divers while it exists.
     /// Split into partial files: core/look/camera (this file), PlayerController.Movement.cs, PlayerController.Air.cs.
     [DefaultExecutionOrder(50)]
     public partial class PlayerController : MonoBehaviour, IPlayer
@@ -17,8 +17,12 @@ namespace Sealebrities
         public const float EyeHeight = 1.62f;
         /// Eye height above the seat transform while seated (the seat marks where the player's feet/root go).
         public const float SeatedEyeHeight = 1.3f;
-        public const float DefaultFov = 72f;
-        const float MenuFov = 60f;
+        /// Eye height of the LOCAL driver at the helm: high enough to look over the windscreen sill at the bow and the
+        /// water a few metres ahead (remote avatars keep SeatedEyeHeight so their head stays on the seat).
+        public const float HelmEyeHeight = 1.65f;
+        /// Vertical field of view in gameplay (art bible §1.13: 70°).
+        public const float DefaultFov = 70f;
+        public const float MenuFov = 50f;
         /// Built-in "Ignore Raycast" layer: the default raycasts of other modules never hit the player capsule.
         public const int PlayerLayer = 2;
 
@@ -36,6 +40,7 @@ namespace Sealebrities
         int gameStartedFrame = -1;
         int lookSkipFrames;
         PlayerMoveMode mode = PlayerMoveMode.Land;
+        bool introWasPlaying;
 
         // look
         float yaw, pitch, seatYaw;
@@ -60,17 +65,18 @@ namespace Sealebrities
         public float Depth => depth;
         public float Air01 => airCapacity > 0f ? Mathf.Clamp01(airLeft / airCapacity) : 0f;
         public float AirSecondsLeft => airLeft;
-        public float MaxSafeDepth => gear.maxDepth;
+        /// Gear depth rating (unlimited while the launch intro flies the camera through the deep).
+        public float MaxSafeDepth => PlayerIntro.Playing ? 9999f : gear.maxDepth;
         public bool FlashlightOn => flashlight != null && flashlight.On;
         public bool IsSeated => seated;
         public bool IsFainting { get; private set; }
         public float LookAngularSpeed => lookAngularSpeed;
 
-        // ------------------------------------------------------------------ module-internal state (used by PlayerHands/Flashlight/Interactor/Narcosis)
-        /// True while the player is controlled in first person (not the main-menu orbit).
+        // ------------------------------------------------------------------ module-internal state (used by PlayerHands/Flashlight/Interactor/Narcosis/UI)
+        /// True while the player is controlled in first person (not the main-menu camera).
         public bool InGameplay => initialized && !menuMode;
-        /// Climbing out of the water, being rescued or fainting: no interaction possible.
-        public bool IsBusy => vaulting || rescueActive || IsFainting;
+        /// Climbing out of the water / up a ladder, being rescued or fainting: no interaction possible.
+        public bool IsBusy => vaulting || ladderClimbing || rescueActive || IsFainting;
         public PlayerMoveMode Mode => mode;
         public bool Grounded => grounded;
         /// Own movement speed (relative to the platform/water), m/s.
@@ -79,10 +85,17 @@ namespace Sealebrities
         public float BobAmount => bobAmp;
         public Vector2 LookDelta => lookDelta;
         public bool CanVaultHint => canVaultHint;
+        /// Swimming next to the dock ladder: Space / E climbs it.
+        public bool CanLadderHint => canLadderHint;
         public GearStats Gear => gear;
         public DifficultySettings Diff => diff;
         /// 0..1 fainting animation weight.
         public float FaintAmount => faintAnim;
+        /// The tank is being refilled (resting on land or on the boat deck); RefillProgress01 = air level.
+        public bool RefillingAir => refilling;
+        public float RefillProgress01 => Air01;
+        /// The view model (for other player components).
+        public PlayerHands ViewHands => hands;
 
         /// Unity-aware null check for interface references that may point at destroyed objects.
         public static bool Alive(object o) => o != null && !(o is Object uo && uo == null);
@@ -97,6 +110,7 @@ namespace Sealebrities
             worldRoot = root;
             flashlight = light;
             hands = viewHands;
+            if (flashlight != null) flashlight.SetHands(hands);
             yaw = transform.eulerAngles.y;
             pitch = 0f;
             airCapacity = airLeft = Mathf.Max(1f, gear.airSeconds);
@@ -105,6 +119,7 @@ namespace Sealebrities
             Subscribe();
             initialized = true;
             menuMode = false;
+            Divers.Add(transform);
             if (WantMenu()) EnterMenuMode();
         }
 
@@ -130,6 +145,8 @@ namespace Sealebrities
                 GameEvents.PlayerBumped -= OnBumped;
                 subscribed = false;
             }
+            menuCam.End();
+            Divers.Remove(transform);
             if (ReferenceEquals(Refs.Player, this)) Refs.Player = null;
         }
 
@@ -191,9 +208,11 @@ namespace Sealebrities
         void OnGearChanged()
         {
             if (!initialized) return;
-            float ratio = Air01;
+            float ratio = Air01, prev = airLeft;
             RefreshStats();
-            airLeft = Mathf.Clamp(ratio * airCapacity, 0f, airCapacity);
+            // In the water keep the absolute seconds (a tank swap or a friend's new tank must never refill the air:
+            // feedback #17 "refill only by resting on land/boat"); on land the refill runs anyway.
+            airLeft = isInWater ? Mathf.Clamp(prev, 0f, airCapacity) : Mathf.Clamp(ratio * airCapacity, 0f, airCapacity);
         }
 
         void RefreshStats()
@@ -213,6 +232,7 @@ namespace Sealebrities
         {
             if (seated) { seated = false; seat = null; seatYaw = 0f; }
             if (vaulting) { vaulting = false; vaultRef = null; }
+            ladderClimbing = false;
             IsFainting = false;
             rescueActive = false;
             pendingFade = null;
@@ -221,11 +241,14 @@ namespace Sealebrities
             landDip = 0f;
             tooDeepWarned = false;
             lowAirWarned = false;
+            emptyWarned = false;
             sprintingUnderwater = false;
+            refilling = false;
             vel = Vector3.zero;
             platform = null;
             platformRb = null;
             canVaultHint = false;
+            canLadderHint = false;
         }
 
         // ------------------------------------------------------------------ menu mode
@@ -242,11 +265,7 @@ namespace Sealebrities
             if (cc != null) cc.enabled = false;
             if (flashlight != null) flashlight.ForceOff();
             if (hands != null) hands.SetVisible(false);
-            if (isUnderwater)
-            {
-                isUnderwater = false;
-                GameEvents.RaiseUnderwaterChanged(false);
-            }
+            SetUnderwater(false);
             isInWater = false;
             depth = 0f;
             mode = PlayerMoveMode.Land;
@@ -257,13 +276,16 @@ namespace Sealebrities
             {
                 camT.SetParent(worldRoot, true);
                 cam.fieldOfView = MenuFov;
-                menuCam.Begin(camT);
+                menuCam.Begin(camT, cam);
             }
         }
 
         void ExitMenuMode()
         {
             menuMode = false;
+            menuCam.End();
+            SetUnderwater(false);
+            depth = 0f;
             if (camT != null)
             {
                 camT.SetParent(head, false);
@@ -277,6 +299,13 @@ namespace Sealebrities
             camRotValid = false;
             lookSkipFrames = 2;     // ignore the mouse-delta spike when the cursor gets locked
             RecheckWaterAfterTeleport();
+        }
+
+        void SetUnderwater(bool under)
+        {
+            if (isUnderwater == under) return;
+            isUnderwater = under;
+            GameEvents.RaiseUnderwaterChanged(under);
         }
 
         // ------------------------------------------------------------------ frame loop
@@ -294,17 +323,21 @@ namespace Sealebrities
             if (menuMode) return;
 
             float dt = Time.deltaTime;
-            if (dt <= 0f || UIState.PauseOpen || UIState.LoadingOpen)
+            // online the world runs on behind the pause menu: keep simulating the diver (air, buoyancy, refill) –
+            // input is already blocked through UIState.BlocksGameplay
+            if (dt <= 0f || (UIState.PauseOpen && !Net.IsOnline) || UIState.LoadingOpen)
             {
                 lookDelta = Vector2.zero;
                 return;
             }
             dt = Mathf.Min(dt, 0.1f);
 
-            bool input = !UIState.BlocksGameplay && !IsFainting && !rescueActive && !vaulting;
+            bool input = !UIState.BlocksGameplay && !IsFainting && !rescueActive && !vaulting && !ladderClimbing;
+            if (input) Hands.HandleInput();
             UpdateLook(input);
 
             if (seated) FollowSeat();
+            else if (ladderClimbing) UpdateLadder(dt);
             else if (vaulting) UpdateVault(dt);
             else UpdateMovement(input, dt);
 
@@ -319,14 +352,40 @@ namespace Sealebrities
             if (!initialized) return;
             if (menuMode)
             {
-                menuCam.Tick(Time.unscaledDeltaTime);
+                bool intro = PlayerIntro.Playing;
+                if (intro) UpdateIntroWaterState();
+                else
+                {
+                    if (introWasPlaying)
+                    {
+                        // the intro ended on the crew shot: continue with the menu camera from there
+                        SetUnderwater(false);
+                        depth = 0f;
+                        if (cam != null) cam.fieldOfView = MenuFov;
+                        menuCam.Begin(camT, cam);
+                    }
+                    menuCam.Tick(Time.unscaledDeltaTime);
+                }
+                introWasPlaying = intro;
                 return;
             }
+            introWasPlaying = false;
             float dt = Time.deltaTime;
             if (seated) FollowSeat();
+            else LatePlatformCarry();
             if (dt <= 0f) return;
             UpdateCameraPose(Mathf.Min(dt, 0.1f));
             MeasureLook(dt);
+        }
+
+        /// While the launch intro flies the camera below the surface, FX/World see a submerged "player".
+        void UpdateIntroWaterState()
+        {
+            if (camT == null) return;
+            Vector3 c = camT.position;
+            float h = Waves.HeightAt(c.x, c.z);
+            depth = Mathf.Max(0f, h - c.y);
+            SetUnderwater(c.y < h - 0.05f);
         }
 
         // ------------------------------------------------------------------ look
@@ -378,7 +437,7 @@ namespace Sealebrities
         // ------------------------------------------------------------------ camera pose (bob, sway, shake, faint)
         void UpdateCameraPose(float dt)
         {
-            eyeHeight = Mathf.Lerp(eyeHeight, seated ? SeatedEyeHeight : EyeHeight, 1f - Mathf.Exp(-6f * dt));
+            eyeHeight = Mathf.Lerp(eyeHeight, seated ? HelmEyeHeight : EyeHeight, 1f - Mathf.Exp(-6f * dt));
             landDip = Mathf.Lerp(landDip, 0f, 1f - Mathf.Exp(-7f * dt));
             head.localPosition = new Vector3(0f, eyeHeight - landDip, 0f);
             head.localRotation = Quaternion.Euler(pitch, 0f, 0f);

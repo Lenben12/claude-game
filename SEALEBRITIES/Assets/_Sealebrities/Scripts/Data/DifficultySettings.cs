@@ -6,46 +6,57 @@ namespace Sealebrities
         public long rescueFee;              // money lost when fainting
         public bool narcosis;               // nitrogen narcosis hallucinations from ~30 m
         public float predatorAggression;    // 0..2, chance/strength of predator bumps
-        public float incomeMultiplier;      // views/money multiplier
-        public bool permadeath;             // fainting ends the save (Abyss)
-        public bool canFaint;               // Snorkeler: a rescue drone pulls you up before fainting
+        public float incomeMultiplier;      // views/money multiplier (uploads and fish)
+        public bool permadeath;             // legacy, no selectable level uses it
+        public bool canFaint;               // Entspannt: a rescue drone pulls you up before fainting
 
-        public static DifficultySettings For(Difficulty d)
+        /// The three levels offered in the menu: Entspannt, Normal, Schwer.
+        public static readonly Difficulty[] Selectable = { Difficulty.Snorkeler, Difficulty.OpenWater, Difficulty.Advanced };
+
+        /// Maps old/invalid values onto a selectable level (Technical/Abyss → Advanced = Schwer).
+        public static Difficulty Normalize(Difficulty d)
         {
             switch (d)
             {
-                case Difficulty.Snorkeler:
-                    return new DifficultySettings { airMultiplier = 2f, rescueFee = 0, narcosis = false, predatorAggression = 0.3f, incomeMultiplier = 1.3f, canFaint = false };
-                case Difficulty.OpenWater:
-                    return new DifficultySettings { airMultiplier = 1f, rescueFee = 40, narcosis = false, predatorAggression = 1f, incomeMultiplier = 1f, canFaint = true };
+                case Difficulty.Snorkeler: return Difficulty.Snorkeler;
+                case Difficulty.OpenWater: return Difficulty.OpenWater;
                 case Difficulty.Advanced:
-                    return new DifficultySettings { airMultiplier = 0.9f, rescueFee = 120, narcosis = true, predatorAggression = 1.3f, incomeMultiplier = 0.9f, canFaint = true };
                 case Difficulty.Technical:
-                    return new DifficultySettings { airMultiplier = 0.8f, rescueFee = 300, narcosis = true, predatorAggression = 1.6f, incomeMultiplier = 0.8f, canFaint = true };
-                default:
-                    return new DifficultySettings { airMultiplier = 0.75f, rescueFee = 500, narcosis = true, predatorAggression = 2f, incomeMultiplier = 0.75f, canFaint = true, permadeath = true };
+                case Difficulty.Abyss: return Difficulty.Advanced;
+                default: return Difficulty.OpenWater;
             }
         }
 
-        public static string Description(Difficulty d)
+        public static DifficultySettings For(Difficulty d)
         {
-            switch (d)
+            switch (Normalize(d))
             {
                 case Difficulty.Snorkeler:
-                    return Loc.Tr("Sterben unmöglich: Eine Rettungsdrohne holt dich hoch. Doppelte Luft, mehr Einnahmen.",
-                                  "No way to die: a rescue drone pulls you up. Double air, more income.");
-                case Difficulty.OpenWater:
-                    return Loc.Tr("Standard. Ohne Luft wirst du ohnmächtig, das Boot zieht dich hoch. Die Aufnahmen des Tauchgangs sind weg, die Rettung kostet 40 $.",
-                                  "Standard. Run out of air and you faint, the boat pulls you up. That dive's footage is lost and the rescue costs $40.");
+                    return new DifficultySettings { airMultiplier = 1.35f, rescueFee = 0, narcosis = false, predatorAggression = 0.4f, incomeMultiplier = 1.2f, canFaint = false };
                 case Difficulty.Advanced:
-                    return Loc.Tr("Weniger Luft, aggressivere Raubtiere, teure Rettung. Ab 30 m Stickstoffnarkose: Du siehst Dinge, die nicht da sind.",
-                                  "Less air, more aggressive predators, expensive rescue. Nitrogen narcosis from 30 m: you see things that aren't there.");
-                case Difficulty.Technical:
-                    return Loc.Tr("Noch weniger Luft, harte Raubtiere, Narkose. Für erfahrene Taucher.",
-                                  "Even less air, tough predators, narcosis. For experienced divers.");
+                    return new DifficultySettings { airMultiplier = 0.85f, rescueFee = 75, narcosis = true, predatorAggression = 1.35f, incomeMultiplier = 0.9f, canFaint = true };
                 default:
-                    return Loc.Tr("Permadeath: Wirst du ohnmächtig, ist der Spielstand verloren. Narkose, wenig Luft, gnadenlose Raubtiere.",
-                                  "Permadeath: if you faint, the save is gone. Narcosis, little air, merciless predators.");
+                    return new DifficultySettings { airMultiplier = 1f, rescueFee = 25, narcosis = false, predatorAggression = 1f, incomeMultiplier = 1f, canFaint = true };
+            }
+        }
+
+        /// Entspannt / Normal / Schwer.
+        public static string Name(Difficulty d) => Loc.DifficultyName(d);
+
+        /// One short line for the menu card.
+        public static string Description(Difficulty d)
+        {
+            switch (Normalize(d))
+            {
+                case Difficulty.Snorkeler:
+                    return Loc.Tr("Keine Ohnmacht – eine Drohne holt dich hoch. Mehr Luft, mehr Einnahmen.",
+                                  "No fainting – a drone pulls you up. More air, more income.");
+                case Difficulty.Advanced:
+                    return Loc.Tr("Weniger Luft, bissige Raubtiere, teure Rettung. Ab 30 m siehst du Dinge, die nicht da sind.",
+                                  "Less air, snappy predators, costly rescue. From 30 m you see things that aren't there.");
+                default:
+                    return Loc.Tr("Ohne Luft wirst du ohnmächtig: Die Clips des Tauchgangs sind weg, die Rettung kostet 25 $.",
+                                  "Run out of air and you faint: that dive's clips are lost and the rescue costs $25.");
             }
         }
     }

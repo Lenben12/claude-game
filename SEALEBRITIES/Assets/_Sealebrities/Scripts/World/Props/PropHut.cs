@@ -5,13 +5,16 @@ using UnityEngine.Rendering;
 
 namespace Sealebrities
 {
-    /// The "Sealebrity Dive Co." hut in the low-poly style: white clapboard walls (separate flat boards), wooden trim,
-    /// turquoise shutters, red shingle roof, striped porch awning; chunky interior with bed, TV, desk and shelves.
+    /// The "Sealebrity Dive Co." hut in the How to Fish beach-shop style (art bible §1.11): weathered whitewashed
+    /// clapboard (Whitewash #DCCFBE in three ±6 % variants) with 2–3 cm gaps showing a dark backing, red-brown accent
+    /// boards at the base, off-white trim, turquoise shutters, 4-pane windows, a red shingle roof and a striped porch
+    /// awning; chunky interior with bed, TV, desk and shelves. Walls, gables, roof and awning are solid (feedback #10).
     /// Local frame: origin = WorldLayout.Hut (shifted west) at floor-top height, +x east (door side), +z north.
     /// Interior x [-4.5, 4.5], z [-5, 5] (sized so that WorldLayout.Bed / TV / PlayerSpawn are inside).
     public static class PropHut
     {
-        const float HX = 4.5f, HZ = 5f, WallH = 2.7f, PitchDeg = 20f, T = 0.14f, BoardH = 0.3f;
+        const float HX = 4.5f, HZ = 5f, WallH = 2.7f, PitchDeg = 20f, T = 0.14f, BoardH = 0.22f, BoardGap = 0.025f;
+        static int wallId;
 
         static PropBatch batch;
         static Matrix4x4 TO;
@@ -73,9 +76,10 @@ namespace Sealebrities
         {
             // floor: separate boards along z with small gaps over a dark skirt (plank look without textures)
             int k = 0;
-            for (float x = -HX; x < HX + 0.16f; x += 0.3f, k++)
-                B(k % 3 == 1 ? PropMats.WoodLight : PropMats.Wood).Box(new Vector3(x, -0.06f, 0f), new Vector3(0.28f, 0.12f, 2f * HZ + 0.3f));
-            B(PropMats.WoodDark).Box(new Vector3(0f, -0.17f, 0f), new Vector3(2f * HX + 0.2f, 0.12f, 2f * HZ + 0.2f));
+            Material[] floorWood = { PropMats.Wood, PropMats.Wood2, PropMats.Wood3 };
+            for (float x = -HX; x < HX + 0.16f; x += 0.25f, k++)
+                B(floorWood[(k * 7 + 3) % 3]).Box(new Vector3(x, -0.06f, 0f), new Vector3(0.22f, 0.12f, 2f * HZ + 0.3f));
+            B(PropMats.PlankGap).Box(new Vector3(0f, -0.15f, 0f), new Vector3(2f * HX + 0.2f, 0.1f, 2f * HZ + 0.2f));
             Col(new Vector3(0f, -0.15f, 0f), new Vector3(2f * HX + 0.3f, 0.3f, 2f * HZ + 0.3f));
             for (int i = -2; i <= 2; i++)
                 B(PropMats.WoodDark).Box(new Vector3(i * 2.2f, -0.32f, 0f), new Vector3(0.18f, 0.2f, 2f * HZ + 0.3f));
@@ -90,36 +94,75 @@ namespace Sealebrities
             var east = new List<Vector4> { new Vector4(-3.2f, -2.0f, 1.0f, 1.9f), new Vector4(0.2f, 1.6f, 0f, 2.15f) };
             var south = new List<Vector4> { new Vector4(-1.6f, -0.4f, 1.0f, 1.9f), new Vector4(1.2f, 2.2f, 1.0f, 1.9f) };
             var north = new List<Vector4> { new Vector4(0.0f, 1.2f, 1.0f, 1.9f) };
-            Wall(true, -HX, -HZ - T * 0.5f, HZ + T * 0.5f, west);
-            Wall(true, HX, -HZ - T * 0.5f, HZ + T * 0.5f, east);
-            Wall(false, -HZ, -HX + T * 0.5f, HX - T * 0.5f, south);
-            Wall(false, HZ, -HX + T * 0.5f, HX - T * 0.5f, north);
+            wallId = 1; Wall(true, -HX, -HZ - T * 0.5f, HZ + T * 0.5f, west);
+            wallId = 2; Wall(true, HX, -HZ - T * 0.5f, HZ + T * 0.5f, east);
+            wallId = 3; Wall(false, -HZ, -HX + T * 0.5f, HX - T * 0.5f, south);
+            wallId = 4; Wall(false, HZ, -HX + T * 0.5f, HX - T * 0.5f, north);
 
-            // wooden corner posts and top plates
-            var trim = B(PropMats.Wood);
+            // off-white corner posts and top plates
+            var trim = B(PropMats.Trim);
             for (int sx = -1; sx <= 1; sx += 2)
                 for (int sz = -1; sz <= 1; sz += 2)
                     trim.Box(new Vector3(sx * (HX + 0.02f), WallH * 0.5f, sz * (HZ + 0.02f)), new Vector3(0.22f, WallH, 0.22f));
             trim.Box(new Vector3(0f, WallH - 0.06f, -HZ), new Vector3(2f * HX, 0.14f, T + 0.08f));
             trim.Box(new Vector3(0f, WallH - 0.06f, HZ), new Vector3(2f * HX, 0.14f, T + 0.08f));
 
-            // gables (east / west), white
+            // gables (east / west): horizontal whitewashed boards shortened under the roof line, dark backing, solid prism
             float rise = (HZ + T * 0.5f) * Mathf.Tan(PitchDeg * Mathf.Deg2Rad);
-            var wall = B(PropMats.Wall);
             for (int s = -1; s <= 1; s += 2)
             {
                 float x = s * HX;
+                var gap = B(PropMats.PlankGap);
                 for (int f = -1; f <= 1; f += 2)
                 {
-                    float xf = x + f * T * 0.5f;
+                    float xf = x + f * T * 0.2f;
                     Vector3 a = new Vector3(xf, WallH, -HZ - T * 0.5f), b = new Vector3(xf, WallH, HZ + T * 0.5f), t = new Vector3(xf, WallH + rise, 0f);
-                    wall.Face3(a, b, t, new Vector3(f, 0f, 0f));
+                    gap.Face3(a, b, t, new Vector3(f, 0f, 0f));
                 }
+                int row = 0;
+                for (float y = WallH; y < WallH + rise - 0.05f; y += BoardH, row++)
+                {
+                    float yTop = Mathf.Min(y + BoardH - BoardGap, WallH + rise);
+                    float half = (HZ + T * 0.5f) * (1f - (yTop - WallH) / rise);
+                    if (half < 0.08f) break;
+                    uint h = Hash(row, 20 + s, 7);
+                    float off = ((h & 255) / 255f - 0.5f) * 0.02f;
+                    B(PropMats.Whitewash((int)((h >> 8) % 3))).Box(new Vector3(x + s * off, (y + yTop) * 0.5f, 0f), new Vector3(T, yTop - y, 2f * half));
+                }
+                GablePrism(x, rise);
                 // a little round attic vent in the west gable (the east gable carries the sign)
                 if (s > 0) continue;
-                B(PropMats.Wood).Cylinder(new Vector3(x + s * (T * 0.5f), WallH + rise * 0.45f, 0f), Quaternion.Euler(0f, 0f, -90f * s), 0.24f, 0.24f, 0.04f, 8, false, true);
+                B(PropMats.Trim).Cylinder(new Vector3(x + s * (T * 0.5f), WallH + rise * 0.45f, 0f), Quaternion.Euler(0f, 0f, -90f * s), 0.24f, 0.24f, 0.04f, 8, false, true);
                 B(PropMats.Ink).Cylinder(new Vector3(x + s * (T * 0.5f + 0.04f), WallH + rise * 0.45f, 0f), Quaternion.Euler(0f, 0f, -90f * s), 0.15f, 0.15f, 0.005f, 8, false, true);
             }
+        }
+
+        static uint Hash(int a, int b, int c)
+        {
+            unchecked
+            {
+                uint h = (uint)(a * 374761393 + b * 668265263 + c * 1442695041);
+                h = (h ^ (h >> 13)) * 1274126177u;
+                return h ^ (h >> 16);
+            }
+        }
+
+        /// Convex triangular prism collider closing a gable (the space between the wall top and the roof).
+        static void GablePrism(float x, float rise)
+        {
+            float z = HZ + T * 0.5f;
+            var v = new[]
+            {
+                new Vector3(x - T, WallH - 0.05f, -z), new Vector3(x - T, WallH - 0.05f, z), new Vector3(x - T, WallH + rise + 0.05f, 0f),
+                new Vector3(x + T, WallH - 0.05f, -z), new Vector3(x + T, WallH - 0.05f, z), new Vector3(x + T, WallH + rise + 0.05f, 0f),
+            };
+            var t = new[] { 0, 2, 1, 3, 4, 5, 0, 1, 4, 0, 4, 3, 1, 2, 5, 1, 5, 4, 0, 3, 5, 0, 5, 2 };
+            var m = new Mesh { name = "HutGableCol" };
+            m.vertices = v;
+            m.triangles = t;
+            m.RecalculateBounds();
+            var mc = PropCol.Mesh(cols, m, O, Quaternion.identity, Vector3.one, "GableCol");
+            mc.convex = true;
         }
 
         static void Stilt(float x, float z)
@@ -147,31 +190,36 @@ namespace Sealebrities
             if (cur < s1) WallPiece(alongZ, fixedCoord, cur, s1, 0f, WallH);
         }
 
-        /// One wall rectangle as horizontal boards on a global 0.3 m grid; every second board sticks out a little.
+        /// One wall rectangle as horizontal boards (0.22 m pitch, 2.5 cm gaps) over a dark backing; three whitewash
+        /// variants, a random 0–1 cm out-of-plane offset per board, red-brown accent boards in the two lowest rows.
         static void WallPiece(bool alongZ, float f, float a0, float a1, float v0, float v1)
         {
             float outSign = Mathf.Sign(f);
-            int k0 = Mathf.FloorToInt(v0 / BoardH + 1e-3f), k1 = Mathf.CeilToInt(v1 / BoardH - 1e-3f);
             float s = (a0 + a1) * 0.5f;
+            float yc = (v0 + v1) * 0.5f;
+            Vector3 bc = alongZ ? new Vector3(f, yc, s) : new Vector3(s, yc, f);
+            Vector3 bs = alongZ ? new Vector3(T * 0.45f, v1 - v0, a1 - a0) : new Vector3(a1 - a0, v1 - v0, T * 0.45f);
+            B(PropMats.PlankGap).Box(bc, bs);
+            int k0 = Mathf.FloorToInt(v0 / BoardH + 1e-3f), k1 = Mathf.CeilToInt(v1 / BoardH - 1e-3f);
             for (int k = k0; k < k1; k++)
             {
-                float y0 = Mathf.Max(v0, k * BoardH), y1 = Mathf.Min(v1, (k + 1) * BoardH);
-                if (y1 - y0 < 0.01f) continue;
-                float push = (k % 2 == 0) ? 0f : 0.02f * outSign;
+                float y0 = Mathf.Max(v0, k * BoardH), y1 = Mathf.Min(v1, (k + 1) * BoardH - BoardGap);
+                if (y1 - y0 < 0.02f) continue;
+                uint h = Hash(k, wallId, Mathf.RoundToInt(a0 * 10f));
+                float off = ((h & 255) / 255f - 0.5f) * 0.02f * outSign;
                 float y = (y0 + y1) * 0.5f;
-                Vector3 center = alongZ ? new Vector3(f + push, y, s) : new Vector3(s, y, f + push);
+                Vector3 center = alongZ ? new Vector3(f + off, y, s) : new Vector3(s, y, f + off);
                 Vector3 size = alongZ ? new Vector3(T, y1 - y0, a1 - a0) : new Vector3(a1 - a0, y1 - y0, T);
-                B(k % 2 == 0 ? PropMats.Wall : PropMats.Wall2).Box(center, size);
+                Material m = k < 2 ? PropMats.AccentBoard : PropMats.Whitewash((int)((h >> 8) % 3));
+                B(m).Box(center, size);
             }
-            float yc = (v0 + v1) * 0.5f;
-            Vector3 cc = alongZ ? new Vector3(f, yc, s) : new Vector3(s, yc, f);
             Vector3 cs = alongZ ? new Vector3(T, v1 - v0, a1 - a0) : new Vector3(a1 - a0, v1 - v0, T);
-            Col(cc, cs);
+            Col(bc, cs);
         }
 
         static void Frame(bool alongZ, float f, Vector4 h)
         {
-            var d = B(PropMats.Wood);
+            var d = B(PropMats.Trim);
             float depth = T + 0.1f, w = 0.09f;
             bool isDoor = h.z <= 0.001f;
             Vector3 P(float s, float y) => alongZ ? new Vector3(f, y, s) : new Vector3(s, y, f);
@@ -183,6 +231,14 @@ namespace Sealebrities
             {
                 Vector3 sill = alongZ ? new Vector3(depth + 0.12f, w, h.y - h.x + 3f * w) : new Vector3(h.y - h.x + 3f * w, w, depth + 0.12f);
                 d.Box(P((h.x + h.y) * 0.5f, h.z - w * 0.5f), sill);
+                // 4-pane window: light glass and a cross of off-white mullions
+                float cs = (h.x + h.y) * 0.5f, cy = (h.z + h.w) * 0.5f;
+                Vector3 gs = alongZ ? new Vector3(0.02f, h.w - h.z, h.y - h.x) : new Vector3(h.y - h.x, h.w - h.z, 0.02f);
+                B(PropMats.Glass).Box(P(cs, cy), gs);
+                Vector3 mv = alongZ ? new Vector3(0.05f, h.w - h.z, 0.05f) : new Vector3(0.05f, h.w - h.z, 0.05f);
+                Vector3 mh = alongZ ? new Vector3(0.05f, 0.05f, h.y - h.x) : new Vector3(h.y - h.x, 0.05f, 0.05f);
+                d.Box(P(cs, cy), mv);
+                d.Box(P(cs, cy), mh);
                 // turquoise shutters left open on both sides (outside)
                 float outSide = Mathf.Sign(f);
                 float sw = (h.y - h.x) * 0.5f;
@@ -222,8 +278,10 @@ namespace Sealebrities
                 float zc = s * run * 0.5f;
                 float yc = ridgeY - run * 0.5f * Mathf.Tan(p) + 0.05f;
                 Vector3 center = new Vector3(0f, yc, zc);
-                Col(center + prot * new Vector3(0f, 0.08f, 0f), new Vector3(width, 0.22f, slopeLen), prot);
+                // thick slabs (no tunnelling when jumping against them), overlapping at the ridge
+                Col(center + prot * new Vector3(0f, 0.02f, -s * 0.15f), new Vector3(width + 0.1f, 0.4f, slopeLen + 0.3f), prot);
             }
+            Col(new Vector3(0f, ridgeY + 0.05f, 0f), new Vector3(width + 0.1f, 0.45f, 0.6f));
             // chunky ridge cap
             B(PropMats.RoofDark).Box(new Vector3(0f, ridgeY + 0.1f, 0f), new Vector3(width + 0.1f, 0.3f, 0.3f), Quaternion.Euler(45f, 0f, 0f));
 
@@ -275,6 +333,10 @@ namespace Sealebrities
             wood.Box(new Vector3(7.1f, 2.2f, 0.9f), new Vector3(0.14f, 0.14f, 5.3f));
             wood.Box(new Vector3(7.1f, 1.1f, pz0 + 0.1f), new Vector3(0.14f, 2.2f, 0.14f));
             wood.Box(new Vector3(7.1f, 1.1f, pz1 - 0.1f), new Vector3(0.14f, 2.2f, 0.14f));
+            // the awning and its posts are solid: nobody climbs through it into the gable any more
+            Col(new Vector3((HX + ax1) * 0.5f, (aTop + aLow) * 0.5f + 0.06f, az0 + stripes * sw * 0.5f), new Vector3(alen + 0.1f, 0.16f, stripes * sw + 0.1f), arot);
+            Col(new Vector3(7.1f, 1.1f, pz0 + 0.1f), new Vector3(0.16f, 2.2f, 0.16f));
+            Col(new Vector3(7.1f, 1.1f, pz1 - 0.1f), new Vector3(0.16f, 2.2f, 0.16f));
             // porch railing on the north/south edges
             for (int s = 0; s < 2; s++)
             {

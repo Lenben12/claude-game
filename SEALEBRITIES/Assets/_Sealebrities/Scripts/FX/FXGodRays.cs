@@ -3,15 +3,18 @@ using UnityEngine.Rendering;
 
 namespace Sealebrities
 {
-    /// Soft additive light shafts below the surface, slanted along the refracted sun direction.
+    /// Additive light shafts below the surface, slanted along the refracted sun direction (art bible §2.3):
+    /// flat graphic bands (no gaussian haze), width 1.2–3.5 m, ~18 m long, tint #DFFBFF, alpha ~0.12 in the
+    /// shallows fading to 0 at 30 m, swaying at 0.1 Hz. 8 shafts on High, 5 on Medium, 3 on Low.
     /// All shafts live in one dynamic mesh (one draw call); each quad is billboarded around its own axis.
-    /// Low-poly look: a few clean, flat bands (no gaussian haze), only in the bright shallows.
     sealed class FXGodRays
     {
-        const int Count = 8;
-        const float FadeStart = 6f;
-        const float MaxDepth = 14f;
-        const float Alpha = 0.3f;
+        const int MaxCount = 8;
+        const float FadeStart = 4f;
+        const float MaxDepth = 30f;
+        const float Alpha = 0.13f;
+        const float SwayHz = 0.1f;
+        const float SwayMeters = 0.45f;
 
         readonly GameObject go;
         readonly Mesh mesh;
@@ -19,21 +22,24 @@ namespace Sealebrities
         readonly Material mat;
         readonly Texture2D tex;
 
-        readonly Vector3[] verts = new Vector3[Count * 4];
-        readonly Color32[] cols = new Color32[Count * 4];
+        readonly Vector3[] verts = new Vector3[MaxCount * 4];
+        readonly Color32[] cols = new Color32[MaxCount * 4];
 
-        readonly Vector2[] anchor = new Vector2[Count];
-        readonly Vector2[] drift = new Vector2[Count];
-        readonly float[] age = new float[Count];
-        readonly float[] life = new float[Count];
-        readonly float[] length = new float[Count];
-        readonly float[] width = new float[Count];
-        readonly float[] gain = new float[Count];
+        readonly Vector2[] anchor = new Vector2[MaxCount];
+        readonly Vector2[] drift = new Vector2[MaxCount];
+        readonly Vector2[] swayDir = new Vector2[MaxCount];
+        readonly float[] swayPhase = new float[MaxCount];
+        readonly float[] age = new float[MaxCount];
+        readonly float[] life = new float[MaxCount];
+        readonly float[] length = new float[MaxCount];
+        readonly float[] width = new float[MaxCount];
+        readonly float[] gain = new float[MaxCount];
 
+        int count = MaxCount;
         float master;
         bool visible, needRespawn = true;
 
-        static readonly Color RayTint = new Color(0.86f, 0.97f, 1f, 1f);   // ~LowPoly.Foam with a turquoise touch
+        static readonly Color RayTint = new Color(0xDF / 255f, 0xFB / 255f, 1f, 1f);   // #DFFBFF
 
         public FXGodRays(Transform parent)
         {
@@ -45,9 +51,9 @@ namespace Sealebrities
 
             mesh = new Mesh { name = "FX_GodRays" };
             mesh.MarkDynamic();
-            var uvs = new Vector2[Count * 4];
-            var tris = new int[Count * 6];
-            for (int i = 0; i < Count; i++)
+            var uvs = new Vector2[MaxCount * 4];
+            var tris = new int[MaxCount * 6];
+            for (int i = 0; i < MaxCount; i++)
             {
                 int v = i * 4, t = i * 6;
                 uvs[v] = new Vector2(0f, 1f);
@@ -80,6 +86,20 @@ namespace Sealebrities
             if (tex != null) Object.Destroy(tex);
         }
 
+        public void SetTier(GraphicsQuality q)
+        {
+            int n = q == GraphicsQuality.High ? 8 : q == GraphicsQuality.Medium ? 5 : 3;
+            if (n == count) return;
+            count = Mathf.Clamp(n, 1, MaxCount);
+            // collapse the unused quads (zero area: no raster cost, no triangle-buffer change)
+            for (int i = count * 4; i < verts.Length; i++)
+            {
+                verts[i] = Vector3.zero;
+                cols[i] = new Color32(0, 0, 0, 0);
+            }
+            needRespawn = true;
+        }
+
         public void Tick(FXFrame f)
         {
             Light sun = WorldInfo.Sun;
@@ -98,7 +118,7 @@ namespace Sealebrities
             Vector3 sunFwd = sun.transform.forward;
             if (sunFwd.y > -0.08f) sunFwd.y = -0.08f;
             Vector2 h = new Vector2(sunFwd.x, sunFwd.z);
-            float sinAir = Mathf.Clamp01(h.magnitude / new Vector3(sunFwd.x, sunFwd.y, sunFwd.z).magnitude);
+            float sinAir = Mathf.Clamp01(h.magnitude / sunFwd.magnitude);
             float sinWater = sinAir / 1.33f;
             Vector2 hd = h.sqrMagnitude > 1e-6f ? h.normalized : Vector2.zero;
             var dir = new Vector3(hd.x * sinWater, -Mathf.Sqrt(1f - sinWater * sinWater), hd.y * sinWater);
@@ -112,7 +132,7 @@ namespace Sealebrities
             if (needRespawn)
             {
                 needRespawn = false;
-                for (int i = 0; i < Count; i++)
+                for (int i = 0; i < count; i++)
                 {
                     Respawn(i, f, camXZ - depthShift);
                     age[i] = Random.Range(0f, life[i]);
@@ -123,7 +143,8 @@ namespace Sealebrities
 
             Matrix4x4 w2l = go.transform.worldToLocalMatrix;
             float dt = f.dt;
-            for (int i = 0; i < Count; i++)
+            float swayT = f.time * FXMath.TwoPi * SwayHz;
+            for (int i = 0; i < count; i++)
             {
                 age[i] += dt;
                 anchor[i] += drift[i] * dt;
@@ -137,7 +158,8 @@ namespace Sealebrities
                 float env = Mathf.Sin(Mathf.PI * Mathf.Clamp01(age[i] / life[i]));
                 float alpha = master * env * gain[i] * Alpha;
 
-                float ax = anchor[i].x, az = anchor[i].y;
+                Vector2 a = anchor[i] + swayDir[i] * (Mathf.Sin(swayT + swayPhase[i]) * SwayMeters);
+                float ax = a.x, az = a.y;
                 var top = new Vector3(ax, Waves.HeightAt(ax, az) - 0.15f, az);
                 Vector3 bottom = top + dir * length[i];
                 Vector3 mid = (top + bottom) * 0.5f;
@@ -145,7 +167,7 @@ namespace Sealebrities
                 float rm = right.magnitude;
                 right = rm > 1e-4f ? right / rm : f.camRight;
 
-                float w0 = width[i] * 0.5f, w1 = width[i] * 0.85f;
+                float w0 = width[i] * 0.5f, w1 = width[i] * 0.8f;
                 int v = i * 4;
                 verts[v] = w2l.MultiplyPoint3x4(top - right * w0);
                 verts[v + 1] = w2l.MultiplyPoint3x4(top + right * w0);
@@ -167,11 +189,14 @@ namespace Sealebrities
             float radius = Random.Range(2.5f, 14f);
             anchor[i] = center + new Vector2(Mathf.Sin(yaw), Mathf.Cos(yaw)) * radius;
             float da = Random.Range(0f, FXMath.TwoPi);
-            drift[i] = new Vector2(Mathf.Cos(da), Mathf.Sin(da)) * Random.Range(0.05f, 0.25f);
-            life[i] = Random.Range(5f, 11f);
-            length[i] = Random.Range(12f, 26f);
-            width[i] = Random.Range(0.7f, 2.6f);
-            gain[i] = Random.Range(0.45f, 1f);
+            drift[i] = new Vector2(Mathf.Cos(da), Mathf.Sin(da)) * Random.Range(0.05f, 0.2f);
+            float sa = Random.Range(0f, FXMath.TwoPi);
+            swayDir[i] = new Vector2(Mathf.Cos(sa), Mathf.Sin(sa));
+            swayPhase[i] = Random.Range(0f, FXMath.TwoPi);
+            life[i] = Random.Range(6f, 12f);
+            length[i] = Random.Range(15f, 21f);
+            width[i] = Random.Range(1.2f, 3.5f);
+            gain[i] = Random.Range(0.7f, 1f);
         }
     }
 }

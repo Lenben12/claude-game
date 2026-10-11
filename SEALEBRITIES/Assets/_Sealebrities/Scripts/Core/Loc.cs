@@ -14,10 +14,16 @@ namespace Sealebrities
 
         public static string Tr(string de, string en) => Current == Language.German ? de : en;
 
+        /// Switches the UI language (stored in Settings, per machine).
         public static void SetLanguage(Language language)
         {
             if (Current == language) return;
             Current = language;
+            if (Settings.Data.language != language)
+            {
+                Settings.Data.language = language;
+                Settings.Save();
+            }
             if (GameManager.I != null) GameManager.I.State.language = language;
             GameEvents.RaiseLanguageChanged();
         }
@@ -61,15 +67,14 @@ namespace Sealebrities
             }
         }
 
+        /// Entspannt / Normal / Schwer (old Technical/Abyss saves count as Schwer).
         public static string DifficultyName(Difficulty d)
         {
-            switch (d)
+            switch (DifficultySettings.Normalize(d))
             {
-                case Difficulty.Snorkeler: return Tr("Schnorchler", "Snorkeler");
-                case Difficulty.OpenWater: return "Open Water";
-                case Difficulty.Advanced: return "Advanced";
-                case Difficulty.Technical: return "Technical";
-                default: return "Abyss";
+                case Difficulty.Snorkeler: return Tr("Entspannt", "Relaxed");
+                case Difficulty.OpenWater: return Tr("Normal", "Normal");
+                default: return Tr("Schwer", "Hard");
             }
         }
 

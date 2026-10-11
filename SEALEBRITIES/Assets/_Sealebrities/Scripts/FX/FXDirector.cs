@@ -6,6 +6,7 @@ namespace Sealebrities
     /// Runs after gameplay scripts (late execution order) so the camera has its final pose for the frame.
     /// Gathers the shared FXFrame once and ticks every FX subsystem. A failing subsystem is logged once and
     /// switched off; it never takes the rest of the game (or the bootstrap) down with it.
+    /// Applies the graphics tier and the audio volumes from Settings (initially and on Settings.Changed).
     [DefaultExecutionOrder(1000)]
     public sealed class FXDirector : MonoBehaviour
     {
@@ -17,10 +18,13 @@ namespace Sealebrities
         FXParticles particles;
         FXGodRays rays;
         FXAudio audio;
+        FXGraphics graphics;
 
         bool initialized, subscribed;
-        bool pendingSplash, pendingSplashUnder;
+        bool pendingSplash, pendingSplashUnder, pendingSettings;
         float lastSplashTime = -100f;
+        bool wasUnderwater;
+        Camera configuredCam;
 
         public void Init()
         {
@@ -31,6 +35,8 @@ namespace Sealebrities
             try { particles = new FXParticles(transform); } catch (Exception e) { Fail("particles", e); particles = null; }
             try { rays = new FXGodRays(transform); } catch (Exception e) { Fail("god rays", e); rays = null; }
             try { audio = new FXAudio(transform); } catch (Exception e) { Fail("audio", e); audio = null; }
+            graphics = new FXGraphics();
+            ApplySettings();
             Subscribe();
         }
 
@@ -51,6 +57,7 @@ namespace Sealebrities
             try { if (rays != null) rays.Dispose(); } catch (Exception) { }
             try { if (audio != null) audio.Dispose(); } catch (Exception) { }
             try { if (post != null) post.Dispose(); } catch (Exception) { }
+            try { if (graphics != null) graphics.RestoreEditorDefaults(); } catch (Exception) { }
         }
 
         void Subscribe()
@@ -58,7 +65,9 @@ namespace Sealebrities
             if (subscribed) return;
             subscribed = true;
             GameEvents.UnderwaterChanged += OnUnderwaterChanged;
+            Settings.Changed += OnSettingsChanged;
             if (audio != null) audio.Subscribe();
+            if (particles != null) particles.Subscribe();
         }
 
         void Unsubscribe()
@@ -66,7 +75,9 @@ namespace Sealebrities
             if (!subscribed) return;
             subscribed = false;
             GameEvents.UnderwaterChanged -= OnUnderwaterChanged;
+            Settings.Changed -= OnSettingsChanged;
             if (audio != null) audio.Unsubscribe();
+            if (particles != null) particles.Unsubscribe();
         }
 
         void OnUnderwaterChanged(bool under)
@@ -75,11 +86,46 @@ namespace Sealebrities
             pendingSplashUnder = under;
         }
 
+        void OnSettingsChanged() { pendingSettings = true; }
+
+        /// Graphics tier (only when it changed) + audio volumes.
+        void ApplySettings()
+        {
+            var data = Settings.Data;
+            GraphicsQuality q = data != null ? data.quality : GraphicsQuality.High;
+            if (graphics != null && (q != f.quality || !appliedOnce))
+            {
+                appliedOnce = true;
+                f.quality = q;
+                try { graphics.Apply(q); } catch (Exception e) { Debug.LogWarning("Sealebrities FX: graphics tier failed: " + e.Message); }
+                try { if (post != null) post.SetTier(q); } catch (Exception) { }
+                try { if (particles != null) particles.SetTier(q); } catch (Exception) { }
+                try { if (rays != null) rays.SetTier(q); } catch (Exception) { }
+                try { if (caustics != null) caustics.SetTier(q); } catch (Exception) { }
+            }
+            if (audio != null) audio.ApplyVolumes();
+        }
+        bool appliedOnce;
+
         void LateUpdate()
         {
             if (!initialized) return;
+            if (pendingSettings)
+            {
+                pendingSettings = false;
+                ApplySettings();
+            }
             UpdateFrame();
             breath.Tick(f);
+
+            if (f.cam != configuredCam)
+            {
+                configuredCam = f.cam;
+                if (configuredCam != null && graphics != null)
+                {
+                    try { graphics.ConfigureCamera(configuredCam); } catch (Exception e) { Debug.LogWarning("Sealebrities FX: camera setup failed: " + e.Message); }
+                }
+            }
 
             if (pendingSplash)
             {
@@ -92,6 +138,11 @@ namespace Sealebrities
             {
                 try { post.Tick(f); } catch (Exception e) { Fail("post-processing", e); post = null; }
             }
+            if (graphics != null && f.cam != null)
+            {
+                try { graphics.TickFarClip(f.cam, f.underwater && f.under01 >= 0.5f, FXVisibility.Meters); }
+                catch (Exception e) { Debug.LogWarning("Sealebrities FX: far clip failed: " + e.Message); graphics = null; }
+            }
             if (caustics != null)
             {
                 try { caustics.Tick(f); }
@@ -99,7 +150,7 @@ namespace Sealebrities
             }
             if (particles != null)
             {
-                try { particles.Tick(f, breath); } catch (Exception e) { Fail("particles", e); particles = null; }
+                try { particles.Tick(f, breath); } catch (Exception e) { Fail("particles", e); particles.Unsubscribe(); particles = null; }
             }
             if (rays != null)
             {
@@ -135,7 +186,8 @@ namespace Sealebrities
             f.dt = dt;
             f.time = Time.time;
             f.unscaledTime = Time.unscaledTime;
-            f.paused = UIState.PauseOpen;
+            // a real pause stops time (offline pause menu, finale); in co-op the world keeps running
+            f.paused = Time.timeScale <= 0.0001f;
             f.inGame = GameManager.I != null && GameManager.I.InGame;
 
             IPlayer p = Refs.Player;
@@ -178,13 +230,28 @@ namespace Sealebrities
                 f.fainting = false;
             }
 
+            if (f.underwater && !wasUnderwater) f.sinceSubmerge = 0f;
+            else if (f.underwater) f.sinceSubmerge += Time.unscaledDeltaTime;
+            else f.sinceSubmerge = 100f;
+            wasUnderwater = f.underwater;
+
             f.night01 = Mathf.Clamp01(EnvState.Night01);
             f.sun01 = Mathf.Clamp01(EnvState.SunIntensity01);
             f.day01 = FXMath.SmoothRange(0.04f, 0.35f, f.sun01) * (1f - f.night01 * 0.8f);
 
-            // Smoothed blends. Entering the water is quick; leaving lets the blue "drain" off the lens.
+            Light sun = WorldInfo.Sun;
+            if (sun != null)
+            {
+                float y = -sun.transform.forward.y;
+                f.sunElevation = Mathf.Asin(Mathf.Clamp(y, -1f, 1f)) * Mathf.Rad2Deg;
+            }
+            else f.sunElevation = Mathf.Lerp(-20f, 45f, f.sun01);
+            // golden hour: sun from just below the horizon to ~20° (the menu is at ~8°)
+            f.golden01 = FXMath.SmoothRange(-4f, 3f, f.sunElevation) * (1f - FXMath.SmoothRange(10f, 22f, f.sunElevation));
+
+            // Smoothed blends. Entering the water is quick (≤ 0.2 s); leaving lets the blue "drain" off the lens.
             float uTarget = f.underwater ? 1f : 0f;
-            f.under01 = Mathf.MoveTowards(f.under01, uTarget, dt / (f.underwater ? 0.18f : 0.35f));
+            f.under01 = Mathf.MoveTowards(f.under01, uTarget, dt / (f.underwater ? 0.16f : 0.35f));
             f.flash01 = Mathf.MoveTowards(f.flash01, f.flashlight ? 1f : 0f, dt / 0.15f);
             f.faint01 = Mathf.MoveTowards(f.faint01, f.fainting ? 1f : 0f, dt / 0.8f);
 

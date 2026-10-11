@@ -6,14 +6,16 @@ using UnityEngine.Rendering;
 
 namespace Sealebrities
 {
-    /// World-anchored water color classes on a 3 m grid (0 = shallow turquoise .. 3 = deep blue), from the seafloor depth.
-    /// The ocean colors its faceted triangles from this map, so lagoons stay bright and the open sea is deep blue.
+    /// World-anchored seafloor depth on the corners of a 3 m grid, stored as the ocean colour-ramp coordinate
+    /// u = sqrt(depth / RampDepth) (0 = shore .. 1 = open sea). The ocean gives every vertex the value at its own
+    /// position, so the water colour blends smoothly with depth – no classes, no squares (art bible §1.6).
     public sealed class WorldWaterMap
     {
         public const float CellSize = 3f;
-        public const int Classes = 4;
+        /// Depth at which the ramp reaches the open-sea colour.
+        public const float RampDepth = 35f;
         public readonly int MinX, MinZ, Size;
-        readonly byte[] value;   // continuous class * 60
+        readonly byte[] value;   // u * 255
 
         WorldWaterMap(int min, int size, byte[] v) { MinX = min; MinZ = min; Size = size; value = v; }
 
@@ -21,58 +23,91 @@ namespace Sealebrities
         public static WorldWaterMap Build(Func<float, float, float> height)
         {
             int min = (int)Math.Floor(WorldTerrainData.Origin / CellSize);
-            int max = (int)Math.Floor(-WorldTerrainData.Origin / CellSize);
+            int max = (int)Math.Ceiling(-WorldTerrainData.Origin / CellSize);
             int size = max - min + 1;
             var v = new byte[size * size];
             Parallel.For(0, size, j =>
             {
-                float z = (min + j) * CellSize + CellSize * 0.5f;
+                float z = (min + j) * CellSize;
                 for (int i = 0; i < size; i++)
                 {
-                    float x = (min + i) * CellSize + CellSize * 0.5f;
-                    float depth = Waves.SeaLevel - height(x, z);
-                    v[j * size + i] = (byte)(ClassOfDepth(depth) * 60f + 0.5f);
+                    float x = (min + i) * CellSize;
+                    // average of the point and a 1.5 m cross: the ramp follows the seafloor, not single facets
+                    float d = 2f * (Waves.SeaLevel - height(x, z));
+                    d += Waves.SeaLevel - height(x + 1.5f, z) + Waves.SeaLevel - height(x - 1.5f, z);
+                    d += Waves.SeaLevel - height(x, z + 1.5f) + Waves.SeaLevel - height(x, z - 1.5f);
+                    v[j * size + i] = (byte)(RampU(d / 6f) * 255f + 0.5f);
                 }
             });
             return new WorldWaterMap(min, size, v);
         }
 
-        /// 0 (<= 1.2 m) .. 1 (4.5 m) .. 2 (13 m) .. 3 (>= 32 m).
-        public static float ClassOfDepth(float depth)
+        /// Ramp coordinate for a seafloor depth (0 at or above the waterline .. 1 from RampDepth on).
+        public static float RampU(float depth)
         {
-            if (depth <= 1.2f) return 0f;
-            if (depth < 4.5f) return (depth - 1.2f) / 3.3f;
-            if (depth < 13f) return 1f + (depth - 4.5f) / 8.5f;
-            if (depth < 32f) return 2f + (depth - 13f) / 19f;
-            return 3f;
+            if (depth <= 0f) return 0f;
+            float t = depth / RampDepth;
+            return t >= 1f ? 1f : (float)Math.Sqrt(t);
         }
 
-        /// Continuous class of a 3 m world cell (outside the map: deep).
-        public float ClassAt(int cellX, int cellZ)
+        /// Seafloor depth for a ramp coordinate (inverse of RampU).
+        public static float DepthOfU(float u) => u * u * RampDepth;
+
+        /// Ramp coordinate at the 3 m grid corner (gx * CellSize, gz * CellSize); outside the map: open sea.
+        public float UAt(int gx, int gz)
         {
-            int i = cellX - MinX, j = cellZ - MinZ;
-            if (i < 0 || j < 0 || i >= Size || j >= Size) return 3f;
-            return value[j * Size + i] * (1f / 60f);
+            int i = gx - MinX, j = gz - MinZ;
+            if (i < 0 || j < 0 || i >= Size || j >= Size) return 1f;
+            return value[j * Size + i] * (1f / 255f);
         }
 
-        /// Discrete class for one triangle: clean color bands (How to Fish look) with only a narrow, jagged
-        /// one-or-two-triangle border between classes (world-anchored hash). A wide dither zone read as noisy
-        /// light/dark "confetti" over the whole reef flat.
-        public static int Pick(float c, uint hash)
+        // ------------------------------------------------------------------ colour ramp (art bible §1.6)
+        // Art polish pass: the albedo is pre-compensated for the noon sun + sky ambient + grade (the build measured the
+        // lit sea ≈ 1.65 × its albedo: #417CB5 instead of the How to Fish #2F6290 near the dock), and the sea is
+        // ≥ 95 % opaque from 4 m on – the reef props and the pale seabed showed through as blue blotches from the dock.
+        // Only the last metre at the beach stays see-through turquoise.
+        // (second/third pass: the shallow house reef (2-4 m) still showed through from the dock end → effectively
+        // opaque from 2.5 m on; only the beach strip stays see-through turquoise)
+        static readonly float[] StopDepth = { 0f, 0.6f, 1.5f, 2.5f, 4f, 5f, 15f, 35f };
+        static readonly float[] StopR = { 0x43, 0x3E, 0x33, 0x2E, 0x2C, 0x2A, 0x24, 0x20 };
+        static readonly float[] StopG = { 0x9E, 0x96, 0x7C, 0x6E, 0x66, 0x5E, 0x4A, 0x3F };
+        static readonly float[] StopB = { 0xB5, 0xAF, 0x9C, 0x92, 0x8C, 0x88, 0x74, 0x66 };
+        static readonly float[] StopA = { 0.60f, 0.72f, 0.93f, 0.99f, 0.997f, 1.0f, 1.0f, 1.0f };
+
+        /// sRGB colour (alpha = opacity) of the sea surface over a seafloor depth.
+        public static Color RampColor(float depth)
         {
-            int k = (int)c;
-            if (k >= Classes - 1) return Classes - 1;
-            float f = c - k;
-            const float lo = 0.44f, hi = 0.56f;
-            float p = f <= lo ? 0f : (f >= hi ? 1f : (f - lo) / (hi - lo));
-            return ((hash & 0xFFFF) / 65535f) < p ? k + 1 : k;
+            if (depth <= 0f) depth = 0f;
+            int last = StopDepth.Length - 1;
+            if (depth >= StopDepth[last]) return Rgba(last, last, 0f);
+            for (int i = 0; i < last; i++)
+            {
+                if (depth <= StopDepth[i + 1])
+                {
+                    float t = (depth - StopDepth[i]) / (StopDepth[i + 1] - StopDepth[i]);
+                    return Rgba(i, i + 1, t);
+                }
+            }
+            return Rgba(last, last, 0f);
         }
+
+        static Color Rgba(int a, int b, float t)
+        {
+            const float k = 1f / 255f;
+            return new Color((StopR[a] + (StopR[b] - StopR[a]) * t) * k, (StopG[a] + (StopG[b] - StopG[a]) * t) * k,
+                             (StopB[a] + (StopB[b] - StopB[a]) * t) * k, StopA[a] + (StopA[b] - StopA[a]) * t);
+        }
+
+        /// Brightness of the facet rows of the ramp texture (each ocean triangle picks one: ±8 % facet variance).
+        public static readonly float[] FacetRows = { 0.915f, 0.97f, 1.03f, 1.085f };
     }
 
-    /// Shoreline foam geometry: a thin faceted band along the sea-level contour of the terrain triangles.
+    /// Shoreline foam geometry: a lumpy 1.6-2.8 m band along the sea-level contour of the terrain triangles, plus a
+    /// thin second wave line 2-4 m offshore where the beach shelves gently.
     public sealed class WorldCoastData
     {
         public Vector3[] Verts, Normals;
+        public Vector3[] LineVerts, LineNormals;
 
         /// Thread-safe (reads only terrain data). Returns null when the terrain never crosses sea level.
         public static WorldCoastData Build(WorldTerrainData terrain)
@@ -99,36 +134,56 @@ namespace Sealebrities
             }
             if (segs.Count == 0) return null;
 
-            // per point: averaged seaward direction and a varying band width
+            // per point: averaged seaward direction, a band width that swells and narrows along the coast
+            // (period ≈ 9 m) with small lumps, and whether a second wave line fits offshore (gentle beach)
             int pc = pts.Count;
             var nrm = new Vector2[pc];
             var width = new float[pc];
+            var line = new bool[pc];
             for (int p = 0; p < pc; p++)
             {
                 Vector2 v = dirs[p];
                 float l = v.magnitude;
                 nrm[p] = l > 1e-5f ? v / l : Vector2.zero;
                 var q = pts[p];
-                float h = WorldTerrainData.Hash01(Mathf.RoundToInt(q.x * 2f), Mathf.RoundToInt(q.z * 2f), 4242);
-                width[p] = 0.9f + 1.3f * h;
+                float swell = WorldNoise.Perlin(q.x * 0.11f + 3.7f, q.z * 0.11f - 8.1f);
+                float lump = WorldTerrainData.Hash01(Mathf.RoundToInt(q.x * 2f), Mathf.RoundToInt(q.z * 2f), 4242);
+                width[p] = Mathf.Clamp(2.2f + 1.5f * swell + 0.45f * (lump - 0.5f), 1.6f, 2.8f);
+                if (nrm[p] != Vector2.zero)
+                {
+                    float h3 = terrain.Height(q.x + nrm[p].x * 3.2f, q.z + nrm[p].y * 3.2f);
+                    float h5 = terrain.Height(q.x + nrm[p].x * 5f, q.z + nrm[p].y * 5f);
+                    line[p] = h3 > -1.3f && h3 < -0.12f && h5 < -0.2f && h5 > -2.2f;
+                }
             }
 
             int segCount = segs.Count / 2;
-            var verts = new Vector3[segCount * 12];
-            var norms = new Vector3[segCount * 12];
-            int o = 0;
+            var verts = new List<Vector3>(segCount * 12);
+            var norms = new List<Vector3>(segCount * 12);
+            var lverts = new List<Vector3>(segCount * 6);
+            var lnorms = new List<Vector3>(segCount * 6);
             for (int k = 0; k < segCount; k++)
             {
                 int ip = segs[k * 2], iq = segs[k * 2 + 1];
                 Vector3 p = pts[ip], q = pts[iq];
+                Vector3 mid = (p + q) * 0.5f;
+                if (WorldFeatures.SuppressFoam(mid.x, mid.z)) continue;
                 Vector3 np = new Vector3(nrm[ip].x, 0f, nrm[ip].y), nq = new Vector3(nrm[iq].x, 0f, nrm[iq].y);
-                Vector3 pin = p - np * 0.35f, qin = q - nq * 0.35f;
-                Vector3 pmid = p + np * (width[ip] * 0.45f) + Vector3.up * 0.05f, qmid = q + nq * (width[iq] * 0.45f) + Vector3.up * 0.05f;
+                Vector3 pin = p - np * 0.4f, qin = q - nq * 0.4f;
+                Vector3 pmid = p + np * (width[ip] * 0.42f) + Vector3.up * 0.06f, qmid = q + nq * (width[iq] * 0.42f) + Vector3.up * 0.06f;
                 Vector3 pout = p + np * width[ip], qout = q + nq * width[iq];
-                o = Quad(verts, norms, o, pin, qin, qmid, pmid);
-                o = Quad(verts, norms, o, pmid, qmid, qout, pout);
+                Quad(verts, norms, pin, qin, qmid, pmid);
+                Quad(verts, norms, pmid, qmid, qout, pout);
+
+                if (line[ip] && line[iq])
+                {
+                    float op = 2.6f + 1.2f * WorldNoise.Perlin(p.x * 0.07f, p.z * 0.07f + 3f);
+                    float oq = 2.6f + 1.2f * WorldNoise.Perlin(q.x * 0.07f, q.z * 0.07f + 3f);
+                    Quad(lverts, lnorms, p + np * op, q + nq * oq, q + nq * (oq + 0.75f), p + np * (op + 0.75f));
+                }
             }
-            return new WorldCoastData { Verts = verts, Normals = norms };
+            if (verts.Count == 0) return null;
+            return new WorldCoastData { Verts = verts.ToArray(), Normals = norms.ToArray(), LineVerts = lverts.ToArray(), LineNormals = lnorms.ToArray() };
         }
 
         static void Segment(WorldTerrainChunk c, int a, int b, int d, float sea, List<Vector3> pts, List<Vector2> dirs, List<int> segs, Dictionary<long, int> index)
@@ -173,43 +228,72 @@ namespace Sealebrities
         }
 
         /// Two flat-shaded, upward-facing triangles.
-        static int Quad(Vector3[] v, Vector3[] n, int o, Vector3 a, Vector3 b, Vector3 c, Vector3 d)
+        static void Quad(List<Vector3> v, List<Vector3> n, Vector3 a, Vector3 b, Vector3 c, Vector3 d)
         {
-            o = Tri(v, n, o, a, b, c);
-            return Tri(v, n, o, a, c, d);
+            Tri(v, n, a, b, c);
+            Tri(v, n, a, c, d);
         }
 
-        static int Tri(Vector3[] v, Vector3[] n, int o, Vector3 a, Vector3 b, Vector3 c)
+        static void Tri(List<Vector3> v, List<Vector3> n, Vector3 a, Vector3 b, Vector3 c)
         {
             var nrm = Vector3.Cross(b - a, c - a);
             if (nrm.y < 0f) { var t = b; b = c; c = t; nrm = -nrm; }
             float l = nrm.magnitude;
             nrm = l > 1e-8f ? nrm / l : Vector3.up;
-            v[o] = a; v[o + 1] = b; v[o + 2] = c;
-            n[o] = nrm; n[o + 1] = nrm; n[o + 2] = nrm;
-            return o + 3;
+            v.Add(a); v.Add(b); v.Add(c);
+            n.Add(nrm); n.Add(nrm); n.Add(nrm);
         }
     }
 
-    /// The white foam line around the island: sits on the water at the shore, bobs gently, hidden from below.
+    /// The white foam band around every coast (island, landmark islands, sea stacks): sits on the water at the shore,
+    /// slides gently in and out (0.12 Hz), hidden from below. A fainter second wave line breathes offshore.
     [DefaultExecutionOrder(110)]
     public sealed class WorldCoast : MonoBehaviour
     {
         public const int RenderQueue = 2985;   // after the ocean surface
-        MeshRenderer r;
-        Material mat;
+        MeshRenderer r, lineR;
+        Transform lineT;
+        Material mat, lineMat;
         Camera cam;
+        int idBase;
+        Color lineCol;
 
         public static WorldCoast Create(Transform parent, WorldCoastData data)
         {
             if (data == null || data.Verts == null || data.Verts.Length == 0) return null;
             var go = new GameObject("CoastFoam");
             go.transform.SetParent(parent, false);
-            var mesh = new Mesh { name = "SB_CoastFoam" };
-            if (data.Verts.Length > 65000) mesh.indexFormat = IndexFormat.UInt32;
-            mesh.SetVertices(data.Verts);
-            mesh.SetNormals(data.Normals);
-            var idx = new int[data.Verts.Length];
+            go.AddComponent<MeshFilter>().sharedMesh = BuildMesh("SB_CoastFoam", data.Verts, data.Normals);
+            var c = go.AddComponent<WorldCoast>();
+            c.idBase = Shader.PropertyToID("_BaseColor");
+            c.r = go.AddComponent<MeshRenderer>();
+            var col = LowPoly.Foam;
+            col.a = 0.92f;
+            c.mat = FoamMaterial("SB_CoastFoam", col, RenderQueue);
+            Setup(c.r, c.mat);
+
+            if (data.LineVerts != null && data.LineVerts.Length > 0)
+            {
+                var lgo = new GameObject("CoastFoamLine");
+                lgo.transform.SetParent(go.transform.parent, false);
+                lgo.AddComponent<MeshFilter>().sharedMesh = BuildMesh("SB_CoastFoamLine", data.LineVerts, data.LineNormals);
+                c.lineR = lgo.AddComponent<MeshRenderer>();
+                c.lineCol = LowPoly.Foam;
+                c.lineCol.a = 0.4f;
+                c.lineMat = FoamMaterial("SB_CoastFoamLine", c.lineCol, RenderQueue - 1);
+                Setup(c.lineR, c.lineMat);
+                c.lineT = lgo.transform;
+            }
+            return c;
+        }
+
+        static Mesh BuildMesh(string name, Vector3[] verts, Vector3[] normals)
+        {
+            var mesh = new Mesh { name = name };
+            if (verts.Length > 65000) mesh.indexFormat = IndexFormat.UInt32;
+            mesh.SetVertices(verts);
+            mesh.SetNormals(normals);
+            var idx = new int[verts.Length];
             for (int i = 0; i < idx.Length; i++) idx[i] = i;
             mesh.SetIndices(idx, MeshTopology.Triangles, 0);
             mesh.RecalculateBounds();
@@ -217,24 +301,27 @@ namespace Sealebrities
             b.Expand(new Vector3(0f, 1f, 0f));
             mesh.bounds = b;
             mesh.UploadMeshData(true);
+            return mesh;
+        }
 
-            go.AddComponent<MeshFilter>().sharedMesh = mesh;
-            var c = go.AddComponent<WorldCoast>();
-            c.r = go.AddComponent<MeshRenderer>();
-            var col = LowPoly.Foam;
-            col.a = 0.9f;
-            c.mat = new Material(MaterialLibrary.Lit) { name = "SB_CoastFoam" };
-            c.mat.SetColor("_BaseColor", col);
-            c.mat.SetFloat("_Smoothness", 0.2f);
-            c.mat.SetFloat("_Metallic", 0f);
-            MaterialLibrary.MakeTransparent(c.mat, false);
-            c.mat.renderQueue = RenderQueue;
-            c.r.sharedMaterial = c.mat;
-            c.r.shadowCastingMode = ShadowCastingMode.Off;
-            c.r.receiveShadows = true;
-            c.r.lightProbeUsage = LightProbeUsage.Off;
-            c.r.reflectionProbeUsage = ReflectionProbeUsage.Off;
-            return c;
+        static Material FoamMaterial(string name, Color col, int queue)
+        {
+            var m = new Material(MaterialLibrary.Lit) { name = name };
+            m.SetColor("_BaseColor", col);
+            m.SetFloat("_Smoothness", 0.2f);
+            m.SetFloat("_Metallic", 0f);
+            MaterialLibrary.MakeTransparent(m, false);
+            m.renderQueue = queue;
+            return m;
+        }
+
+        static void Setup(MeshRenderer r, Material m)
+        {
+            r.sharedMaterial = m;
+            r.shadowCastingMode = ShadowCastingMode.Off;
+            r.receiveShadows = true;
+            r.lightProbeUsage = LightProbeUsage.Off;
+            r.reflectionProbeUsage = ReflectionProbeUsage.Off;
         }
 
         void LateUpdate()
@@ -251,14 +338,26 @@ namespace Sealebrities
                 show = p.y > Waves.HeightAt(p.x, p.z) - 0.05f;
             }
             if (r.enabled != show) r.enabled = show;
+            if (lineR != null && lineR.enabled != show) lineR.enabled = show;
             if (!show) return;
+
+            // on an ~8 % beach a few cm of rise slide the foam's landward edge ~0.4 m in and out
             float t = Time.time;
-            transform.localPosition = new Vector3(0f, 0.07f + 0.07f * Mathf.Sin(t * 1.15f) + 0.03f * Mathf.Sin(t * 2.3f + 1f), 0f);
+            float slide = Mathf.Sin(t * 0.754f);
+            transform.localPosition = new Vector3(0f, 0.07f + 0.045f * slide + 0.015f * Mathf.Sin(t * 1.9f + 1f), 0f);
+            if (lineR != null)
+            {
+                lineT.localPosition = new Vector3(0f, 0.05f + 0.03f * Mathf.Sin(t * 0.754f + 2.2f), 0f);
+                lineCol.a = 0.4f * (0.55f + 0.45f * Mathf.Sin(t * 0.754f + 1.2f));
+                lineMat.SetColor(idBase, lineCol);
+            }
         }
 
         void OnDestroy()
         {
             if (mat != null) Destroy(mat);
+            if (lineMat != null) Destroy(lineMat);
+            if (lineT != null) Destroy(lineT.gameObject);
         }
     }
 }

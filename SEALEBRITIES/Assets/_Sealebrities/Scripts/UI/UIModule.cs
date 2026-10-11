@@ -73,9 +73,10 @@ namespace Sealebrities
             if (controller != null) controller.ShowMainMenu();
         }
 
-        /// Debug/AutoShot helper: opens the phone on an app by id ("sealog", "shop", "fintube", "krill", "followfish",
-        /// "map", "messages", "settings"). "sealog:&lt;speciesId&gt;" opens that species' journal page, null or "" the home
-        /// screen, "close" closes the phone. Returns false when the phone cannot open (no game, menu/pause/loading open).
+        /// Debug/AutoShot helper: opens the phone on an app by id ("sealog", "tasks", "market", "gallery", "shop",
+        /// "fintube", "krill", "followfish", "map", "messages", "settings"). "sealog:&lt;speciesId&gt;" opens that species'
+        /// journal page, null or "" the home screen, "close" closes the phone, "inventory" / "inventory:close" toggles the
+        /// inventory. Returns false when the phone cannot open (no game, menu/pause/loading open).
         public static bool DebugOpenPhone(string app)
         {
             if (controller == null || controller.Phone == null) return false;
@@ -85,6 +86,8 @@ namespace Sealebrities
                 phone.Close();
                 return true;
             }
+            if (app == "inventory") { controller.Inventory.Open(); return UIState.InventoryOpen; }
+            if (app == "inventory:close") { controller.Inventory.Close(); return true; }
 
             string id = app, detail = null;
             if (!string.IsNullOrEmpty(app))
@@ -100,8 +103,8 @@ namespace Sealebrities
             UIPhoneApp target = null;
             if (!string.IsNullOrEmpty(id))
             {
-                UIPhoneApp[] apps = { phone.Sealog, phone.Shop, phone.FinTube, phone.Krill, phone.FollowFish, phone.Map, phone.Messages, phone.Settings };
-                for (int i = 0; i < apps.Length; i++)
+                var apps = phone.Apps;
+                for (int i = 0; i < apps.Count; i++)
                     if (apps[i] != null && apps[i].Id == id) { target = apps[i]; break; }
                 if (target == null) Debug.LogWarning("Sealebrities UI: unknown phone app '" + id + "'.");
             }

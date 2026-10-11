@@ -18,9 +18,17 @@ namespace Sealebrities
         static void ResetStatics() { Ready = false; HadErrors = false; BootSeconds = 0f; }
     }
 
-    /// The only object in Main.unity. Creates the GameManager and the world root, then installs every module in the
-    /// documented order behind the loading screen and opens the main menu. Every step is guarded: a module that
-    /// throws is logged and the boot continues with the next one.
+    /// The only object in Main.unity. Boot order:
+    ///   Awake  – GameManager (Settings.Load + Settings.Apply: frame cap, vSync, volumes, language, key bindings),
+    ///            co-op module (NetBoot: transport pump, session, lobby, command line -host/-join) and net-sync
+    ///            (avatars, boat, creatures, voice), debug cheats, world root, loading camera.
+    ///   Boot() – behind the loading screen: UI, World, Player, Boat, Fauna, Filming, FX, creature prewarm.
+    ///   Then   – UIModule.ShowMainMenu: on the first menu after launch the UI runs the launch intro
+    ///            (UIIntro → PlayerIntro.Play, skippable, captions) and opens the menu when it ends; the Player module
+    ///            shows the bean-diver crew on the dock behind the menu. PlayerIntro skips itself for -host, -join,
+    ///            -autoshot, -autoplaytest, -autoplaytest-mp and -nointro. With -host / -join NetBoot starts or joins
+    ///            the co-op session as soon as the menu is up.
+    /// Every step is guarded: a module that throws is logged and the boot continues with the next one.
     [DefaultExecutionOrder(-1000)]
     public sealed class GameBootstrap : MonoBehaviour
     {
@@ -40,15 +48,23 @@ namespace Sealebrities
             BootState.Ready = false;
             BootState.HadErrors = false;
 
-            Application.targetFrameRate = 60;   // vSync count stays at the quality-level default
-            // shadow distance comes from the URP asset (m_ShadowDistance = 150, written by SealebritiesSetup);
-            // URP ignores QualitySettings.shadowDistance
-
+            // Frame cap, vSync and volumes come from the player's settings (Settings.Apply, run by GameManager.Awake);
+            // shadow distance comes from the URP asset (written by SealebritiesSetup) – URP ignores QualitySettings.
             if (GameManager.I == null)
             {
                 var gm = new GameObject("GameManager");
-                gm.AddComponent<GameManager>();
+                gm.AddComponent<GameManager>();   // Awake: Settings.Load + Settings.Apply
             }
+            else
+            {
+                Step("Settings.Apply", Settings.Apply);
+            }
+
+            // Co-op early, so the lobby, the command line (-host / -join) and the replication handlers exist before
+            // any module installs. Both are idempotent (they also self-install after the scene load).
+            Step("NetBoot.EnsureInstalled", NetBoot.EnsureInstalled);
+            Step("NetWorldSync.Install", () => NetWorldSync.Install());
+            Step("DebugCheats.Install", DebugCheats.Install);
 
             var world = new GameObject("World");
             root = world.transform;
@@ -133,7 +149,14 @@ namespace Sealebrities
             if (bootCamera != null && Camera.main != null) DestroyBootCamera();
 
             Step("UIModule.HideLoading", UIModule.HideLoading);
-            Step("UIModule.ShowMainMenu", UIModule.ShowMainMenu);
+            // First menu after launch: the UI plays the launch intro (PlayerIntro.Play) and opens the menu when it ends
+            // or is skipped. Without a UI the intro still runs so the camera ends on the menu crew.
+            if (UIModule.Controller != null) Step("UIModule.ShowMainMenu", UIModule.ShowMainMenu);
+            else
+            {
+                UIState.MainMenuOpen = true;
+                Step("PlayerIntro.Play", () => PlayerIntro.Play(null));
+            }
 
             if (!subscribed)
             {

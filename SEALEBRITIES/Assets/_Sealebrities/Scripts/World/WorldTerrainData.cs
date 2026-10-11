@@ -7,7 +7,7 @@ using UnityEngine;
 namespace Sealebrities
 {
     /// Color class of one terrain triangle; each class is one shared flat LowPoly material (one submesh per chunk).
-    public enum TerrainClass : byte { Sand, SandAlt, WetSand, Grass, GrassDark, Soil, Rock, RockDark, Seabed, SeabedAlt, DeepRock }
+    public enum TerrainClass : byte { Sand, SandAlt, WetSand, Grass, GrassDark, Soil, Rock, RockDark, Seabed, SeabedAlt, DeepRock, GrassDry }
 
     /// One 128 m terrain chunk: a slightly jittered grid whose border vertices sit exactly on the chunk edge.
     /// Edges shared with a coarser neighbour are stitched (their extra vertices lie on the coarse edge), so there are no cracks.
@@ -87,14 +87,18 @@ namespace Sealebrities
         }
     }
 
-    /// The whole low-poly terrain as data: 16 x 16 chunks of 128 m, fine (3.2 m) around the island, the house reef and the
-    /// dive sites, coarse (6.4 m) elsewhere. Built on worker threads from WorldHeightField; Height() is thread-safe and
-    /// returns the height of the actual triangulated surface, so props and creatures sit exactly on the rendered ground.
+    /// The whole low-poly terrain as data: 16 x 16 chunks of 128 m, ultra fine (1.6 m) where the island's points of interest
+    /// need crisp shapes (waterfall cliff, cave, ravine, tide pools), fine (3.2 m) around the island, the house reef, the
+    /// dive sites and the landmark islands, coarse (6.4 m) elsewhere. Built on worker threads from WorldHeightField;
+    /// Height() is thread-safe and returns the height of the actual triangulated surface, so props and creatures sit
+    /// exactly on the rendered ground.
     public sealed class WorldTerrainData
     {
         public const float ChunkSize = 128f;
         public const int ChunksPerSide = 16;
-        public const int FineCells = 40, CoarseCells = 20;   // coarse must divide fine (crack-free stitching)
+        public const int UltraCells = 80, FineCells = 40, CoarseCells = 20;   // each must divide the next (crack-free stitching)
+        /// Number of TerrainClass values (= max submeshes per chunk).
+        public const int Classes = 12;
         public const float Origin = -WorldLayout.TerrainSize * 0.5f;
         const float Jitter = 0.17f;                          // < 0.2 cells keeps every triangle valid
 
@@ -111,7 +115,74 @@ namespace Sealebrities
         static float[] siteX, siteZ, siteR;
         static float[] pathX, pathZ;
         static float pathMinX, pathMaxX, pathMinZ, pathMaxZ;
-        static readonly float[] yardX = new float[3], yardZ = new float[3];
+        static int[][] pathGrid;                 // segment start indices per PathCell grid cell
+        const float PathCell = 16f, PathGridMin = -320f;
+        const int PathGridN = 40;
+        static readonly float[] yardX = new float[4], yardZ = new float[4], yardR0 = new float[4], yardR1 = new float[4];
+        static Vector2[][] pathPolylines = new Vector2[0][];
+
+        /// Sampled centre lines (world x/z) of every dirt path and trail the terrain paints – normally the props' trail
+        /// network (PropPaths.Routes sampled exactly like PropPaths does, 1 m spacing, boardwalk excluded). Valid after
+        /// PrepareStatics (always once the world is built).
+        public static IReadOnlyList<Vector2[]> PathPolylines => pathPolylines;
+
+        /// Fallback trails to the points of interest, used only when the props' trail network is unavailable.
+        public static Vector2[][] TrailControlPoints()
+        {
+            var fall = WorldLayout.WaterfallTop;
+            var a = WorldFeatures.FallDir;
+            var beach = WorldFeatures.PoolBeach;
+            var cave = WorldLayout.CaveEntrance;
+            var cd = WorldFeatures.CaveDir;
+            var clearing = new Vector2(cave.x - cd.x * 7f, cave.z - cd.z * 7f);
+            var bn = WorldFeatures.BridgeNorth;
+            var bs = WorldFeatures.BridgeSouth;
+            var radio = WorldLayout.RadioTowerRuins;
+            var heli = WorldLayout.Helipad;
+            var sb = WorldLayout.SecondBeach;
+            var tide = WorldLayout.TidePools;
+            var ts = WorldFeatures.TideSeaward;
+            return new[]
+            {
+                // jungle trail: main path → plunge pool beach → around the amphitheater up to the falls' plateau → cave
+                new[]
+                {
+                    new Vector2(72f, 70f), new Vector2(50f, 63f), new Vector2(24f, 58f), new Vector2(0f, 55f), new Vector2(-22f, 50f),
+                    new Vector2(-37f, 39f), new Vector2(beach.x, beach.z), new Vector2(-66f, 29f), new Vector2(-84f, 39f),
+                    new Vector2(-92f, 57f), new Vector2(fall.x - a.x * 9f - 9f, fall.z - a.z * 9f), new Vector2(-104f, 72f),
+                    new Vector2(-124f, 80f), new Vector2(-129f, 96f), new Vector2(clearing.x - 4f, clearing.y - 2f),
+                },
+                // lighthouse → cave along the north flank
+                new[]
+                {
+                    new Vector2(-14f, 142f), new Vector2(-40f, 141f), new Vector2(-66f, 134f), new Vector2(-90f, 125f),
+                    new Vector2(-106f, 120f), new Vector2(clearing.x + 2f, clearing.y + 1f),
+                },
+                // centre → rope bridge (north rim)
+                new[]
+                {
+                    new Vector2(94f, 50f), new Vector2(70f, 30f), new Vector2(44f, 12f), new Vector2(18f, -6f), new Vector2(0f, -19f),
+                    new Vector2(bn.x, bn.z + 3.5f),
+                },
+                // rope bridge (south rim) → radio tower ruins
+                new[]
+                {
+                    new Vector2(bs.x, bs.z - 3.5f), new Vector2(-38f, -63f), new Vector2(-62f, -80f), new Vector2(-88f, -95f),
+                    new Vector2(radio.x + 10f, radio.z + 5f),
+                },
+                // helipad → second beach
+                new[]
+                {
+                    new Vector2(heli.x - 8f, heli.z - 9f), new Vector2(58f, -100f), new Vector2(50f, -128f), new Vector2(sb.x + 2f, sb.z + 18f),
+                },
+                // helipad → tide pools
+                new[]
+                {
+                    new Vector2(heli.x + 10f, heli.z - 6f), new Vector2(104f, -82f), new Vector2(124f, -86f),
+                    new Vector2(tide.x - ts.x * 10f, tide.z - ts.z * 10f),
+                },
+            };
+        }
 
         /// Caches dive site and path layout in plain arrays. Call on the main thread before building.
         public static void PrepareStatics()
@@ -122,17 +193,21 @@ namespace Sealebrities
             int n = sites != null ? sites.Count : 0;
             siteX = new float[n]; siteZ = new float[n]; siteR = new float[n];
             for (int i = 0; i < n; i++) { siteX[i] = sites[i].center.x; siteZ[i] = sites[i].center.z; siteR[i] = sites[i].radius; }
-            yardX[0] = WorldLayout.Hut.x; yardZ[0] = WorldLayout.Hut.z;
-            yardX[1] = WorldLayout.Helipad.x; yardZ[1] = WorldLayout.Helipad.z;
-            yardX[2] = WorldLayout.Lighthouse.x; yardZ[2] = WorldLayout.Lighthouse.z;
+            SetYard(0, WorldLayout.Hut, 7f, 13f);
+            SetYard(1, WorldLayout.Helipad, 6f, 11f);
+            SetYard(2, WorldLayout.Lighthouse, 5f, 9f);
+            SetYard(3, WorldLayout.RadioTowerRuins, 7f, 11f);
             BuildPaths();
             prepared = true;
         }
 
+        static void SetYard(int i, Vector3 p, float r0, float r1) { yardX[i] = p.x; yardZ[i] = p.z; yardR0[i] = r0; yardR1[i] = r1; }
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics() { prepared = false; }
 
-        /// Dirt paths under the props' path stones: hut -> lighthouse and hut -> helipad (same control points as the props).
+        /// Dirt paths under the props' path stones: hut -> lighthouse and hut -> helipad (same control points as the props),
+        /// plus the trails to the points of interest.
         static void BuildPaths()
         {
             var hut = WorldLayout.Hut;
@@ -151,11 +226,52 @@ namespace Sealebrities
             {
                 new Vector2(hut.x + 6f, hut.z - 7f), new Vector2(112f, -8f), new Vector2(98f, -32f), new Vector2(heli.x + 9f, heli.z + 9f),
             };
+            // The props module owns the trail network (PropPaths.Routes, pure functions of WorldLayout): paint exactly its
+            // sampled dirt lines (same seeds and wobble) so the terrain dirt lies under the props' strips and stones.
+            var dense = new List<Vector2[]>();
+            try
+            {
+                var routes = PropPaths.Routes;
+                for (int r = 0; r < routes.Count; r++)
+                {
+                    var rp = routes[r].points;
+                    if (routes[r].boardwalk || rp == null || rp.Length < 2) continue;
+                    dense.Add(PropPaths.SampleSpline(rp, 1f, 40 + r * 13, 1.4f).ToArray());
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("Sealebrities: trail network from the props unavailable, using the world's own trails (" + e.Message + ").");
+                dense.Clear();
+            }
+
             var xs = new List<float>();
             var zs = new List<float>();
-            Spline(main, xs, zs);
-            xs.Add(float.NaN); zs.Add(float.NaN);   // break between the two paths
-            Spline(side, xs, zs);
+            var lines = new List<Vector2[]>();
+            if (dense.Count > 0)
+            {
+                for (int p = 0; p < dense.Count; p++)
+                {
+                    if (p > 0) { xs.Add(float.NaN); zs.Add(float.NaN); }   // break between two paths
+                    for (int i = 0; i < dense[p].Length; i++) { xs.Add(dense[p][i].x); zs.Add(dense[p][i].y); }
+                    lines.Add(dense[p]);
+                }
+            }
+            else
+            {
+                var all = new List<Vector2[]> { main, side };
+                all.AddRange(TrailControlPoints());
+                for (int p = 0; p < all.Count; p++)
+                {
+                    if (p > 0) { xs.Add(float.NaN); zs.Add(float.NaN); }   // break between two paths
+                    int first = xs.Count;
+                    Spline(all[p], xs, zs);
+                    var line = new Vector2[xs.Count - first];
+                    for (int i = 0; i < line.Length; i++) line[i] = new Vector2(xs[first + i], zs[first + i]);
+                    lines.Add(line);
+                }
+            }
+            pathPolylines = lines.ToArray();
             pathX = xs.ToArray(); pathZ = zs.ToArray();
             pathMinX = pathMinZ = float.MaxValue; pathMaxX = pathMaxZ = float.MinValue;
             for (int i = 0; i < pathX.Length; i++)
@@ -164,6 +280,30 @@ namespace Sealebrities
                 pathMinX = Math.Min(pathMinX, pathX[i]); pathMaxX = Math.Max(pathMaxX, pathX[i]);
                 pathMinZ = Math.Min(pathMinZ, pathZ[i]); pathMaxZ = Math.Max(pathMaxZ, pathZ[i]);
             }
+
+            // spatial index: every segment is listed in each grid cell its (padded) bounds touch
+            var cells = new List<int>[PathGridN * PathGridN];
+            for (int i = 0; i < pathX.Length - 1; i++)
+            {
+                float ax = pathX[i], az = pathZ[i], bx = pathX[i + 1], bz = pathZ[i + 1];
+                if (float.IsNaN(ax) || float.IsNaN(bx)) continue;
+                int c0 = CellOf(Math.Min(ax, bx) - 3f), c1 = CellOf(Math.Max(ax, bx) + 3f);
+                int r0 = CellOf(Math.Min(az, bz) - 3f), r1 = CellOf(Math.Max(az, bz) + 3f);
+                for (int r = r0; r <= r1; r++)
+                    for (int c = c0; c <= c1; c++)
+                    {
+                        int k = r * PathGridN + c;
+                        (cells[k] ??= new List<int>(8)).Add(i);
+                    }
+            }
+            pathGrid = new int[cells.Length][];
+            for (int k = 0; k < cells.Length; k++) pathGrid[k] = cells[k] != null ? cells[k].ToArray() : null;
+        }
+
+        static int CellOf(float v)
+        {
+            int c = (int)Math.Floor((v - PathGridMin) / PathCell);
+            return c < 0 ? 0 : (c >= PathGridN ? PathGridN - 1 : c);
         }
 
         static void Spline(Vector2[] cps, List<float> xs, List<float> zs)
@@ -182,13 +322,14 @@ namespace Sealebrities
             xs.Add(cps[cps.Length - 1].x); zs.Add(cps[cps.Length - 1].y);
         }
 
-        /// 0..1 dirt yard around the hut, the helipad and the lighthouse (tighter than the flat building plateaus).
+        /// 0..1 dirt yard around the hut, the helipad, the lighthouse and the radio tower ruins (tighter than the flat
+        /// building plateaus).
         static float Yard(float x, float z)
         {
-            float a = 1f - SmoothStep(7f, 13f, Dist(x, z, yardX[0], yardZ[0]));
-            float b = 1f - SmoothStep(6f, 11f, Dist(x, z, yardX[1], yardZ[1]));
-            float c = 1f - SmoothStep(5f, 9f, Dist(x, z, yardX[2], yardZ[2]));
-            return Math.Max(a, Math.Max(b, c));
+            float best = 0f;
+            for (int i = 0; i < yardX.Length; i++)
+                best = Math.Max(best, 1f - SmoothStep(yardR0[i], yardR1[i], Dist(x, z, yardX[i], yardZ[i])));
+            return best;
         }
 
         static float Dist(float x, float z, float cx, float cz)
@@ -200,12 +341,14 @@ namespace Sealebrities
         /// 0..1, 1 on the dirt paths.
         static float PathMask(float x, float z)
         {
-            if (pathX == null || x < pathMinX - 3f || x > pathMaxX + 3f || z < pathMinZ - 3f || z > pathMaxZ + 3f) return 0f;
+            if (pathX == null || pathGrid == null || x < pathMinX - 3f || x > pathMaxX + 3f || z < pathMinZ - 3f || z > pathMaxZ + 3f) return 0f;
+            var segs = pathGrid[CellOf(z) * PathGridN + CellOf(x)];
+            if (segs == null) return 0f;
             float best = float.MaxValue;
-            for (int i = 0; i < pathX.Length - 1; i++)
+            for (int s = 0; s < segs.Length; s++)
             {
+                int i = segs[s];
                 float ax = pathX[i], az = pathZ[i], bx = pathX[i + 1], bz = pathZ[i + 1];
-                if (float.IsNaN(ax) || float.IsNaN(bx)) continue;
                 float abx = bx - ax, abz = bz - az;
                 float len2 = abx * abx + abz * abz;
                 float t = len2 > 1e-6f ? Clamp01(((x - ax) * abx + (z - az) * abz) / len2) : 0f;
@@ -222,7 +365,7 @@ namespace Sealebrities
             if (!prepared) throw new InvalidOperationException("WorldTerrainData.PrepareStatics must run on the main thread first.");
             for (int cz = 0; cz < ChunksPerSide; cz++)
                 for (int cx = 0; cx < ChunksPerSide; cx++)
-                    res[cz * ChunksPerSide + cx] = IsFine(cx, cz) ? FineCells : CoarseCells;
+                    res[cz * ChunksPerSide + cx] = IsUltra(cx, cz) ? UltraCells : (IsFine(cx, cz) ? FineCells : CoarseCells);
 
             Parallel.For(0, Chunks.Length, k =>
             {
@@ -245,7 +388,25 @@ namespace Sealebrities
                 float pad = i == 0 ? 60f : 10f;
                 if (RectCircle(x0, z0, x1, z1, siteX[i], siteZ[i], siteR[i] + pad)) return true;
             }
+            // the landmark islands (beaches, rocks and their shallow shelf)
+            var mi = WorldFeatures.MiniIslands;
+            for (int i = 0; i < mi.Length; i++)
+                if (RectCircle(x0, z0, x1, z1, mi[i].center.x, mi[i].center.z, mi[i].shoreRadius + 18f)) return true;
             return false;
+        }
+
+        /// Chunks holding a point of interest whose shape needs 1.6 m facets (cliff, cave passage, ravine, tide pools).
+        static bool IsUltra(int cx, int cz)
+        {
+            float x0 = Origin + cx * ChunkSize, z0 = Origin + cz * ChunkSize;
+            float x1 = x0 + ChunkSize, z1 = z0 + ChunkSize;
+            if (RectCircle(x0, z0, x1, z1, WorldLayout.WaterfallTop.x, WorldLayout.WaterfallTop.z, 30f)) return true;
+            if (RectCircle(x0, z0, x1, z1, WorldLayout.WaterfallPool.x, WorldLayout.WaterfallPool.z, 16f)) return true;
+            var cave = WorldLayout.CaveEntrance + WorldFeatures.CaveDir * 6.5f;
+            if (RectCircle(x0, z0, x1, z1, cave.x, cave.z, 13f)) return true;
+            if (RectCircle(x0, z0, x1, z1, WorldLayout.TidePools.x, WorldLayout.TidePools.z, 20f)) return true;
+            float rz = WorldLayout.Ravine.z;
+            return x1 > WorldFeatures.RavineWestX + 8f && x0 < WorldFeatures.RavineEastX - 8f && z1 > rz - 14f && z0 < rz + 14f;
         }
 
         static bool RectCircle(float x0, float z0, float x1, float z1, float cx, float cz, float r)
@@ -351,7 +512,7 @@ namespace Sealebrities
         static void BuildRenderData(WorldTerrainChunk c, int seed)
         {
             int n = c.N, s = n + 1, triCount = 2 * n * n;
-            const int classes = 11;
+            const int classes = Classes;
             var cls = new byte[triCount];
             var tri = new int[triCount * 3];
             var count = new int[classes];
@@ -418,19 +579,33 @@ namespace Sealebrities
         {
             float r1 = (hash & 0x3FF) / 1023f;            // dithers class borders into scattered facets
             float r2 = ((hash >> 10) & 0x3FF) / 1023f;    // picks the occasional variant facet
+            float r3 = ((hash >> 20) & 0x3FF) / 1023f;    // dry-grass fringe
             float slope = ny >= 1f ? 0f : MathF.Acos(Math.Max(-1f, ny)) * 57.29578f;
             float n2 = WorldNoise.Perlin(x * 0.11f + 2.5f, z * 0.11f + 9.5f);
+            var feature = h > -1.5f ? WorldHeightField.Hint(x, z, h) : GroundHint.None;
 
             if (h > 0.35f)
             {
                 float rockAt = 34f + 7f * n2;
                 if (slope > rockAt + 13f) return TerrainClass.RockDark;
                 if (slope > rockAt) return r2 < 0.2f ? TerrainClass.RockDark : TerrainClass.Rock;
+                switch (feature)
+                {
+                    case GroundHint.Rock: return r2 < 0.3f ? TerrainClass.RockDark : TerrainClass.Rock;
+                    case GroundHint.Sand: return r2 < 0.1f ? TerrainClass.SandAlt : TerrainClass.Sand;
+                    case GroundHint.Soil: return r2 < 0.12f ? TerrainClass.GrassDry : TerrainClass.Soil;
+                    case GroundHint.WetSand: return TerrainClass.WetSand;
+                }
                 // small trampled yards (hut, helipad, lighthouse) fade out in scattered facets; paths are solid dirt
                 if (Yard(x, z) > 0.15f + 0.7f * r1 || PathMask(x, z) > 0.3f + 0.4f * r1) return TerrainClass.Soil;
-                float grassT = GrassBlend(x, z, h, n2);
-                if (grassT > 0.2f + 0.6f * r1)
+                // art polish: the sand/grass border follows a coherent noise edge with only a little per-facet jitter
+                // (jagged triangle rows, How to Fish) – the old per-facet random 0.2-0.8 threshold spread a 20 m
+                // checkerboard of big green/sand facets over flat beach terraces where the blend sits near 0.5
+                float grassT = GrassBlend(x, z, h, n2) - GrassEdge(x, z) + 0.5f;
+                if (grassT > 0.5f + 0.08f * (r1 - 0.5f))
                 {
+                    // dry, yellowish grass fringe (2-4 m) along the sand border (~30 % of its facets)
+                    if (grassT < 0.78f && r3 < 0.3f) return TerrainClass.GrassDry;
                     // coherent light/dark meadow patches (darker jungle uphill) with a narrow dithered border
                     // and a few accent facets, instead of a busy per-triangle mosaic
                     float jungle = SmoothStep(-0.2f, 0.25f, WorldNoise.Fbm(x * 0.012f - 4f, z * 0.012f + 6f, 2)) * 0.75f
@@ -439,9 +614,16 @@ namespace Sealebrities
                     if (r2 < 0.035f) dark = !dark;
                     return dark ? TerrainClass.GrassDark : TerrainClass.Grass;
                 }
+                // a 1.2-2.5 m band of wet sand right behind the waterline
+                if (h < 0.1f + 0.14f * r1) return TerrainClass.WetSand;
                 return r2 < 0.07f ? TerrainClass.SandAlt : TerrainClass.Sand;
             }
-            if (h > -0.7f) return slope > 32f ? TerrainClass.Rock : TerrainClass.WetSand;
+            if (h > -0.7f)
+            {
+                if (feature == GroundHint.Rock || slope > 32f) return r2 < 0.3f ? TerrainClass.RockDark : TerrainClass.Rock;
+                return h > 0.1f + 0.14f * r1 ? TerrainClass.Sand : TerrainClass.WetSand;
+            }
+            if (feature == GroundHint.Rock) return r2 < 0.35f ? TerrainClass.RockDark : TerrainClass.Rock;
 
             float d = -h;
             float nd = WorldNoise.Fbm(x * 0.03f + 17f, z * 0.03f - 5f, 2);
@@ -471,16 +653,34 @@ namespace Sealebrities
         public static float GrassAmount(float x, float z, float h)
         {
             if (h <= 0.35f) return 0f;
+            // rock platforms, beaches, creek beds and gravel floors of the points of interest stay bare
+            if (WorldHeightField.Hint(x, z, h) != GroundHint.None) return 0f;
             float n2 = WorldNoise.Perlin(x * 0.11f + 2.5f, z * 0.11f + 9.5f);
-            return GrassBlend(x, z, h, n2);
+            // shifted by the same coherent edge noise the terrain colors use, so 0.5 is exactly the painted border
+            float g = GrassBlend(x, z, h, n2) - GrassEdge(x, z) + 0.5f;
+            return g < 0f ? 0f : (g > 1f ? 1f : g);
         }
 
-        /// True on the trampled dirt yards (hut, helipad, lighthouse) and the dirt paths the terrain colors as Soil.
-        /// Valid after PrepareStatics (always the case once the world is built).
+        /// Grass/sand border threshold (around 0.5): a low-frequency noise so the border forms coherent patches.
+        static float GrassEdge(float x, float z) => 0.5f + 0.35f * WorldNoise.Perlin(x * 0.09f + 5.3f, z * 0.09f - 1.7f);
+
+        /// True on the trampled dirt yards (hut, helipad, lighthouse, radio tower ruins) and the dirt paths and trails the
+        /// terrain colors as Soil. Valid after PrepareStatics (always the case once the world is built).
         public static bool IsBareSoil(float x, float z)
         {
             if (!prepared) return false;
             return Yard(x, z) > 0.5f || PathMask(x, z) > 0.5f;
+        }
+
+        /// Ground class the terrain paints at (x, z) for a ground height h (ignores slope-rock and per-facet dithering):
+        /// lets props avoid putting grass or palms on rock platforms, gravel beds or wet sand.
+        public static GroundHint GroundAt(float x, float z, float h)
+        {
+            var hint = WorldHeightField.Hint(x, z, h);
+            if (hint != GroundHint.None) return hint;
+            if (prepared && (Yard(x, z) > 0.5f || PathMask(x, z) > 0.5f)) return GroundHint.Soil;
+            if (h < 0.2f) return GroundHint.WetSand;
+            return GrassAmount(x, z, h) < 0.5f ? GroundHint.Sand : GroundHint.None;
         }
 
         // ------------------------------------------------------------------ queries

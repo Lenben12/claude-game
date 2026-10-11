@@ -8,19 +8,27 @@ namespace Sealebrities
     /// Animated caustics projected by the sun (light cookie) while the camera is underwater, shallow and it is day.
     /// 16 tileable, looping frames are generated on a worker thread; the cookie texture is re-composed ~15x per
     /// second by blending neighbouring frames and fading toward white (= no effect) with the caustic strength.
-    /// Low-poly look: clean, graphic light lines with low contrast (the cookie never darkens the sun by more than
-    /// ~20 %), only in the shallow reef (fully on to 7 m, gone by 16 m).
+    /// Low-poly look (art bible §2.3): a clean light web, cell ≈ 1.6 m, +25 % brightness on the lines (the cookie
+    /// never darkens the sun by more than ~20 %), fully on to 8 m, gone by 18 m. Off on the Low graphics tier.
     sealed class FXCaustics
     {
         const int Size = 256;
         const int FrameCount = 16;
         const float LoopSeconds = 3.6f;
-        const float UploadInterval = 1f / 15f;
-        const float TileMeters = 11f;
-        const float FadeStart = 7f;
-        const float MaxDepth = 16f;
+        const float UploadInterval = 1f / 12f;
+        const float TileMeters = 9.6f;   // 6 cells across the tile -> 1.6 m cells
+        const float FadeStart = 8f;
+        const float MaxDepth = 18f;
         const float MaxStrength = 0.8f;
         const int Seed = 4711;
+
+        bool tierEnabled = true;
+
+        public void SetTier(GraphicsQuality q)
+        {
+            tierEnabled = q != GraphicsQuality.Low;
+            if (!tierEnabled) Release();
+        }
 
         Task<byte[][]> task;
         byte[][] frames;
@@ -143,7 +151,7 @@ namespace Sealebrities
                 sun = s;
                 sunData = null;
             }
-            if (sun == null || !EnsureReady()) return;
+            if (sun == null || !tierEnabled || !EnsureReady()) return;
 
             float depthFade = 1f - FXMath.SmoothRange(FadeStart, MaxDepth, f.depth);
             float target = (f.underwater && f.depth < MaxDepth) ? MaxStrength * f.under01 * f.day01 * depthFade : 0f;

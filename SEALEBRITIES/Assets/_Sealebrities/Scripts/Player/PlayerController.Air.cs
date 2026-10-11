@@ -2,14 +2,22 @@ using UnityEngine;
 
 namespace Sealebrities
 {
-    /// Air supply, depth limits, predator bumps, fainting and the Snorkeler rescue drone.
+    /// Air supply (core balance: breath-hold 20 s without a tank, tanks 90 s and up), depth limits, predator bumps,
+    /// fainting and the rescue drone of the relaxed difficulty.
+    /// Air is only used below the surface; consumption = Progression.AirRate(depth) (×1.4 sprinting, ×3 too deep).
+    /// A tank is never refilled in the water: rest on land or on the boat and it fills up within ~5 s
+    /// (RefillingAir). Without a tank the diver holds the breath and simply breathes again at the surface.
     public partial class PlayerController
     {
+        const float RefillSeconds = 5f;      // empty → full while resting out of the water
+        const float RefillDelay = 0.6f;      // seconds out of the water before refilling starts
+        const float BreathRecoverSeconds = 6f;
+
         GearStats gear = DefaultGear();
         DifficultySettings diff = DifficultySettings.For(Difficulty.OpenWater);
-        float airCapacity = 45f, airLeft = 45f;
-        float outOfWaterTimer, notUnderTimer;
-        bool tooDeepWarned, lowAirWarned, rescueActive, sprintingUnderwater;
+        float airCapacity = Progression.BreathHoldSeconds, airLeft = Progression.BreathHoldSeconds;
+        float outOfWaterTimer, notUnderTimer, refillFrom;
+        bool tooDeepWarned, lowAirWarned, emptyWarned, rescueActive, sprintingUnderwater, refilling;
 
         // fade safety net: if the UI's fader never calls back, run the action ourselves
         System.Action pendingFade;
@@ -17,13 +25,16 @@ namespace Sealebrities
 
         static GearStats DefaultGear() => new GearStats
         {
-            airSeconds = 45f, maxDepth = 6f, swimSpeed = 1f, cameraQuality = 0.6f, tapeSeconds = 90f, maxZoom = 1.5f, boatSpeed = 1f
+            airSeconds = Progression.BreathHoldSeconds, maxDepth = 6f, swimSpeed = 1f, cameraQuality = 0.6f, tapeSeconds = 90f, maxZoom = 1.5f, boatSpeed = 1f,
+            fishSpeed = 1f
         };
 
         public void RefillAir()
         {
             airLeft = airCapacity;
             lowAirWarned = false;
+            emptyWarned = false;
+            refilling = false;
         }
 
         void UpdateAir(float dt)
@@ -33,7 +44,7 @@ namespace Sealebrities
             if (isUnderwater)
             {
                 notUnderTimer = 0f;
-                float rate = 1f + depth / 20f;
+                float rate = Progression.AirRate(depth);
                 if (sprintingUnderwater) rate *= 1.4f;
                 if (depth > gear.maxDepth)
                 {
@@ -46,31 +57,53 @@ namespace Sealebrities
                     }
                 }
                 airLeft = Mathf.Max(0f, airLeft - rate * dt);
-                if (!lowAirWarned && airLeft > 0f && Air01 < 0.2f)
+                if (!lowAirWarned && airLeft > 0f && Air01 < 0.25f)
                 {
                     lowAirWarned = true;
-                    GameEvents.RaiseToast(Loc.Tr("Luft wird knapp – tauch auf!", "Air is running low – surface!"));
+                    GameEvents.RaiseToast(Loc.Tr("Luft knapp – auftauchen!", "Low air – surface!"));
                 }
             }
             else
             {
                 notUnderTimer += dt;
                 if (notUnderTimer > 3f) tooDeepWarned = false;     // a new dive may warn again
-                // Snorkel set (no tank): you breathe through the snorkel at the surface, the breath-hold recovers.
+                // no tank: at the surface you simply breathe again (snorkel); a tank only refills out of the water
                 if (!gear.hasTank && isInWater && notUnderTimer > 0.8f)
-                    airLeft = Mathf.Min(airCapacity, airLeft + airCapacity * 0.3f * dt);
+                    airLeft = Mathf.Min(airCapacity, airLeft + airCapacity / BreathRecoverSeconds * dt);
                 if (Air01 > 0.5f) lowAirWarned = false;
+                if (gear.hasTank && isInWater && airLeft <= 0.05f && !emptyWarned)
+                {
+                    emptyWarned = true;
+                    GameEvents.RaiseToast(Loc.Tr("Flasche leer – an Land oder aufs Boot!", "Tank empty – back to land or the boat!"));
+                }
             }
 
-            // tanks are only refilled on land / on the boat
+            // resting on land / on the boat deck refills the tank gradually
             if (!isInWater)
             {
                 outOfWaterTimer += dt;
-                if (outOfWaterTimer >= 2f && airLeft < airCapacity) RefillAir();
+                if (outOfWaterTimer >= RefillDelay && airLeft < airCapacity)
+                {
+                    if (!refilling) { refilling = true; refillFrom = Air01; }
+                    airLeft = Mathf.Min(airCapacity, airLeft + airCapacity / RefillSeconds * dt);
+                    if (airLeft >= airCapacity)
+                    {
+                        refilling = false;
+                        lowAirWarned = false;
+                        emptyWarned = false;
+                        if (gear.hasTank && refillFrom < 0.7f) GameEvents.RaiseToast(Loc.Tr("Flasche voll", "Tank full"));
+                    }
+                }
+                else refilling = false;
             }
-            else outOfWaterTimer = 0f;
+            else
+            {
+                outOfWaterTimer = 0f;
+                refilling = false;
+            }
 
-            if (isInWater)
+            // out of air below the surface: faint (or the rescue drone on the relaxed difficulty)
+            if (isUnderwater)
             {
                 if (!diff.canFaint)
                 {
@@ -94,12 +127,13 @@ namespace Sealebrities
             if (IsFainting) return;
             IsFainting = true;
             sprintingUnderwater = false;
+            Hands.StowAll();
             RunFade(() =>
             {
                 try
                 {
                     var gm = GameManager.I;
-                    if (gm != null) gm.HandleFaint();     // loses the dive footage; permadeath returns to the menu
+                    if (gm != null) gm.HandleFaint();     // loses the dive footage (rescue fee via the host in co-op)
                     if (gm != null && gm.InGame && !menuMode)
                     {
                         GetRescuePoint(out Vector3 p, out float y);
@@ -118,12 +152,13 @@ namespace Sealebrities
             }, 2.5f);
         }
 
-        /// Snorkeler difficulty: nobody faints, a drone carries the diver back at 8 % air.
+        /// Relaxed difficulty: nobody faints, a drone carries the diver back at 8 % air.
         void StartDroneRescue()
         {
             if (rescueActive) return;
             rescueActive = true;
             sprintingUnderwater = false;
+            Hands.StowAll();
             GameEvents.RaiseToast(Loc.Tr("Luft fast leer – die Rettungsdrohne holt dich!", "Almost out of air – the rescue drone is coming!"));
             RunFade(() =>
             {
@@ -136,7 +171,7 @@ namespace Sealebrities
                         pitch = 0f;
                         TeleportTo(p, y);
                         RefillAir();
-                        GameEvents.RaiseToast(Loc.Tr("Die Rettungsdrohne hat dich aufs Boot gebracht.", "The rescue drone carried you back to the boat."));
+                        GameEvents.RaiseToast(Loc.Tr("Die Drohne hat dich aufs Boot gebracht.", "The drone carried you back to the boat."));
                     }
                 }
                 finally

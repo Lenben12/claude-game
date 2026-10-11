@@ -31,48 +31,35 @@ namespace Sealebrities
             hero.style.alignItems = Align.Center;
             hero.style.marginTop = 30f;
             var circle = UIKit.Box();
-            UIKit.Size(circle, 120f, 120f);
-            UIKit.Radius(circle, 60f);
+            UIKit.Size(circle, 200f, 200f);
+            UIKit.Radius(circle, 100f);
             circle.style.backgroundColor = UIPalette.A(UIPalette.Violet, 0.18f);
-            UIKit.Border(circle, 2f, UIPalette.A(UIPalette.Violet, 0.6f));
-            circle.style.alignItems = Align.Center;
-            circle.style.justifyContent = Justify.Center;
-            circle.Add(new UIGlyph(unlocked ? UIGlyphs.Broadcast : UIGlyphs.Lock, UIPalette.Violet, 64f));
+            UIKit.Border(circle, 4f, UIPalette.Violet);
+            UIKit.Center(circle);
+            circle.Add(new UIGlyph(unlocked ? UIGlyphs.Broadcast : UIGlyphs.Lock, UIPalette.Violet, 110f));
             hero.Add(circle);
 
-            var live = UIKit.Pill("● LIVE", UIPalette.Live, Color.white, 12f);
+            var live = UIKit.Pill("● LIVE", UIPalette.Live, Color.white, PhoneKit.Small);
             live.style.alignSelf = Align.Center;
-            live.style.marginTop = 14f;
+            live.style.marginTop = 18f;
             hero.Add(live);
 
-            var title = UIKit.Text(unlocked ? Loc.Tr("Kommt im nächsten Update", "Coming in the next update")
-                                            : Loc.Tr("Livestream ab 1.000 Followern", "Livestream from 1,000 followers"), 22f, UIPalette.Text, true);
-            title.style.marginTop = 14f;
+            var title = PhoneKit.T(unlocked ? Loc.Tr("Kommt im nächsten Update", "Coming in the next update")
+                                            : Loc.Tr("Livestream ab 1.000 Followern", "Livestream from 1,000 followers"), PhoneKit.Big, UIPalette.Ink, true);
+            title.style.marginTop = 16f;
             title.style.unityTextAlign = TextAnchor.MiddleCenter;
-            title.style.whiteSpace = WhiteSpace.Normal;
             hero.Add(title);
             body.Add(hero);
 
-            var text = UIKit.Para(unlocked
-                ? Loc.Tr("Du hast es geschafft! Bald streamst du live aus dem Wasser: Zuschauer schreiben im Chat, spenden Krill-Coins und wünschen sich Tiere. Mit Relay-Boje sogar aus der Tiefe.",
-                         "You made it! Soon you'll stream live from the water: viewers chat, donate krill coins and request animals. With a relay buoy even from the deep.")
-                : Loc.Tr("Sammle mehr Follower mit FinTube-Videos. Ab 1.000 Followern schaltest du KRILL.tv frei – live aus dem Ozean!",
-                         "Grow your followers with FinTube videos. At 1,000 followers you unlock KRILL.tv – live from the ocean!"), 14f, UIPalette.TextDim);
-            text.style.unityTextAlign = TextAnchor.MiddleCenter;
-            text.style.marginTop = 10f;
-            body.Add(text);
-
             if (!unlocked)
             {
-                var bar = new UIBar(10f, UIPalette.Violet);
-                bar.style.marginTop = 22f;
-                bar.SetValue(s.followers / (float)Progression.LivestreamFollowers);
+                var bar = PhoneKit.Bar(s.followers / (float)Progression.LivestreamFollowers, UIPalette.Violet, 18f);
+                bar.style.marginTop = 26f;
                 body.Add(bar);
                 var row = UIKit.Row();
-                row.style.marginTop = 6f;
-                row.Add(UIKit.Text(Loc.Number(s.followers) + " / " + Loc.Number(Progression.LivestreamFollowers), 13f, UIPalette.Text, true));
-                row.Add(UIKit.Flex());
-                row.Add(UIKit.Text(Loc.Tr("noch ", "") + Loc.Number(Progression.LivestreamFollowers - s.followers) + Loc.Tr("", " to go"), 13f, UIPalette.TextDim));
+                row.style.marginTop = 8f;
+                row.Add(new UIGlyph(UIGlyphs.Person, UIPalette.Turquoise, 28f));
+                row.Add(UIKit.Text(" " + Loc.Number(s.followers) + " / " + Loc.Number(Progression.LivestreamFollowers), PhoneKit.Body, UIPalette.Ink, true));
                 body.Add(row);
             }
         }
@@ -83,7 +70,7 @@ namespace Sealebrities
     {
         public override string Id => "followfish";
         public override string Title => "FollowFish";
-        public override Color Color => UIPalette.Sky;
+        public override Color Color => UIPalette.Rgb(0x4F7FAE);
         public override UIGlyph.DrawFn Icon => UIGlyphs.Chart;
 
         public override void Build(VisualElement body)
@@ -91,48 +78,43 @@ namespace Sealebrities
             var s = UIKit.State;
             if (s == null) return;
 
-            body.Add(UIKit.Caption(Loc.Tr("Follower", "Followers"), UIPalette.TextFaint, 12f));
-            var big = UIKit.Text(Loc.Number(s.followers), 46f, UIPalette.Text, true);
-            body.Add(big);
+            var top = UIKit.Row();
+            top.Add(new UIGlyph(UIGlyphs.Person, UIPalette.Turquoise, 60f));
+            var big = UIKit.Text(Loc.Number(s.followers), PhoneKit.Huge, UIPalette.Ink, true);
+            big.style.marginLeft = 10f;
+            top.Add(big);
+            body.Add(top);
             long startOfDay = s.followerHistory.Count > 0 ? s.followerHistory[s.followerHistory.Count - 1] : 0;
             long today = s.followers - startOfDay;
-            var delta = UIKit.Text(UIKit.Signed(today) + Loc.Tr(" heute", " today"), 14f, today >= 0 ? UIPalette.Money : UIPalette.Coral, true);
+            var delta = UIKit.Text(UIKit.Signed(today) + Loc.Tr(" heute", " today"), PhoneKit.Body, today >= 0 ? UIPalette.LeafInk : UIPalette.CoralInk, true);
             body.Add(delta);
 
-            // chart
             var data = new List<long>(s.followerHistory);
             data.Add(s.followers);
-            var chartCard = UIKit.Card(new Color(1f, 1f, 1f, 0.05f), 16f, 12f);
-            chartCard.style.marginTop = 12f;
+            var chartCard = PhoneKit.Card(16f);
+            chartCard.style.marginTop = 14f;
             long max = 10;
             foreach (var v in data) if (v > max) max = v;
-            var top = UIKit.Row();
-            top.Add(UIKit.Text(Loc.Tr("Verlauf", "History"), 12f, UIPalette.TextDim, true));
-            top.Add(UIKit.Flex());
-            top.Add(UIKit.Text("max " + Loc.Number(max), 11f, UIPalette.TextFaint));
-            chartCard.Add(top);
             var chart = new UIFollowerChart(data, max);
-            chart.style.height = 170f;
-            chart.style.marginTop = 6f;
+            chart.style.height = 260f;
             chartCard.Add(chart);
             var axis = UIKit.Row();
-            axis.style.marginTop = 4f;
-            axis.Add(UIKit.Text(Loc.Tr("Tag 1", "Day 1"), 11f, UIPalette.TextFaint));
+            axis.style.marginTop = 6f;
+            axis.Add(UIKit.Text(Loc.Tr("Tag 1", "Day 1"), PhoneKit.Tiny, UIPalette.InkSoft));
             axis.Add(UIKit.Flex());
-            axis.Add(UIKit.Text(Loc.Tr("Jetzt", "Now"), 11f, UIPalette.TextFaint));
+            axis.Add(UIKit.Text(Loc.Tr("Jetzt", "Now"), PhoneKit.Tiny, UIPalette.InkSoft));
             chartCard.Add(axis);
             body.Add(chartCard);
 
             var tiles = UIKit.Row();
-            tiles.style.marginTop = 10f;
-            tiles.Add(UIWidgets.StatTile(Loc.Number(s.totalViews), Loc.Tr("Aufrufe gesamt", "Total views"), UIPalette.Text));
-            tiles.Add(UIKit.HSpacer(6f));
-            tiles.Add(UIWidgets.StatTile(s.videos.Count.ToString(), Loc.Tr("Videos", "Videos"), UIPalette.Live));
-            tiles.Add(UIKit.HSpacer(6f));
-            tiles.Add(UIWidgets.StatTile(Journal.DiscoveredCount + "/" + SpeciesDatabase.All.Count, Loc.Tr("Arten", "Species"), UIPalette.Lagoon));
+            tiles.Add(PhoneKit.Stat(UIGlyphs.Eye, UIPalette.InkSoft, UIKit.Compact(s.totalViews)));
+            tiles.Add(UIKit.HSpacer(8f));
+            tiles.Add(PhoneKit.Stat(UIGlyphs.Play, UIPalette.Danger, s.videos.Count.ToString()));
+            tiles.Add(UIKit.HSpacer(8f));
+            tiles.Add(PhoneKit.Stat(UIGlyphs.Book, UIPalette.Turquoise, Journal.DiscoveredCount + "/" + SpeciesDatabase.All.Count));
             body.Add(tiles);
 
-            body.Add(UIWidgets.SectionTitle(Loc.Tr("Meilensteine · Ziel 1.000.000", "Milestones · goal 1,000,000")));
+            body.Add(PhoneKit.Section(Loc.Tr("Meilensteine", "Milestones"), UIGlyphs.Star));
             var next = Progression.NextMilestone(s.followers);
             long prev = 0;
             foreach (var m in Progression.Milestones)
@@ -148,43 +130,40 @@ namespace Sealebrities
         {
             var row = UIKit.Row();
             row.style.alignItems = Align.FlexStart;
-            UIKit.Pad(row, 10f, 12f, 10f, 10f);
-            UIKit.Radius(row, 12f);
-            row.style.marginBottom = 5f;
-            row.style.backgroundColor = isNext ? UIPalette.A(UIPalette.Sun, 0.12f) : new Color(1f, 1f, 1f, reached ? 0.05f : 0.02f);
-            if (isNext) UIKit.Border(row, 1f, UIPalette.A(UIPalette.Sun, 0.6f));
+            UIKit.Pad(row, 14f, 16f, 14f, 14f);
+            UIKit.Radius(row, 20f);
+            row.style.marginBottom = 8f;
+            row.style.backgroundColor = isNext ? UIPalette.A(UIPalette.Sun, 0.25f) : Color.white;
+            if (isNext) UIKit.Border(row, 2f, UIPalette.SunInk);
+            if (!reached && !isNext) row.style.opacity = 0.6f;
 
             var icon = UIKit.Box();
-            UIKit.Size(icon, 24f, 24f);
-            UIKit.Radius(icon, 12f);
-            icon.style.alignItems = Align.Center; icon.style.justifyContent = Justify.Center;
+            UIKit.Size(icon, 40f, 40f);
+            UIKit.Radius(icon, 20f);
+            UIKit.Center(icon);
             if (reached)
             {
-                icon.style.backgroundColor = UIPalette.Money;
-                icon.Add(new UIGlyph(UIGlyphs.Check, UIPalette.Deep, 16f));
+                icon.style.backgroundColor = UIPalette.LeafInk;
+                icon.Add(new UIGlyph(UIGlyphs.Check, Color.white, 26f));
             }
             else
             {
-                UIKit.Border(icon, 2f, isNext ? UIPalette.Sun : UIPalette.TextFaint);
-                if (isNext) icon.Add(new UIGlyph(UIGlyphs.Star, UIPalette.Sun, 13f));
+                UIKit.Border(icon, 3f, isNext ? UIPalette.SunInk : UIPalette.Silhouette);
+                if (isNext) icon.Add(new UIGlyph(UIGlyphs.Star, UIPalette.SunInk, 22f));
             }
             row.Add(icon);
 
             var col = UIKit.Col();
-            col.style.marginLeft = 10f;
+            col.style.marginLeft = 12f;
             col.style.flexGrow = 1;
             col.style.flexShrink = 1;
-            col.Add(UIKit.Text(m.Title, 14.5f, reached ? UIPalette.Text : isNext ? UIPalette.Sun : UIPalette.TextDim, true));
-            col.Add(UIKit.Para(m.Description, 12f, reached || isNext ? UIPalette.TextDim : UIPalette.TextFaint));
+            col.Add(PhoneKit.T(m.Title, PhoneKit.Body, UIPalette.Ink, true));
+            col.Add(PhoneKit.T(m.Description, PhoneKit.Tiny, UIPalette.InkSoft));
             if (isNext)
             {
-                var bar = new UIBar(6f, UIPalette.Sun);
-                bar.style.marginTop = 6f;
-                bar.SetValue((followers - prev) / (float)System.Math.Max(1L, m.followers - prev));
+                var bar = PhoneKit.Bar((followers - prev) / (float)System.Math.Max(1L, m.followers - prev), UIPalette.SunInk, 12f);
+                bar.style.marginTop = 8f;
                 col.Add(bar);
-                var left = UIKit.Text(Loc.Tr("noch ", "") + Loc.Number(m.followers - followers) + Loc.Tr(" Follower", " followers to go"), 11f, UIPalette.Sun);
-                left.style.marginTop = 3f;
-                col.Add(left);
             }
             row.Add(col);
             return row;
@@ -210,10 +189,10 @@ namespace Sealebrities
             var r = contentRect;
             if (r.width < 4f || r.height < 4f) return;
             var p = ctx.painter2D;
-            float left = r.x + 2f, right = r.xMax - 6f, top = r.y + 8f, bottom = r.yMax - 2f;
+            float left = r.x + 4f, right = r.xMax - 10f, top = r.y + 10f, bottom = r.yMax - 4f;
 
             p.strokeColor = UIPalette.Line;
-            p.lineWidth = 1f;
+            p.lineWidth = 2f;
             for (int i = 0; i <= 4; i++)
             {
                 float y = Mathf.Lerp(bottom, top, i / 4f);
@@ -229,8 +208,7 @@ namespace Sealebrities
                 return new Vector2(x, y);
             }
 
-            // area
-            p.fillColor = UIPalette.A(UIPalette.Lagoon, 0.16f);
+            p.fillColor = UIPalette.A(UIPalette.Turquoise, 0.22f);
             p.BeginPath();
             p.MoveTo(new Vector2(n == 1 ? left : Pt(0).x, bottom));
             if (n == 1) p.LineTo(new Vector2(left, Pt(0).y));
@@ -239,9 +217,8 @@ namespace Sealebrities
             p.ClosePath();
             p.Fill();
 
-            // line
-            p.strokeColor = UIPalette.Lagoon;
-            p.lineWidth = 3f;
+            p.strokeColor = UIPalette.TurquoiseInk;
+            p.lineWidth = 5f;
             p.lineJoin = LineJoin.Round;
             p.lineCap = LineCap.Round;
             p.BeginPath();
@@ -249,12 +226,11 @@ namespace Sealebrities
             else { p.MoveTo(Pt(0)); for (int i = 1; i < n; i++) p.LineTo(Pt(i)); }
             p.Stroke();
 
-            // current value dot
             var last = Pt(n - 1);
-            p.fillColor = UIPalette.Lagoon;
-            p.BeginPath(); p.Arc(last, 6f, Angle.Degrees(0f), Angle.Degrees(360f)); p.Fill();
+            p.fillColor = UIPalette.TurquoiseInk;
+            p.BeginPath(); p.Arc(last, 10f, Angle.Degrees(0f), Angle.Degrees(360f)); p.Fill();
             p.fillColor = Color.white;
-            p.BeginPath(); p.Arc(last, 3f, Angle.Degrees(0f), Angle.Degrees(360f)); p.Fill();
+            p.BeginPath(); p.Arc(last, 5f, Angle.Degrees(0f), Angle.Degrees(360f)); p.Fill();
         }
     }
 }

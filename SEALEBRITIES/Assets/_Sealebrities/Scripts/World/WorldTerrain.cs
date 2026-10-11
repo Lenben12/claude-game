@@ -20,19 +20,22 @@ namespace Sealebrities
         {
             if (classMats == null || classMats.Length == 0 || classMats[0] == null)
             {
+                // How to Fish palette (art bible §1.7/§1.8): olive grass with a dry fringe, warm sand, a wet-sand band
+                // behind the foam, violet-grey rock, path dirt, saturated seabed sand
                 classMats = new[]
                 {
                     LowPoly.Mat(LowPoly.Sand),
-                    LowPoly.Mat(Color.Lerp(LowPoly.Sand, LowPoly.WetSand, 0.4f)),
+                    LowPoly.Mat(Color.Lerp(LowPoly.Sand, LowPoly.WetSand, 0.35f)),
                     MaterialLibrary.Opaque(LowPoly.WetSand, 0.22f, 0f),
                     LowPoly.Mat(LowPoly.Grass),
                     LowPoly.Mat(LowPoly.GrassDark),
-                    LowPoly.Mat(LowPoly.Soil),
+                    LowPoly.Mat(LowPoly.PathDirt),
                     LowPoly.Mat(LowPoly.Rock),
                     LowPoly.Mat(LowPoly.RockDark),
                     LowPoly.Mat(LowPoly.Seabed),
-                    LowPoly.Mat(Color.Lerp(LowPoly.Seabed, LowPoly.WetSand, 0.5f)),
+                    LowPoly.Mat(Color.Lerp(LowPoly.Seabed, LowPoly.WetSand, 0.45f)),
                     LowPoly.Mat(LowPoly.DeepRock),
+                    LowPoly.Mat(LowPoly.GrassDry),
                 };
             }
             return classMats[(int)c];
@@ -49,7 +52,7 @@ namespace Sealebrities
             root.SetParent(parent, false);
             root.position = Vector3.zero;
 
-            int maxVerts = 2 * WorldTerrainData.FineCells * WorldTerrainData.FineCells * 3;
+            int maxVerts = 2 * WorldTerrainData.UltraCells * WorldTerrainData.UltraCells * 3;
             if (identity == null || identity.Length < maxVerts)
             {
                 identity = new ushort[maxVerts];
@@ -57,7 +60,7 @@ namespace Sealebrities
             }
 
             var watch = Stopwatch.StartNew();
-            var mats = new List<Material>(11);
+            var mats = new List<Material>(WorldTerrainData.Classes);
             int done = 0;
             foreach (var c in data.Chunks)
             {
@@ -136,6 +139,10 @@ namespace Sealebrities
             mesh.bounds = bounds;
             mesh.UploadMeshData(true);
 
+            // ---- collider FIRST: a MeshCollider added next to a MeshFilter grabs the (non-readable) render mesh and
+            // logs "CollisionMeshData couldn't be created" for every chunk; it gets its own welded mesh below
+            AddCollider(go, c);
+
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             var mr = go.AddComponent<MeshRenderer>();
             mr.sharedMaterials = mats.ToArray();
@@ -144,8 +151,11 @@ namespace Sealebrities
             mr.lightProbeUsage = LightProbeUsage.Off;
             mr.reflectionProbeUsage = ReflectionProbeUsage.Off;
             mr.allowOcclusionWhenDynamic = false;
+        }
 
-            // ---- collider: the same surface, welded (fewer vertices to cook)
+        /// The chunk's collider: the same surface, welded (fewer vertices to cook).
+        static void AddCollider(GameObject go, WorldTerrainChunk c)
+        {
             int s = c.N + 1;
             var cv = new Vector3[s * s];
             for (int k = 0; k < cv.Length; k++) cv[k] = new Vector3(c.Vx[k], c.Vy[k], c.Vz[k]);

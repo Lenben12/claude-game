@@ -46,6 +46,66 @@ namespace Sealebrities
             return Finish("FX_CleanBubble", size, size, px, TextureWrapMode.Clamp);
         }
 
+        /// Faceted low-poly air bubble (art bible §2.3): an octagon with a crisp white rim, a faint see-through body
+        /// and a small triangular highlight facet up-left. Read as white at ~60 % alpha through the particle colour.
+        public static Texture2D FacetBubble(int size)
+        {
+            var px = new Color32[size * size];
+            float half = size * 0.5f;
+            float aa = 1.1f / half;
+            const int Sides = 8;
+            const float Outer = 0.90f, Inner = 0.70f;
+            // edge normals of the octagon (flat side on top)
+            var nx = new float[Sides];
+            var ny = new float[Sides];
+            for (int k = 0; k < Sides; k++)
+            {
+                float a = (k + 0.5f) * FXMath.TwoPi / Sides + FXMath.TwoPi / (2f * Sides);
+                nx[k] = Mathf.Cos(a);
+                ny[k] = Mathf.Sin(a);
+            }
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                float dx = (x + 0.5f - half) / half, dy = (y + 0.5f - half) / half;
+                float r = 0f;   // polygon "radius": the largest projection on an edge normal
+                for (int k = 0; k < Sides; k++)
+                {
+                    float p = dx * nx[k] + dy * ny[k];
+                    if (p > r) r = p;
+                }
+                float inside = Coverage(Outer - r, aa);
+                float rim = inside * Coverage(r - Inner, aa);
+                // highlight facet: a small triangle in the upper-left quadrant
+                float hx = dx + 0.36f, hy = dy - 0.30f;
+                float tri = Mathf.Max(Mathf.Max(-hy - 0.02f, hx - 0.17f), hy - hx * 0.9f - 0.16f);
+                float hl = inside * Coverage(-tri, aa);
+                float a2 = Mathf.Max(Mathf.Max(rim * 0.95f, hl), inside * 0.18f);
+                px[y * size + x] = new Color32(255, 255, 255, (byte)(FXMath.Clamp01(a2) * 255f));
+            }
+            return Finish("FX_FacetBubble", size, size, px, TextureWrapMode.Clamp);
+        }
+
+        /// Bioluminescent spark: a crisp bright core with a short soft glow (additive).
+        public static Texture2D Spark(int size)
+        {
+            var px = new Color32[size * size];
+            float half = size * 0.5f;
+            float aa = 1.2f / half;
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                float dx = (x + 0.5f - half) / half, dy = (y + 0.5f - half) / half;
+                float r = Mathf.Sqrt(dx * dx + dy * dy);
+                float core = Coverage(0.32f - r, aa);
+                float g = FXMath.Clamp01(1f - r);
+                float glow = g * g * 0.45f;
+                float a = Mathf.Max(core, glow);
+                px[y * size + x] = new Color32(255, 255, 255, (byte)(FXMath.Clamp01(a) * 255f));
+            }
+            return Finish("FX_Spark", size, size, px, TextureWrapMode.Clamp);
+        }
+
         /// Signed distance (positive = inside) to 0..1 coverage over an anti-aliasing width.
         static float Coverage(float sd, float aa) => FXMath.Clamp01(sd / aa + 0.5f);
 

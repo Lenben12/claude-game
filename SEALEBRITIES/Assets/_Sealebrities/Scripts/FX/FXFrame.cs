@@ -6,6 +6,7 @@ namespace Sealebrities
     sealed class FXFrame
     {
         public float dt, time, unscaledTime;
+        /// True while the game is really paused (Time.timeScale == 0, offline pause menu / finale).
         public bool paused;
         public bool inGame;
 
@@ -22,13 +23,23 @@ namespace Sealebrities
 
         /// Smoothed blends (0..1).
         public float under01, flash01, faint01, warn01, narcosis01, splash01;
+        /// Real seconds since the camera last went below the surface (large while above water).
+        public float sinceSubmerge = 100f;
 
         public float night01, sun01, day01;
+        /// Sun elevation in degrees read from the World sun transform (negative at night).
+        public float sunElevation = 45f;
+        /// 0..1 golden-hour weight (sun a few degrees above the horizon, 0 at night and at high sun).
+        public float golden01;
+
+        public GraphicsQuality quality = GraphicsQuality.High;
     }
 
     static class FXMath
     {
         public const float TwoPi = 6.28318530718f;
+        public const float Ln2 = 0.693147f, Ln10 = 2.302585f;
+        public const float SqrtLn2 = 0.832555f, SqrtLn10 = 1.517427f;
 
         public static float Clamp01(float x) => x < 0f ? 0f : x > 1f ? 1f : x;
 
@@ -47,57 +58,101 @@ namespace Sealebrities
         public static bool Differs(Color a, Color b, float eps) =>
             Mathf.Abs(a.r - b.r) > eps || Mathf.Abs(a.g - b.g) > eps || Mathf.Abs(a.b - b.b) > eps || Mathf.Abs(a.a - b.a) > eps;
 
-        // ------------------------------------------------------------------ low-poly underwater look
-        // Pure math only (no Unity API in the static initializers): FXMath is also used by worker threads.
-        // Fog/background color by camera depth, picked from the LowPoly water palette (WaterShallow #7FD8E0,
-        // Water #4DB3D6, WaterDeep #2C72AA): bright light turquoise in the shallow reef, bluer at 25 m,
-        // dark blue at 50-60 m, near black from 80 m on.
-        static readonly float[] StopDepth = { 0f, 4f, 10f, 18f, 25f, 38f, 52f, 65f, 80f, 120f };
-        static readonly Color[] StopColor =
+        /// Piecewise-linear lookup in a key table (keys ascending).
+        public static float Interp(float[] keys, float[] values, float x)
         {
-            Hex(0x74D6E6), Hex(0x63CCE1), Hex(0x4CB7D9), Hex(0x3699CA), Hex(0x297DB8),
-            Hex(0x1A5894), Hex(0x0E3768), Hex(0x09244A), Hex(0x041327), Hex(0x01060E)
-        };
-        static readonly Color MoonBlue = new Color(0.004f, 0.012f, 0.03f, 0f);
-
-        /// Underwater fog + camera background color. Dimmed at dawn/dusk (sun01) and darkened at night, so the
-        /// unlit fog matches the World module's attenuated sun/ambient light.
-        public static Color UnderwaterColor(float depth, float night01, float sun01 = 1f)
-        {
-            Color c = StopColor[StopColor.Length - 1];
-            if (depth <= 0f) c = StopColor[0];
-            else
+            if (x <= keys[0]) return values[0];
+            int last = keys.Length - 1;
+            if (x >= keys[last]) return values[last];
+            for (int i = 1; i <= last; i++)
             {
-                for (int i = 1; i < StopDepth.Length; i++)
+                if (x < keys[i])
                 {
-                    if (depth < StopDepth[i])
-                    {
-                        float t = (depth - StopDepth[i - 1]) / (StopDepth[i] - StopDepth[i - 1]);
-                        c = Color.Lerp(StopColor[i - 1], StopColor[i], t);
-                        break;
-                    }
+                    float t = (x - keys[i - 1]) / (keys[i] - keys[i - 1]);
+                    return values[i - 1] + (values[i] - values[i - 1]) * t;
                 }
             }
-            Color day = c * (0.5f + 0.5f * SmoothRange(0.05f, 0.6f, sun01));
+            return values[last];
+        }
+
+        // ------------------------------------------------------------------ underwater look (art bible §2.1 / §2.2)
+        // Pure math only (no Unity API in the static initializers): FXMath is also used by worker threads.
+        // Fog + background colour by camera depth: bright saturated turquoise in the shallows, blue at 25 m, dark
+        // blue at 55 m, near black from 80 m on. These are the on-screen targets; ACES + the underwater exposure
+        // lift (+0.35) bring the grading output back to roughly the same values.
+        static readonly float[] StopDepth = { 0f, 3f, 10f, 18f, 25f, 40f, 55f, 80f, 120f };
+        // (art polish: the shallow stops are pre-compensated for the grade – #5ECAD9 measured #86CED5 on screen, milky;
+        // #45CCE4 lands near the bright, saturated turquoise target)
+        static readonly Color[] StopColor =
+        {
+            Hex(0x50CDE2), Hex(0x50CDE2), Hex(0x3AABCE), Hex(0x2D90BC), Hex(0x2478AA),
+            Hex(0x1A5A8C), Hex(0x123E6A), Hex(0x0B2648), Hex(0x050F22)
+        };
+        /// Moonlight scattered in the upper water column at night (readable navy instead of pure black).
+        static readonly Color MoonNavy = new Color(0.030f, 0.062f, 0.125f, 0f);
+
+        /// Day colour of the water at a camera depth (no time-of-day dimming).
+        public static Color UnderwaterDayColor(float depth)
+        {
+            if (depth <= StopDepth[0]) return StopColor[0];
+            for (int i = 1; i < StopDepth.Length; i++)
+            {
+                if (depth < StopDepth[i])
+                {
+                    float t = (depth - StopDepth[i - 1]) / (StopDepth[i] - StopDepth[i - 1]);
+                    return Color.Lerp(StopColor[i - 1], StopColor[i], t);
+                }
+            }
+            return StopColor[StopColor.Length - 1];
+        }
+
+        /// Underwater fog + camera background colour. Dimmed a little at dawn/dusk (sun01) and turned into a dark
+        /// moonlit navy at night, so the unlit fog matches the World module's attenuated sun/ambient light.
+        public static Color UnderwaterColor(float depth, float night01, float sun01 = 1f)
+        {
+            Color c = UnderwaterDayColor(depth);
+            // dusk keeps at least 60 % of the day colour: entering the water in the evening is never black
+            Color day = c * Mathf.Lerp(0.6f, 1f, SmoothRange(0.06f, 0.5f, sun01));
             if (night01 > 0f)
             {
-                Color n = c * 0.1f + MoonBlue;
+                Color n = c * 0.12f + MoonNavy * (1f - SmoothRange(0f, 45f, depth));
                 day = Color.Lerp(day, n, Clamp01(night01));
             }
             day.a = 1f;
             return day;
         }
 
-        /// Exponential-squared fog density underwater: the shallow reef stays crisp for ~15 m and readable to
-        /// ~30-35 m; the deep closes in (flashlight territory).
-        public static float UnderwaterFogDensity(float depth, float night01)
-        {
-            float k = 0.034f + 0.034f * Smooth01(depth / 90f);
-            return k * (1f + 0.15f * Clamp01(night01));
-        }
+        // Exponential-squared fog density k by camera depth. Visibility (10 % of an object's own colour left) =
+        // sqrt(ln 10) / k: ~19 m in the shallows, ~17 m at 15 m, ~13 m at 25 m, ~11 m at 40 m, ~8 m in the deep.
+        // Objects within 6 m keep ~80 % of their colour in the shallows. Night: k x 1.5 (much shorter sight).
+        static readonly float[] KDepth = { 0f, 8f, 15f, 25f, 40f, 60f, 80f };
+        static readonly float[] KValue = { 0.080f, 0.080f, 0.090f, 0.118f, 0.140f, 0.165f, 0.190f };
+        public const float NightFogBoost = 0.5f;
 
-        /// Exponential-squared haze above water (soft pastel horizon, slightly closer at night).
-        public static float SkyFogDensity(float night01) => 0.0011f + 0.0003f * Clamp01(night01);
+        public static float UnderwaterFogDensity(float depth, float night01) =>
+            Interp(KDepth, KValue, Mathf.Max(0f, depth)) * (1f + NightFogBoost * Clamp01(night01));
+
+        /// Exponential (not squared) haze above water: 8 % at 50 m, 21 % at 150 m, 62 % at 600 m by day.
+        public static float SkyFogDensity(float night01) => 0.0016f + 0.0006f * Clamp01(night01);
+
+        /// Distance at which the exponential and the exponential-squared fog are equally dense (blend while the
+        /// lens crosses the surface).
+        public const float FogMatchDistance = 15f;
+
+        /// Above-water fog must never read grey by day (HSV saturation >= 0.25 at high sun, blue hue when grey).
+        /// Main thread only (uses Color.RGBToHSV).
+        public static Color GuardSkyFog(Color c, float sun01)
+        {
+            c.a = 1f;
+            float need = 0.25f * SmoothRange(0.55f, 0.75f, sun01);
+            if (need <= 0.001f) return c;
+            Color.RGBToHSV(c, out float h, out float s, out float v);
+            if (s >= need) return c;
+            if (s < 0.03f) h = 0.58f;   // pure grey has no hue: take the sky blue (~209°)
+            Color o = Color.HSVToRGB(h, need, v);
+            o.a = 1f;
+            return o;
+        }
     }
 
     /// Regulator breathing rhythm shared by the breathing audio and the exhale bubbles.

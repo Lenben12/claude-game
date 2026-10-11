@@ -20,7 +20,7 @@ namespace Sealebrities
         Vector3 vel, target;
         float t, open01, collapse01, descent = 2.8f, yaw, landTime;
         bool drifting, chuteGone;
-        string promptCache;
+        string promptCache, promptLabel, promptItem;
         Language promptLang;
 
         // ------------------------------------------------------------------ creation
@@ -42,7 +42,7 @@ namespace Sealebrities
             var go = new GameObject("DeliveryCrate");
             go.transform.SetParent(svc.transform, false);
             go.transform.position = pos;
-            go.transform.rotation = Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
+            go.transform.rotation = Quaternion.Euler(0f, HeliService.Hash(d) % 360u, 0f);
             var c = go.AddComponent<HeliCrate>();
             c.Setup(svc, d, false, Vector3.zero);
             c.Slot = slot;
@@ -150,6 +150,20 @@ namespace Sealebrities
             if (service != null) service.Unregister(this);
         }
 
+        /// Points the crate at the current Delivery instance (co-op snapshots replace the objects).
+        public void Rebind(Delivery current)
+        {
+            if (current != null) Delivery = current;
+        }
+
+        /// The delivery was received elsewhere (another player / machine): disappear with a little puff.
+        public void Vanish()
+        {
+            if (state == State.Landed || state == State.Floating)
+                BoatParticles.Puff(transform.position + Vector3.up * 0.4f, new Color(0.75f, 0.62f, 0.45f, 0.85f), 14, 0.4f);
+            Destroy(gameObject);
+        }
+
         string ItemName()
         {
             var item = Delivery != null ? GearDatabase.Get(Delivery.itemId) : null;
@@ -178,6 +192,9 @@ namespace Sealebrities
 
             if (Delivery != null)
             {
+                // host/offline: shared state; co-op client: optimistic until the next host snapshot (saves are skipped there)
+                var cur = service.Resolve(Delivery) ?? Delivery;
+                cur.dropped = true;
                 Delivery.dropped = true;
                 if (GameManager.I != null) GameManager.I.Save();
             }
@@ -308,10 +325,14 @@ namespace Sealebrities
         public string GetPrompt()
         {
             if (!CanInteract()) return null;
-            if (promptCache == null || promptLang != Loc.Current)
+            string label = GameInput.BindingLabel(GameAction.Interact);
+            string item = Delivery != null ? Delivery.itemId : null;
+            if (promptCache == null || promptLang != Loc.Current || !ReferenceEquals(label, promptLabel) || item != promptItem)
             {
                 promptLang = Loc.Current;
-                promptCache = Loc.Tr("E – Paket öffnen: ", "E – Open package: ") + ItemName();
+                promptLabel = label;
+                promptItem = item;
+                promptCache = label + Loc.Tr(" – Öffnen: ", " – Open: ") + ItemName();
             }
             return promptCache;
         }
@@ -320,14 +341,19 @@ namespace Sealebrities
         {
             if (state != State.Landed && state != State.Floating) return false;
             var gm = GameManager.I;
-            return gm != null && gm.InGame && Delivery != null && gm.State.deliveries.Contains(Delivery);
+            if (gm == null || !gm.InGame || Delivery == null || service == null) return false;
+            var cur = service.Resolve(Delivery);
+            return cur != null && !service.WasOpened(cur);
         }
 
         public void Interact()
         {
             if (!CanInteract()) return;
+            var cur = service.Resolve(Delivery);
+            if (cur == null) return;
             Vector3 p = transform.position + Vector3.up * 0.4f;
-            Shop.Receive(Delivery);
+            service.MarkOpened(cur);
+            Shop.Receive(cur);   // co-op clients: forwarded to the host (NetCommand.OpenCrate), applied optimistically
             BoatParticles.Puff(p, new Color(0.75f, 0.62f, 0.45f, 0.85f), 26, 0.45f);
             BoatSynth.PlayAt(BoatSynth.Thunk, p, 0.8f);
             Destroy(gameObject);

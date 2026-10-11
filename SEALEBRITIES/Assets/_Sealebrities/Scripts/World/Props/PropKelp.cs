@@ -32,6 +32,14 @@ namespace Sealebrities
                 Vector2 pc = PropUtil.InDisc(rng, site.radius * 0.92f);
                 float prad = PropUtil.Range(rng, 8f, 20f);
                 int count = 12 + rng.Next(20);
+                if (attempts == 1)
+                {
+                    // a dense stand around the site buoy, where players anchor and jump in (playtest: the centre was a
+                    // bare clearing, so the "forest" looked empty on arrival)
+                    pc = Vector2.zero;
+                    prad = 22f;
+                    count = 70;
+                }
                 for (int k = 0; k < count && stalks.Count < StalkTarget; k++)
                 {
                     Vector2 o = PropUtil.InDisc(rng, prad);
@@ -56,6 +64,7 @@ namespace Sealebrities
                 list.Add(s);
             }
             float currentDir = PropUtil.Range(rng, 0f, 360f);
+            Debug.Log("Sealebrities props: kelp forest with " + stalks.Count + " stalks in " + clusters.Count + " clusters (" + attempts + " patch attempts).");
             foreach (var kv in clusters)
             {
                 try { BuildCluster(decor, sway, kv.Value, rng, currentDir); }

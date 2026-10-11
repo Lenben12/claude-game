@@ -4,15 +4,35 @@ using UnityEngine.UIElements;
 
 namespace Sealebrities
 {
-    /// Chopper Shop: gear categories, item cards with stats, normal/express orders and current deliveries.
+    /// Chopper Shop: icon category tabs, item cards with stat bars, standard (same day, +2–3 h) and express (+45 min)
+    /// orders, and the current deliveries with a live ETA.
     public class UIAppShop : UIPhoneApp
     {
-        static readonly GearSlot[] Slots = { GearSlot.Tank, GearSlot.Fins, GearSlot.Lamp, GearSlot.Camera, GearSlot.Boat, GearSlot.Submarine };
+        static readonly GearSlot[] Slots = { GearSlot.Tank, GearSlot.Camera, GearSlot.Rod, GearSlot.Fins, GearSlot.Lamp, GearSlot.Boat, GearSlot.Submarine };
         int category;
+        readonly System.Collections.Generic.List<GearSlot> visibleSlots = new System.Collections.Generic.List<GearSlot>();
+
+        static bool HasBuyable(GearSlot slot)
+        {
+            var all = GearDatabase.All;
+            for (int i = 0; i < all.Count; i++) if (all[i].slot == slot && !all[i].comingSoon) return true;
+            return false;
+        }
+
+        struct LiveEta
+        {
+            public Delivery delivery;
+            public Label label;
+            public int shown;
+        }
+
+        readonly List<LiveEta> etas = new List<LiveEta>();
+        readonly List<GearItem> items = new List<GearItem>();
+        float tickTimer;
 
         public override string Id => "shop";
-        public override string Title => Loc.Tr("Chopper Shop", "Chopper Shop");
-        public override Color Color => UIPalette.Sun;
+        public override string Title => "Chopper Shop";
+        public override Color Color => UIPalette.Coral;
         public override UIGlyph.DrawFn Icon => UIGlyphs.Heli;
 
         public override int Badge
@@ -22,7 +42,7 @@ namespace Sealebrities
                 var s = UIKit.State;
                 if (s == null) return 0;
                 int n = 0;
-                foreach (var d in s.deliveries) if (d.dropped) n++;
+                for (int i = 0; i < s.deliveries.Count; i++) if (s.deliveries[i] != null && s.deliveries[i].dropped) n++;
                 return n;
             }
         }
@@ -31,12 +51,27 @@ namespace Sealebrities
         {
             switch (slot)
             {
-                case GearSlot.Tank: return Loc.Tr("Flaschen", "Tanks");
+                case GearSlot.Tank: return Loc.Tr("Luft", "Air");
                 case GearSlot.Fins: return Loc.Tr("Flossen", "Fins");
-                case GearSlot.Lamp: return Loc.Tr("Lampen", "Lamps");
-                case GearSlot.Camera: return Loc.Tr("Kameras", "Cameras");
+                case GearSlot.Lamp: return Loc.Tr("Licht", "Light");
+                case GearSlot.Camera: return Loc.Tr("Kamera", "Camera");
                 case GearSlot.Boat: return Loc.Tr("Boot", "Boat");
-                default: return Loc.Tr("U-Boote", "Subs");
+                case GearSlot.Rod: return Loc.Tr("Angel", "Rod");
+                default: return Loc.Tr("U-Boot", "Sub");
+            }
+        }
+
+        public static Color SlotColor(GearSlot s)
+        {
+            switch (s)
+            {
+                case GearSlot.Camera: return UIPalette.Sun;
+                case GearSlot.Lamp: return UIPalette.Warn;
+                case GearSlot.Rod: return UIPalette.Sky;
+                case GearSlot.Tank: return UIPalette.Turquoise;
+                case GearSlot.Fins: return UIPalette.Coral;
+                case GearSlot.Boat: return UIPalette.Rgb(0x9A7658);
+                default: return UIPalette.Violet;
             }
         }
 
@@ -45,212 +80,294 @@ namespace Sealebrities
             var gm = GameManager.I;
             if (gm == null) return;
             var s = gm.State;
+            etas.Clear();
 
-            // balance
             var bal = UIKit.Row();
-            bal.Add(UIWidgets.StatTile(Loc.Money(s.money), Loc.Tr("Guthaben", "Balance"), UIPalette.Money));
-            bal.Add(UIKit.HSpacer(8f));
-            bal.Add(UIWidgets.StatTile(Loc.Number(s.followers), Loc.Tr("Follower", "Followers"), UIPalette.Lagoon));
+            bal.Add(PhoneKit.Stat(UIGlyphs.Coin, UIPalette.Sun, Loc.Money(s.money)));
+            bal.Add(UIKit.HSpacer(10f));
+            bal.Add(PhoneKit.Stat(UIGlyphs.Person, UIPalette.Turquoise, UIKit.Compact(s.followers)));
             body.Add(bal);
 
-            // deliveries
             if (s.deliveries.Count > 0)
             {
-                body.Add(UIWidgets.SectionTitle(Loc.Tr("Lieferungen", "Deliveries"), UIPalette.Sun));
-                foreach (var d in s.deliveries) body.Add(DeliveryRow(d, s));
+                body.Add(PhoneKit.Section(Loc.Tr("Lieferungen", "Deliveries"), UIGlyphs.Heli));
+                for (int i = 0; i < s.deliveries.Count; i++) if (s.deliveries[i] != null) body.Add(DeliveryRow(s.deliveries[i]));
             }
 
-            // categories
+            // category tabs (a slot whose items are all "coming soon" – the submarines – is not shown)
+            visibleSlots.Clear();
+            for (int i = 0; i < Slots.Length; i++) if (HasBuyable(Slots[i])) visibleSlots.Add(Slots[i]);
+            if (visibleSlots.Count == 0) visibleSlots.Add(GearSlot.Tank);
+            category = Mathf.Clamp(category, 0, visibleSlots.Count - 1);
             var tabs = UIKit.Row();
             tabs.style.flexWrap = Wrap.Wrap;
-            tabs.style.marginTop = 14f;
-            for (int i = 0; i < Slots.Length; i++)
+            tabs.style.marginTop = 16f;
+            tabs.style.marginBottom = 4f;
+            for (int i = 0; i < visibleSlots.Count; i++)
             {
                 int idx = i;
                 bool sel = i == category;
-                var b = UIKit.Btn(SlotName(Slots[i]), () => { category = idx; Phone.Refresh(false); }, UIBtnKind.Ghost, 13f);
-                UIKit.Pad(b, 7f, 12f, 7f, 12f);
-                UIKit.Radius(b, 999f);
-                b.style.marginRight = 6f; b.style.marginBottom = 6f;
-                if (sel) UIKit.SetColors(b, UIPalette.Sun, UIPalette.Deep);
-                tabs.Add(b);
+                var sl = visibleSlots[i];
+                var t = UIKit.Col();
+                t.style.alignItems = Align.Center;
+                t.style.width = Length.Percent(25f);
+                t.style.marginBottom = 10f;
+                var tile = UIWidgets.IconTile(UIGlyphs.ForSlot(sl), sel ? SlotColor(sl) : UIPalette.CardAlt, 72f);
+                if (sel) UIKit.Border(tile, 3f, UIPalette.Ink);
+                t.Add(tile);
+                var l = UIKit.Text(SlotName(sl), PhoneKit.Tiny, sel ? UIPalette.Ink : UIPalette.InkSoft, true);
+                l.style.marginTop = 4f;
+                t.Add(l);
+                UIKit.IgnorePicking(t);
+                t.pickingMode = PickingMode.Position;
+                t.RegisterCallback<ClickEvent>(_ => { UIAudio.Click(); category = idx; Phone.Refresh(false); });
+                tabs.Add(t);
             }
             body.Add(tabs);
 
-            var slot = Slots[Mathf.Clamp(category, 0, Slots.Length - 1)];
-            var items = new List<GearItem>();
+            var slot = visibleSlots[category];
+            items.Clear();
             foreach (var g in GearDatabase.All) if (g.slot == slot) items.Add(g);
             items.Sort((a, b) => a.tier.CompareTo(b.tier));
             var equipped = GearDatabase.Equipped(s, slot);
-            foreach (var item in items) body.Add(ItemCard(item, s, equipped == item));
-
-            var note = UIKit.Para(Loc.Tr("Pilot Gary liefert am nächsten Morgen zum Helipad. Express (+50 %) kommt in wenigen Minuten. Die Kiste holst du selbst ab.",
-                                         "Pilot Gary delivers to the helipad the next morning. Express (+50 %) arrives in a few minutes. Pick up the crate yourself."), 12f, UIPalette.TextFaint);
-            note.style.marginTop = 8f;
-            body.Add(note);
+            for (int i = 0; i < items.Count; i++) body.Add(ItemCard(items[i], s, equipped == items[i]));
         }
 
-        static VisualElement DeliveryRow(Delivery d, GameState s)
+        VisualElement DeliveryRow(Delivery d)
         {
             var item = GearDatabase.Get(d.itemId);
             var row = UIKit.Row();
-            row.style.backgroundColor = UIPalette.A(UIPalette.Sun, d.dropped ? 0.18f : 0.08f);
-            UIKit.Radius(row, 12f);
-            UIKit.Pad(row, 10f, 12f, 10f, 10f);
-            row.style.marginBottom = 6f;
-            var g = new UIGlyph(UIGlyphs.Heli, UIPalette.Sun, 26f);
-            g.style.marginRight = 10f;
-            row.Add(g);
+            row.style.backgroundColor = d.dropped ? UIPalette.A(UIPalette.Sun, 0.35f) : Color.white;
+            UIKit.Radius(row, 20f);
+            UIKit.Pad(row, 12f, 16f, 12f, 12f);
+            row.style.marginBottom = 8f;
+            row.Add(UIWidgets.IconTile(item != null ? UIGlyphs.ForSlot(item.slot) : UIGlyphs.Heli, item != null ? SlotColor(item.slot) : UIPalette.Coral, 52f));
             var col = UIKit.Col();
+            col.style.marginLeft = 12f;
             col.style.flexShrink = 1;
             col.style.flexGrow = 1;
-            col.Add(UIKit.Text(item != null ? item.Name : d.itemId, 14f, UIPalette.Text, true));
-            string status;
-            if (d.dropped) status = Loc.Tr("Liegt am Helipad – abholen!", "Waiting at the helipad – pick it up!");
-            else if (Shop.IsDue(d)) status = Loc.Tr("Heli im Anflug …", "Chopper inbound …");
-            else status = Loc.Tr("Ankunft: Tag ", "Arrives: day ") + d.arrivalDay + " · " + UIKit.TimeOfDay(d.arrivalTime);
-            var st = UIKit.Text(status, 12.5f, d.dropped ? UIPalette.Sun : UIPalette.TextDim);
-            st.style.whiteSpace = WhiteSpace.Normal;
-            col.Add(st);
+            col.Add(PhoneKit.T(item != null ? item.Name : d.itemId, PhoneKit.Body, UIPalette.Ink, true));
+            var eta = UIKit.Text("", PhoneKit.Small, d.dropped ? UIPalette.SunInk : UIPalette.InkSoft, true);
+            col.Add(eta);
             row.Add(col);
-            if (d.express) row.Add(UIKit.Pill("EXPRESS", UIPalette.Coral, Color.white, 10f));
+            if (d.express) row.Add(UIKit.Pill("EXPRESS", UIPalette.Coral, Color.white, PhoneKit.Tiny));
+            var le = new LiveEta { delivery = d, label = eta, shown = -2 };
+            UpdateEta(ref le);
+            etas.Add(le);
             return row;
+        }
+
+        static void UpdateEta(ref LiveEta e)
+        {
+            var d = e.delivery;
+            int key;
+            if (d.dropped) key = -1;
+            else if (Shop.IsDue(d)) key = 0;
+            else key = Mathf.CeilToInt(Shop.SecondsUntil(d) / 10f);
+            if (key == e.shown) return;
+            e.shown = key;
+            if (key == -1) e.label.text = Loc.Tr("Liegt am Helipad – abholen!", "At the helipad – pick it up!");
+            else if (key == 0) e.label.text = Loc.Tr("Heli im Anflug …", "Chopper inbound …");
+            else
+            {
+                var gm = GameManager.I;
+                string day = gm != null && d.arrivalDay > gm.State.day ? Loc.Tr("morgen ", "tomorrow ") : "";
+                int secs = key * 10;
+                e.label.text = day + UIKit.TimeOfDay(d.arrivalTime) + " · " + Loc.Tr("in ", "in ") + UIKit.ClockShort(secs) + " min";
+            }
         }
 
         VisualElement ItemCard(GearItem item, GameState s, bool isEquipped)
         {
             bool owned = Shop.IsOwned(item), ordered = Shop.IsOrdered(item);
-            var card = UIKit.Card(UIPalette.A(UIPalette.Raised, 0.95f), 16f, 14f);
-            card.style.marginTop = 8f;
-            if (isEquipped) UIKit.Border(card, 1.5f, UIPalette.A(UIPalette.Money, 0.6f));
+            var card = PhoneKit.Card();
+            if (isEquipped) UIKit.Border(card, 3f, UIPalette.LeafInk);
 
             var head = UIKit.Row();
-            var name = UIKit.Text(item.Name, 16f, item.comingSoon ? UIPalette.TextDim : UIPalette.Text, true);
-            name.style.flexShrink = 1;
-            name.style.whiteSpace = WhiteSpace.Normal;
-            head.Add(name);
-            head.Add(UIKit.Flex());
-            if (isEquipped) head.Add(UIKit.Pill(Loc.Tr("AUSGERÜSTET", "EQUIPPED"), UIPalette.Money, UIPalette.Deep, 10f));
-            else if (owned) head.Add(UIKit.Pill(Loc.Tr("IM BESITZ", "OWNED"), UIPalette.A(UIPalette.Money, 0.3f), UIPalette.Money, 10f));
-            else if (ordered) head.Add(UIKit.Pill(Loc.Tr("UNTERWEGS", "ON ITS WAY"), UIPalette.Sun, UIPalette.Deep, 10f));
-            else if (item.comingSoon) head.Add(UIKit.Pill(Loc.Tr("BALD", "SOON"), UIPalette.A(UIPalette.Violet, 0.35f), UIPalette.Violet, 10f));
+            var tile = UIWidgets.IconTile(UIGlyphs.ForSlot(item.slot), item.comingSoon ? UIPalette.CardAlt : SlotColor(item.slot), 68f);
+            head.Add(tile);
+            var nc = UIKit.Col();
+            nc.style.marginLeft = 12f;
+            nc.style.flexShrink = 1;
+            nc.style.flexGrow = 1;
+            var name = PhoneKit.T(item.Name, PhoneKit.Body, item.comingSoon ? UIPalette.InkSoft : UIPalette.Ink, true);
+            nc.Add(name);
+            var desc = PhoneKit.T(item.Description, PhoneKit.Tiny, UIPalette.InkSoft);
+            desc.style.marginTop = 2f;
+            nc.Add(desc);
+            head.Add(nc);
             card.Add(head);
 
-            var desc = UIKit.Para(item.Description, 12.5f, UIPalette.TextDim);
-            desc.style.marginTop = 4f;
-            card.Add(desc);
+            var status = UIKit.Row();
+            status.style.marginTop = 8f;
+            if (isEquipped) status.Add(StatusPill(UIGlyphs.Check, Loc.Tr("Ausgerüstet", "Equipped"), UIPalette.LeafInk));
+            else if (owned) status.Add(StatusPill(UIGlyphs.Bag, Loc.Tr("Im Inventar", "In inventory"), UIPalette.TurquoiseInk));
+            else if (ordered) status.Add(StatusPill(UIGlyphs.Heli, Loc.Tr("Unterwegs", "On its way"), UIPalette.SunInk));
+            else if (item.comingSoon) status.Add(StatusPill(UIGlyphs.Clock, Loc.Tr("Bald", "Soon"), UIPalette.Violet));
+            if (status.childCount > 0) card.Add(status);
 
-            var stats = UIKit.Row();
-            stats.style.flexWrap = Wrap.Wrap;
-            stats.style.marginTop = 8f;
-            foreach (var st in Stats(item, s)) stats.Add(StatChip(st));
+            // stat bars
+            var stats = UIKit.Col();
+            stats.style.marginTop = 10f;
+            AddStats(stats, item, s);
             card.Add(stats);
 
-            if (owned) return card;
+            if (owned || ordered || item.comingSoon) return card;
 
             var priceRow = UIKit.Row();
-            priceRow.style.marginTop = 8f;
-            priceRow.Add(UIKit.Text(Loc.Money(item.price), 18f, UIPalette.Sun, true));
+            priceRow.style.marginTop = 12f;
+            priceRow.Add(new UIGlyph(UIGlyphs.Coin, UIPalette.Sun, 32f));
+            var price = UIKit.Text(Loc.Money(item.price), PhoneKit.Big, s.money >= item.price ? UIPalette.Ink : UIPalette.CoralInk, true);
+            price.style.marginLeft = 8f;
+            priceRow.Add(price);
             priceRow.Add(UIKit.Flex());
             if (item.followersNeeded > 0)
             {
                 bool met = s.followers >= item.followersNeeded;
-                var g = new UIGlyph(UIGlyphs.Person, met ? UIPalette.TextDim : UIPalette.Coral, 13f);
-                g.style.marginRight = 4f;
-                priceRow.Add(g);
-                priceRow.Add(UIKit.Text(Loc.Tr("ab ", "from ") + Loc.Number(item.followersNeeded), 12.5f, met ? UIPalette.TextDim : UIPalette.Coral, true));
+                priceRow.Add(new UIGlyph(UIGlyphs.Person, met ? UIPalette.Turquoise : UIPalette.CoralInk, 26f));
+                var fl = UIKit.Text(UIKit.Compact(item.followersNeeded), PhoneKit.Small, met ? UIPalette.InkSoft : UIPalette.CoralInk, true);
+                fl.style.marginLeft = 4f;
+                priceRow.Add(fl);
             }
             card.Add(priceRow);
-
-            if (item.comingSoon)
-            {
-                var cs = UIKit.Text(Loc.Tr("Kommt in einem späteren Update", "Coming in a later update"), 12.5f, UIPalette.Violet, true);
-                cs.style.marginTop = 8f;
-                card.Add(cs);
-                return card;
-            }
-            if (ordered) return card;
 
             bool canNormal = Shop.CanBuy(item, false, out string reason);
             bool canExpress = Shop.CanBuy(item, true, out string reasonExpress);
             var buttons = UIKit.Row();
-            buttons.style.marginTop = 10f;
-            var buy = UIKit.Btn(Loc.Tr("Bestellen", "Order"), () => { if (Shop.Buy(item, false)) Phone.Refresh(true); }, UIBtnKind.Primary, 14f);
+            buttons.style.marginTop = 12f;
+            var buy = BuyButton(UIGlyphs.Heli, Loc.Tr("Bestellen", "Order"), StandardEta(s), () => { if (Shop.Buy(item, false)) { UIAudio.Pop(); Phone.Refresh(true); } }, UIBtnKind.Primary);
             buy.style.flexGrow = 1;
             buy.style.flexBasis = 0;
-            UIKit.Pad(buy, 9f, 8f, 9f, 8f);
             UIKit.SetEnabled(buy, canNormal);
             buttons.Add(buy);
-            var express = UIKit.Btn(Loc.Tr("Express +50 %", "Express +50 %") + " · " + Loc.Money(Shop.Price(item, true)), () => { if (Shop.Buy(item, true)) Phone.Refresh(true); }, UIBtnKind.Secondary, 13f);
-            express.style.flexGrow = 1.4f;
+            var express = BuyButton(UIGlyphs.Clock, Loc.Money(Shop.Price(item, true)), "+45 min", () => { if (Shop.Buy(item, true)) { UIAudio.Pop(); Phone.Refresh(true); } }, UIBtnKind.Secondary);
+            express.style.flexGrow = 1;
             express.style.flexBasis = 0;
-            express.style.marginLeft = 8f;
-            UIKit.Pad(express, 9f, 8f, 9f, 8f);
+            express.style.marginLeft = 10f;
             UIKit.SetEnabled(express, canExpress);
             buttons.Add(express);
             card.Add(buttons);
-            if (!canNormal || !canExpress)
+            if (!canNormal && !string.IsNullOrEmpty(reason))
             {
-                string why = !canNormal ? reason : reasonExpress;
-                if (!string.IsNullOrEmpty(why))
-                {
-                    var w = UIKit.Text(why, 12f, UIPalette.Coral, true);
-                    w.style.marginTop = 6f;
-                    card.Add(w);
-                }
+                var w = PhoneKit.T(reason, PhoneKit.Small, UIPalette.CoralInk, true);
+                w.style.marginTop = 8f;
+                card.Add(w);
             }
             return card;
         }
 
-        struct UIShopStat
+        static string StandardEta(GameState s)
         {
-            public string label, value;
+            if (s.timeOfDay > Shop.LastStandardOrder) return Loc.Tr("morgen ", "tomorrow ") + UIKit.TimeOfDay(Shop.MorningArrival);
+            return "+2–3 h";
         }
 
-        static List<UIShopStat> Stats(GearItem g, GameState s)
+        static Button BuyButton(UIGlyph.DrawFn icon, string text, string sub, System.Action onClick, UIBtnKind kind)
         {
-            var list = new List<UIShopStat>();
+            var b = PhoneKit.Button("", onClick, kind, PhoneKit.Body);
+            b.style.flexDirection = FlexDirection.Row;
+            b.style.alignItems = Align.Center;
+            b.style.justifyContent = Justify.Center;
+            UIKit.Pad(b, 12f, 12f, 12f, 12f);
+            var skin = b.userData as UIBtnSkin;
+            Color fg = skin != null ? skin.fg : Color.white;
+            b.Add(new UIGlyph(icon, fg, 34f));
+            var col = UIKit.Col();
+            col.style.marginLeft = 8f;
+            col.pickingMode = PickingMode.Ignore;
+            var t = UIKit.Text(text, PhoneKit.Small, fg, true);
+            t.pickingMode = PickingMode.Ignore;
+            col.Add(t);
+            var st = UIKit.Text(sub, PhoneKit.Tiny, UIPalette.A(fg, 0.8f), false);
+            st.pickingMode = PickingMode.Ignore;
+            col.Add(st);
+            b.Add(col);
+            return b;
+        }
+
+        static VisualElement StatusPill(UIGlyph.DrawFn icon, string text, Color c)
+        {
+            var row = UIKit.Row();
+            row.style.backgroundColor = UIPalette.A(c, 0.14f);
+            UIKit.Radius(row, 999f);
+            UIKit.Pad(row, 6f, 14f, 6f, 10f);
+            row.Add(new UIGlyph(icon, c, 22f));
+            var l = UIKit.Text(text, PhoneKit.Tiny, c, true);
+            l.style.marginLeft = 6f;
+            row.Add(l);
+            return row;
+        }
+
+        // ------------------------------------------------------------------ stat bars
+        static float MaxOf(GearSlot slot, System.Func<GearItem, float> f)
+        {
+            float m = 0.0001f;
+            foreach (var g in GearDatabase.All) if (g.slot == slot) m = Mathf.Max(m, f(g));
+            return m;
+        }
+
+        static void AddStats(VisualElement host, GearItem g, GameState s)
+        {
             float airMul = DifficultySettings.For(s.difficulty).airMultiplier;
             switch (g.slot)
             {
                 case GearSlot.Tank:
-                    list.Add(new UIShopStat { label = Loc.Tr("Luft", "Air"), value = UIKit.ClockShort(Mathf.RoundToInt(g.airSeconds * airMul)) + " min" });
-                    list.Add(new UIShopStat { label = Loc.Tr("Tiefe", "Depth"), value = Loc.Tr("bis ", "to ") + Loc.Meters(g.maxDepth) });
+                    host.Add(StatBar(UIGlyphs.Bubbles, g.airSeconds / MaxOf(g.slot, x => x.airSeconds), UIKit.ClockShort(Mathf.RoundToInt(g.airSeconds * airMul)) + " min"));
+                    host.Add(StatBar(UIGlyphs.Depth, g.maxDepth / MaxOf(g.slot, x => x.maxDepth), Loc.Meters(g.maxDepth)));
                     break;
                 case GearSlot.Submarine:
-                    list.Add(new UIShopStat { label = Loc.Tr("Tiefe", "Depth"), value = Loc.Tr("bis ", "to ") + Loc.Meters(g.maxDepth) });
+                    host.Add(StatBar(UIGlyphs.Depth, g.maxDepth / MaxOf(g.slot, x => x.maxDepth), Loc.Meters(g.maxDepth)));
                     break;
                 case GearSlot.Fins:
-                    list.Add(new UIShopStat { label = Loc.Tr("Tempo", "Speed"), value = UIKit.Mult(g.swimSpeed) });
+                    host.Add(StatBar(UIGlyphs.Wave, g.swimSpeed / MaxOf(g.slot, x => x.swimSpeed), UIKit.Mult(g.swimSpeed)));
                     break;
                 case GearSlot.Lamp:
-                    list.Add(new UIShopStat { label = Loc.Tr("Licht", "Light"), value = UIKit.Mult(g.lampIntensity) });
-                    list.Add(new UIShopStat { label = Loc.Tr("Reichweite", "Range"), value = Loc.Meters(g.lampRange) });
+                    host.Add(StatBar(UIGlyphs.Sun, g.lampIntensity / MaxOf(g.slot, x => x.lampIntensity), UIKit.Mult(g.lampIntensity)));
+                    host.Add(StatBar(UIGlyphs.Eye, g.lampRange / MaxOf(g.slot, x => x.lampRange), Loc.Meters(g.lampRange)));
                     break;
                 case GearSlot.Camera:
-                    list.Add(new UIShopStat { label = Loc.Tr("Qualität", "Quality"), value = UIKit.Mult(g.cameraQuality) });
-                    list.Add(new UIShopStat { label = Loc.Tr("Band", "Tape"), value = UIKit.ClockShort(Mathf.RoundToInt(g.tapeSeconds)) + " min" });
-                    list.Add(new UIShopStat { label = "Zoom", value = UIKit.Mult(g.maxZoom) });
+                    host.Add(StatBar(UIGlyphs.Star, g.cameraQuality / MaxOf(g.slot, x => x.cameraQuality), UIKit.Mult(g.cameraQuality)));
+                    host.Add(StatBar(UIGlyphs.Clock, g.tapeSeconds / MaxOf(g.slot, x => x.tapeSeconds), UIKit.ClockShort(Mathf.RoundToInt(g.tapeSeconds)) + " min"));
+                    host.Add(StatBar(UIGlyphs.Plus, g.maxZoom / MaxOf(g.slot, x => x.maxZoom), UIKit.Mult(g.maxZoom)));
+                    break;
+                case GearSlot.Rod:
+                    host.Add(StatBar(UIGlyphs.Clock, g.fishSpeed / MaxOf(g.slot, x => x.fishSpeed), UIKit.Mult(g.fishSpeed)));
+                    host.Add(StatBar(UIGlyphs.Star, (g.fishLuck + 0.15f) / (MaxOf(g.slot, x => x.fishLuck) + 0.15f), "+" + Mathf.RoundToInt(g.fishLuck * 100f) + " %"));
                     break;
                 case GearSlot.Boat:
-                    list.Add(new UIShopStat { label = Loc.Tr("Bootstempo", "Boat speed"), value = UIKit.Mult(g.boatSpeed) });
+                    host.Add(StatBar(UIGlyphs.Boat, g.boatSpeed / MaxOf(g.slot, x => x.boatSpeed), UIKit.Mult(g.boatSpeed)));
                     break;
             }
-            return list;
         }
 
-        static VisualElement StatChip(UIShopStat st)
+        static VisualElement StatBar(UIGlyph.DrawFn icon, float v01, string value)
         {
-            var chip = UIKit.Row();
-            chip.style.backgroundColor = new Color(1f, 1f, 1f, 0.06f);
-            UIKit.Radius(chip, 8f);
-            UIKit.Pad(chip, 4f, 8f, 4f, 8f);
-            chip.style.marginRight = 6f; chip.style.marginBottom = 4f;
-            chip.Add(UIKit.Text(st.label, 11.5f, UIPalette.TextFaint));
-            var v = UIKit.Text(st.value, 12f, UIPalette.Text, true);
-            v.style.marginLeft = 5f;
-            chip.Add(v);
-            return chip;
+            var row = UIKit.Row();
+            row.style.marginTop = 6f;
+            row.Add(new UIGlyph(icon, UIPalette.InkSoft, 26f));
+            var bar = PhoneKit.Bar(Mathf.Clamp01(v01), UIPalette.Turquoise, 12f);
+            bar.style.flexGrow = 1;
+            bar.style.marginLeft = 10f;
+            bar.style.marginRight = 10f;
+            row.Add(bar);
+            var l = UIKit.Text(value, PhoneKit.Small, UIPalette.Ink, true);
+            l.style.width = 110f;
+            l.style.unityTextAlign = TextAnchor.MiddleRight;
+            row.Add(l);
+            return row;
+        }
+
+        public override void Tick(float dt)
+        {
+            tickTimer -= dt;
+            if (tickTimer > 0f) return;
+            tickTimer = 0.5f;
+            for (int i = 0; i < etas.Count; i++)
+            {
+                var e = etas[i];
+                UpdateEta(ref e);
+                etas[i] = e;
+            }
         }
     }
 }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Sealebrities
 {
@@ -8,6 +9,7 @@ namespace Sealebrities
         public float[] waves, jungle, drone, groan;
         public float[] inhale, exhale, heartbeat, splash, bump;
         public float[] blip, recOn, recOff, discover, fanfare, coin;
+        public float[] warn, shutter, equip, cast, reel, catchFish, sparkle, click, ping, error;
     }
 
     /// xorshift32 noise source (thread-safe as a value owned by one generator).
@@ -91,6 +93,16 @@ namespace Sealebrities
                 discover = Discover(),
                 fanfare = Fanfare(),
                 coin = Coin(),
+                warn = WarnBeep(),
+                shutter = Shutter(),
+                equip = Equip(),
+                cast = Cast(),
+                reel = Reel(),
+                catchFish = CatchFish(),
+                sparkle = Sparkle(),
+                click = Click(),
+                ping = Ping(),
+                error = ErrorBoop(),
             };
         }
 
@@ -631,6 +643,423 @@ namespace Sealebrities
                 a[i] = env * (MathF.Sin(phase) + 0.3f * MathF.Sin(3f * phase) + 0.12f * MathF.Sin(5f * phase));
             }
             return Declick(NormalizePeak(a, 0.6f));
+        }
+
+        // ------------------------------------------------------------------ extra one-shots (FXSfx)
+        /// Warning "piep piep" (low air / too deep), soft so it can repeat.
+        static float[] WarnBeep()
+        {
+            var a = new float[N(0.32f)];
+            AddSoftBeep(a, 0, 1318.5f, 0.075f, 0.6f);
+            AddSoftBeep(a, N(0.16f), 1318.5f, 0.075f, 0.6f);
+            return Declick(NormalizePeak(a, 0.6f));
+        }
+
+        static void AddSoftBeep(float[] a, int start, float f, float dur, float amp)
+        {
+            int len = Math.Min(a.Length - start, N(dur + 0.06f));
+            for (int i = 0; i < len; i++)
+            {
+                float t = i / (float)SR;
+                float env = (1f - MathF.Exp(-t / 0.004f)) * (t < dur ? 1f : MathF.Exp(-(t - dur) / 0.015f));
+                a[start + i] += amp * env * (MathF.Sin(TwoPi * f * t) + 0.12f * MathF.Sin(TwoPi * 2f * f * t));
+            }
+        }
+
+        /// Camera shutter: sharp click, mechanical clack, short motor whirr.
+        static float[] Shutter()
+        {
+            int n = N(0.28f);
+            var a = new float[n];
+            var rng = new FXRng(1701);
+            var hp = FXBiquad.HighPass(2500f, 0.7f);
+            var bp = FXBiquad.BandPass(1400f, 1.2f);
+            for (int i = 0; i < n; i++)
+            {
+                float t = i / (float)SR;
+                float w = rng.Signed();
+                float t1 = t - 0.003f;   // after the declick fade-in
+                float click = t1 > 0f ? hp.Process(w) * MathF.Exp(-t1 / 0.004f) : 0f;
+                float t2 = t - 0.045f;
+                float clack = t2 > 0f ? bp.Process(w) * 1.6f * MathF.Exp(-t2 / 0.012f) : 0f;
+                float t3 = t - 0.08f;
+                float whirr = t3 > 0f && t3 < 0.16f ? 0.12f * MathF.Sin(TwoPi * 420f * t3) * MathF.Sin(MathF.PI * t3 / 0.16f) * (0.6f + 0.4f * MathF.Sin(TwoPi * 60f * t3)) : 0f;
+                a[i] = click + clack + whirr;
+            }
+            return Declick(NormalizePeak(a, 0.75f));
+        }
+
+        /// Hotbar equip: a soft cloth "fwip" and a tiny click.
+        static float[] Equip()
+        {
+            int n = N(0.16f);
+            var a = new float[n];
+            var rng = new FXRng(88);
+            float y1 = 0f, y2 = 0f;
+            for (int i = 0; i < n; i++)
+            {
+                float t = i / (float)SR;
+                float x = t / 0.13f;
+                float fc = 700f + 2600f * x;
+                float c = OnePole(fc);
+                float w = rng.Signed();
+                y1 += c * (w - y1);
+                y2 += c * (y1 - y2);
+                float env = x < 1f ? MathF.Sin(MathF.PI * x) : 0f;
+                a[i] = (y1 - y2) * 2.2f * env * env;
+                float tc = t - 0.12f;
+                if (tc > 0f) a[i] += 0.25f * MathF.Sin(TwoPi * 2200f * tc) * MathF.Exp(-tc / 0.006f);
+            }
+            return Declick(NormalizePeak(a, 0.5f));
+        }
+
+        /// Fishing rod cast: a whoosh through the air, then the line zipping off the reel.
+        static float[] Cast()
+        {
+            int n = N(0.95f);
+            var a = new float[n];
+            var rng = new FXRng(4040);
+            var bp = FXBiquad.BandPass(800f, 1.1f);
+            for (int i = 0; i < n; i++)
+            {
+                float t = i / (float)SR;
+                float x = t / 0.32f;
+                if (x < 1f)
+                {
+                    // the band-pass is recreated on a coarse grid (sweep 500 -> 2400 -> 900 Hz)
+                    if ((i & 255) == 0) bp = FXBiquad.BandPass(500f + 1900f * MathF.Sin(MathF.PI * MathF.Min(1f, x * 1.3f)), 1.1f);
+                    float env = MathF.Sin(MathF.PI * x);
+                    a[i] += bp.Process(rng.Signed()) * 2.4f * env * env;
+                }
+            }
+            // reel zip: clicks from 70 Hz slowing to 20 Hz
+            float ph = 0f;
+            int start = N(0.22f);
+            for (int i = start; i < n; i++)
+            {
+                float t = (i - start) / (float)SR;
+                float rate = 20f + 50f * MathF.Exp(-t / 0.25f);
+                ph += rate / SR;
+                if (ph >= 1f)
+                {
+                    ph -= 1f;
+                    AddTick(a, i, 3200f, 0.18f * MathF.Exp(-t / 0.5f));
+                }
+            }
+            return Declick(NormalizePeak(a, 0.7f));
+        }
+
+        static void AddTick(float[] a, int start, float f, float amp)
+        {
+            int len = Math.Min(a.Length - start, N(0.012f));
+            for (int i = 0; i < len; i++)
+            {
+                float t = i / (float)SR;
+                a[start + i] += amp * MathF.Sin(TwoPi * f * t) * MathF.Exp(-t / 0.0025f);
+            }
+        }
+
+        /// Reel ratchet (winding in).
+        static float[] Reel()
+        {
+            int n = N(0.7f);
+            var a = new float[n];
+            int step = N(1f / 17f);
+            var rng = new FXRng(77);
+            for (int i = 0, k = 0; i < n; i += step, k++)
+                AddTick(a, i, 2600f + 400f * rng.Next01(), 0.5f * (0.7f + 0.3f * (k & 1)));
+            return Declick(NormalizePeak(a, 0.55f));
+        }
+
+        /// A fish pulled out of the water: small splash + two bloops.
+        static float[] CatchFish()
+        {
+            float dur = 0.55f;
+            int n = N(dur);
+            var a = new float[n];
+            var rng = new FXRng(919);
+            float y1 = 0f, y2 = 0f;
+            for (int i = 0; i < n; i++)
+            {
+                float t = i / (float)SR;
+                float c = OnePole(900f + 5200f * MathF.Exp(-t / 0.12f));
+                float w = rng.Signed();
+                y1 += c * (w - y1);
+                y2 += c * (y1 - y2);
+                a[i] = y2 * 2f * (1f - MathF.Exp(-t / 0.002f)) * MathF.Exp(-t / 0.11f);
+            }
+            AddBubble(a, N(0.05f), 520f, 0.035f, 0.25f);
+            AddBubble(a, N(0.14f), 760f, 0.03f, 0.18f);
+            return Declick(NormalizePeak(a, 0.7f), 0.001f, 0.04f);
+        }
+
+        /// Collectible found: quick rising pentatonic sparkle.
+        static float[] Sparkle()
+        {
+            var a = new float[N(1.2f)];
+            float[] notes = { 1046.5f, 1174.7f, 1318.5f, 1568f, 1760f };
+            for (int k = 0; k < notes.Length; k++) AddBell(a, N(0.055f * k), notes[k], 0.35f, 0.18f + 0.04f * k);
+            return Declick(NormalizePeak(a, 0.6f), 0.002f, 0.05f);
+        }
+
+        /// UI click.
+        static float[] Click()
+        {
+            int n = N(0.03f);
+            var a = new float[n];
+            for (int i = 0; i < n; i++)
+            {
+                float t = i / (float)SR;
+                a[i] = MathF.Sin(TwoPi * 1900f * t) * MathF.Exp(-t / 0.005f) + 0.3f * MathF.Sin(TwoPi * 3800f * t) * MathF.Exp(-t / 0.002f);
+            }
+            return Declick(NormalizePeak(a, 0.45f), 0.0005f, 0.005f);
+        }
+
+        /// Notification "ding" (phone banner).
+        static float[] Ping()
+        {
+            var a = new float[N(0.9f)];
+            AddBell(a, 0, 1568f, 0.55f, 0.22f);
+            AddBell(a, N(0.08f), 2093f, 0.4f, 0.25f);
+            return Declick(NormalizePeak(a, 0.55f), 0.002f, 0.05f);
+        }
+
+        /// Not possible / denied: two low descending boops.
+        static float[] ErrorBoop()
+        {
+            var a = new float[N(0.32f)];
+            AddBeep(a, 0, 392f, 0.1f, 0.5f);
+            AddBeep(a, N(0.13f), 294f, 0.14f, 0.5f);
+            var lp = FXBiquad.LowPass(1800f, 0.7f);
+            for (int i = 0; i < a.Length; i++) a[i] = lp.Process(a[i]);
+            return Declick(NormalizePeak(a, 0.5f));
+        }
+
+        // ------------------------------------------------------------------ music: ukulele beach loop
+        public const float MusicBpm = 104f;
+
+        // chord shapes on a re-entrant ukulele (strings G4 C4 E4 A4)
+        static readonly float[] ChordC = { 392.00f, 261.63f, 329.63f, 523.25f };    // 0003
+        static readonly float[] ChordAm = { 440.00f, 261.63f, 329.63f, 440.00f };   // 2000
+        static readonly float[] ChordF = { 440.00f, 261.63f, 349.23f, 440.00f };    // 2010
+        static readonly float[] ChordG7 = { 392.00f, 293.66f, 349.23f, 493.88f };   // 0212
+        static readonly float[] BassRoot = { 130.81f, 110.00f, 87.31f, 98.00f };    // C3 A2 F2 G2
+        static readonly float[] BassFifth = { 98.00f, 82.41f, 130.81f, 146.83f };   // G2 E2 C3 D3
+
+        // melody in 8th notes per bar (MIDI, 0 = rest): C major pentatonic, a lazy beach tune
+        static readonly int[] Melody =
+        {
+            76, 0, 79, 0, 81, 79, 76, 0,
+            72, 0, 76, 0, 74, 72, 69, 0,
+            69, 0, 72, 0, 74, 0, 76, 0,
+            74, 0, 0, 79, 0, 0, 0, 0,
+            79, 0, 81, 0, 84, 0, 81, 79,
+            76, 0, 79, 0, 76, 74, 72, 0,
+            74, 0, 76, 0, 72, 0, 69, 0,
+            67, 0, 71, 0, 74, 0, 0, 0,
+        };
+
+        /// Seamless 8-bar island loop (C – Am – F – G7, 104 BPM, ~18.5 s): Karplus-Strong ukulele strums with a
+        /// laid-back swing, round bass, shaker and a soft marimba melody, a little room reverb. Main menu / intro.
+        public static float[] Music()
+        {
+            float beat = 60f / MusicBpm;
+            const int Bars = 8;
+            int n = N(Bars * 4 * beat);
+            int tail = N(2.5f);
+            var uke = new float[n + tail];
+            var low = new float[n + tail];
+            var perc = new float[n + tail];
+            var mel = new float[n + tail];
+            float[][] chords = { ChordC, ChordAm, ChordF, ChordG7, ChordC, ChordAm, ChordF, ChordG7 };
+            int[] chordIdx = { 0, 1, 2, 3, 0, 1, 2, 3 };
+
+            // strum pattern (8th slots): D . D U . U D U
+            int[] slots = { 0, 2, 3, 5, 6, 7 };
+            bool[] down = { true, true, false, false, true, false };
+            float[] vel = { 1f, 0.72f, 0.5f, 0.56f, 0.8f, 0.48f };
+            const float Swing = 0.11f;   // off-beat 8ths a little late
+            float eighth = beat * 0.5f;
+
+            // strum times (for each string: ring until the next strum)
+            var times = new List<float>();
+            var chordOf = new List<int>();
+            var downOf = new List<bool>();
+            var velOf = new List<float>();
+            for (int bar = 0; bar < Bars; bar++)
+                for (int s = 0; s < slots.Length; s++)
+                {
+                    int slot = slots[s];
+                    float t = bar * 4f * beat + slot * eighth + ((slot & 1) == 1 ? Swing * beat : 0f);
+                    times.Add(t); chordOf.Add(bar); downOf.Add(down[s]); velOf.Add(vel[s]);
+                }
+            float loopLen = Bars * 4f * beat;
+            uint seed = 11;
+            for (int e = 0; e < times.Count; e++)
+            {
+                float t0 = times[e];
+                float next = e + 1 < times.Count ? times[e + 1] : loopLen + times[0];
+                float[] chord = chords[chordOf[e]];
+                bool dn = downOf[e];
+                float v = velOf[e];
+                for (int k = 0; k < 4; k++)
+                {
+                    int str = dn ? k : 3 - k;
+                    float ts = t0 + k * (dn ? 0.011f : 0.008f);
+                    float amp = v * (dn ? 0.32f : 0.24f) * (str == 1 && !dn ? 0.6f : 1f);
+                    int start = N(ts);
+                    int len = N(Math.Min(1.7f, next - ts + 0.03f));
+                    Pluck(uke, start, chord[str], amp, 0.32f + 0.45f * v, len, seed++);
+                }
+            }
+
+            // bass: root on 1, fifth on 3
+            for (int bar = 0; bar < Bars; bar++)
+            {
+                int c = chordIdx[bar];
+                float bt = bar * 4f * beat;
+                AddBass(low, N(bt), BassRoot[c], 0.5f, N(beat * 1.9f));
+                AddBass(low, N(bt + 2f * beat), BassFifth[c], 0.42f, N(beat * 1.9f));
+            }
+
+            // shaker on every 8th, accents off-beat
+            var srng = new FXRng(303);
+            for (int i8 = 0; i8 < Bars * 8; i8++)
+            {
+                float t = i8 * eighth + ((i8 & 1) == 1 ? Swing * beat : 0f);
+                AddShaker(perc, N(t), (i8 & 1) == 1 ? 0.12f : 0.07f, ref srng);
+            }
+
+            // marimba melody
+            for (int i8 = 0; i8 < Melody.Length; i8++)
+            {
+                int midi = Melody[i8];
+                if (midi <= 0) continue;
+                float t = i8 * eighth + ((i8 & 1) == 1 ? Swing * beat : 0f);
+                float f = 440f * MathF.Pow(2f, (midi - 69) / 12f);
+                AddMarimba(mel, N(t), f, 0.2f);
+            }
+
+            // mix + gentle tone shaping
+            var mix = new float[n + tail];
+            var ukeLp = FXBiquad.LowPass(5200f, 0.7f);
+            var ukeHp = FXBiquad.HighPass(120f, 0.7f);
+            var percHp = FXBiquad.HighPass(4000f, 0.7f);
+            for (int i = 0; i < mix.Length; i++)
+                mix[i] = ukeLp.Process(ukeHp.Process(uke[i])) + low[i] * 0.9f + percHp.Process(perc[i]) + mel[i] * 0.8f;
+
+            // small room (3 combs + allpass), mostly dry
+            Reverb(mix, 0.16f);
+
+            // wrap the tail into the start: what rings over the loop end is heard at the start of the repeat
+            var o = new float[n];
+            Array.Copy(mix, o, n);
+            for (int i = 0; i < tail && i < n; i++) o[i] += mix[n + i];
+            return NormalizePeak(o, 0.8f);
+        }
+
+        /// Karplus-Strong nylon string pluck rendered from start for len samples (short fade-out at the end).
+        static void Pluck(float[] buf, int start, float freq, float amp, float bright, int len, uint seed)
+        {
+            int period = Math.Max(2, (int)MathF.Round(SR / freq - 0.5f));
+            var line = new float[period];
+            var rng = new FXRng(seed * 2654435761u + 1u);
+            float lp = 0f, mean = 0f;
+            float a = bright < 0.05f ? 0.05f : bright > 0.95f ? 0.95f : bright;
+            for (int i = 0; i < period; i++)
+            {
+                lp += a * (rng.Signed() - lp);
+                line[i] = lp;
+                mean += lp;
+            }
+            mean /= period;
+            for (int i = 0; i < period; i++) line[i] -= mean;
+            const float T60 = 1.25f;   // nylon: short, warm sustain
+            float g = MathF.Pow(10f, -3f / (T60 * freq));
+            len = Math.Min(len, buf.Length - start);
+            int fade = Math.Min(len, N(0.018f));
+            int idx = 0;
+            for (int i = 0; i < len; i++)
+            {
+                float cur = line[idx];
+                int nx = idx + 1 == period ? 0 : idx + 1;
+                line[idx] = g * 0.5f * (cur + line[nx]);
+                idx = nx;
+                float env = i < len - fade ? 1f : (len - i) / (float)fade;
+                float att = i < 40 ? i / 40f : 1f;
+                buf[start + i] += cur * amp * env * att;
+            }
+        }
+
+        static void AddBass(float[] a, int start, float f, float amp, int len)
+        {
+            len = Math.Min(len, a.Length - start);
+            for (int i = 0; i < len; i++)
+            {
+                float t = i / (float)SR;
+                float env = (1f - MathF.Exp(-t / 0.006f)) * MathF.Exp(-t / 0.55f);
+                float rel = i > len - N(0.03f) ? (len - i) / (float)N(0.03f) : 1f;
+                float ph = TwoPi * f * t;
+                a[start + i] += amp * env * rel * (MathF.Sin(ph) + 0.25f * MathF.Sin(2f * ph) + 0.06f * MathF.Sin(3f * ph));
+            }
+        }
+
+        static void AddShaker(float[] a, int start, float amp, ref FXRng rng)
+        {
+            int len = Math.Min(a.Length - start, N(0.07f));
+            for (int i = 0; i < len; i++)
+            {
+                float t = i / (float)SR;
+                float env = (1f - MathF.Exp(-t / 0.004f)) * MathF.Exp(-t / 0.022f);
+                a[start + i] += amp * env * rng.Signed();
+            }
+        }
+
+        static void AddMarimba(float[] a, int start, float f, float amp)
+        {
+            int len = Math.Min(a.Length - start, N(0.9f));
+            for (int i = 0; i < len; i++)
+            {
+                float t = i / (float)SR;
+                float att = 1f - MathF.Exp(-t / 0.0015f);
+                float s = MathF.Sin(TwoPi * f * t) * MathF.Exp(-t / 0.32f)
+                        + 0.35f * MathF.Sin(TwoPi * 3.93f * f * t) * MathF.Exp(-t / 0.045f)
+                        + 0.12f * MathF.Sin(TwoPi * 9.9f * f * t) * MathF.Exp(-t / 0.012f);
+                a[start + i] += amp * att * s;
+            }
+        }
+
+        static void Reverb(float[] a, float wet)
+        {
+            int[] delays = { N(0.0297f), N(0.0371f), N(0.0411f) };
+            const float Fb = 0.74f;
+            var lines = new float[3][];
+            var pos = new int[3];
+            for (int k = 0; k < 3; k++) lines[k] = new float[delays[k]];
+            int apLen = N(0.005f);
+            var ap = new float[apLen];
+            int apPos = 0;
+            var damp = new float[3];
+            for (int i = 0; i < a.Length; i++)
+            {
+                float x = a[i];
+                float sum = 0f;
+                for (int k = 0; k < 3; k++)
+                {
+                    float y = lines[k][pos[k]];
+                    damp[k] += 0.35f * (y - damp[k]);   // a little high-frequency damping in the feedback
+                    lines[k][pos[k]] = x + damp[k] * Fb;
+                    pos[k] = pos[k] + 1 == delays[k] ? 0 : pos[k] + 1;
+                    sum += y;
+                }
+                sum *= 0.33f;
+                float d = ap[apPos];
+                float v = sum + d * 0.5f;
+                ap[apPos] = v;
+                apPos = apPos + 1 == apLen ? 0 : apPos + 1;
+                float rev = d - v * 0.5f;
+                a[i] = x + rev * wet;
+            }
         }
     }
 }

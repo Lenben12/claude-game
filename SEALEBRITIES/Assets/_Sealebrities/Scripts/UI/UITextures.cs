@@ -5,15 +5,16 @@ using UnityEngine;
 namespace Sealebrities
 {
     /// Species icons for the journal/FinTube. Uses the Fauna module's CreatureIcons.Get(SpeciesDef) and falls back to a
-    /// simple procedural silhouette if that ever throws.
+    /// simple procedural silhouette if that ever throws. Silhouette() returns the flat grey (#8C96A3) "not found yet" shape.
     public static class UICreatureIcons
     {
         static Func<SpeciesDef, Texture2D> faunaIcons;
         static bool resolved;
         static readonly Dictionary<string, Texture2D> Fallback = new Dictionary<string, Texture2D>();
+        static readonly Dictionary<string, Texture2D> Silhouettes = new Dictionary<string, Texture2D>();
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { faunaIcons = null; resolved = false; Fallback.Clear(); }
+        static void ResetStatics() { faunaIcons = null; resolved = false; Fallback.Clear(); Silhouettes.Clear(); }
 
         public static Texture2D Get(SpeciesDef s)
         {
@@ -36,6 +37,40 @@ namespace Sealebrities
             var tex = BuildFallback(s);
             Fallback[s.id] = tex;
             return tex;
+        }
+
+        /// Flat grey silhouette of the species icon (built once per species). Null when the icon is not readable.
+        public static Texture2D Silhouette(SpeciesDef s)
+        {
+            if (s == null) return null;
+            if (Silhouettes.TryGetValue(s.id, out var cached)) return cached;
+            Texture2D result = null;
+            var src = Get(s);
+            if (src != null)
+            {
+                try
+                {
+                    var px = src.GetPixels32(0);
+                    var sil = (Color32)UIPalette.Silhouette;
+                    for (int i = 0; i < px.Length; i++)
+                    {
+                        byte a = px[i].a;
+                        px[i] = new Color32(sil.r, sil.g, sil.b, a);
+                    }
+                    result = new Texture2D(src.width, src.height, TextureFormat.RGBA32, false)
+                    {
+                        wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear, name = "SB_UI_Sil_" + s.id
+                    };
+                    result.SetPixels32(px);
+                    result.Apply(false, true);
+                }
+                catch (Exception)
+                {
+                    result = null;
+                }
+            }
+            Silhouettes[s.id] = result;
+            return result;
         }
 
         static void Resolve()
@@ -77,7 +112,7 @@ namespace Sealebrities
             }
             var t = new Texture2D(N, N, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear, name = "SB_UI_Icon_" + s.id };
             t.SetPixels32(px);
-            t.Apply(false, true);
+            t.Apply(false, false);
             return t;
         }
 
@@ -144,9 +179,7 @@ namespace Sealebrities
         static void DrawFish(Color32[] px, Color a, Color b, Color c, float height, float tailSize, float finTop)
         {
             float cx = 58f, cy = 64f, rx = 44f, ry = Mathf.Clamp(rx * height * 1.25f, 8f, 46f);
-            // tail
             Triangle(px, new Vector2(cx + rx * 0.82f, cy), new Vector2(cx + rx + 22f, cy + 8f + ry * tailSize), new Vector2(cx + rx + 22f, cy - 8f - ry * tailSize), c);
-            // dorsal fin
             if (finTop > 0.01f)
                 Triangle(px, new Vector2(cx - rx * 0.25f, cy + ry * 0.8f), new Vector2(cx + rx * 0.35f, cy + ry * 0.7f), new Vector2(cx + rx * 0.15f, cy + ry + rx * finTop), c);
             Ellipse(px, cx, cy, rx, ry, a, Color.Lerp(a, b, 0.7f));
@@ -210,7 +243,8 @@ namespace Sealebrities
         static Color A(Color c, float a) { c.a = a; return c; }
     }
 
-    /// Top-down map texture of the island sampled from the terrain (built once, lazily).
+    /// Top-down "drawn" sea chart of the whole play area (main island, landmark islands, dive sites),
+    /// sampled from the terrain once (lazily) in the light How-to-Fish palette.
     public static class UIMapTexture
     {
         static Texture2D tex;
@@ -233,14 +267,21 @@ namespace Sealebrities
 
         static Texture2D Build(bool useTerrain)
         {
-            const int n = 256;
+            const int n = 384;
             var h = new float[n * n];
             for (int y = 0; y < n; y++)
                 for (int x = 0; x < n; x++)
                 {
                     float wx = -WorldHalf + (x + 0.5f) / n * WorldLayout.TerrainSize;
                     float wz = -WorldHalf + (y + 0.5f) / n * WorldLayout.TerrainSize;
-                    h[y * n + x] = useTerrain ? WorldInfo.GroundHeight(new Vector3(wx, 0f, wz)) - Waves.SeaLevel : ApproxHeight(wx, wz);
+                    float v;
+                    if (useTerrain)
+                    {
+                        try { v = WorldInfo.GroundHeight(new Vector3(wx, 0f, wz)) - Waves.SeaLevel; }
+                        catch (Exception) { v = ApproxHeight(wx, wz); }
+                    }
+                    else v = ApproxHeight(wx, wz);
+                    h[y * n + x] = v;
                 }
 
             var px = new Color32[n * n];
@@ -249,19 +290,32 @@ namespace Sealebrities
                 {
                     float v = h[y * n + x];
                     Color c = HeightColor(v);
+                    float hl = h[y * n + Mathf.Max(0, x - 1)], hr = h[y * n + Mathf.Min(n - 1, x + 1)];
+                    float hd = h[Mathf.Max(0, y - 1) * n + x], hu = h[Mathf.Min(n - 1, y + 1) * n + x];
                     if (v > 0f)
                     {
-                        float hl = h[y * n + Mathf.Max(0, x - 1)], hr = h[y * n + Mathf.Min(n - 1, x + 1)];
-                        float hd = h[Mathf.Max(0, y - 1) * n + x], hu = h[Mathf.Min(n - 1, y + 1) * n + x];
-                        float shade = Mathf.Clamp((hl - hr + hd - hu) * 0.06f, -0.25f, 0.25f);
-                        c = shade > 0 ? Color.Lerp(c, Color.white, shade) : Color.Lerp(c, Color.black, -shade);
+                        // soft hill shading (light from the north-west)
+                        float shade = Mathf.Clamp((hl - hr + hu - hd) * 0.05f, -0.22f, 0.22f);
+                        c = shade > 0 ? Color.Lerp(c, Color.white, shade) : Color.Lerp(c, UIPalette.Rgb(0x3B3A4E), -shade);
+                        // ink coastline
+                        bool coast = hl <= 0f || hr <= 0f || hd <= 0f || hu <= 0f;
+                        if (coast) c = Color.Lerp(c, UIPalette.Rgb(0x5E4436), 0.55f);
                     }
                     else
                     {
-                        // subtle depth contour lines every 20 m
-                        float m = Mathf.Repeat(-v, 20f);
-                        if (m < 0.9f && v < -4f) c = Color.Lerp(c, Color.white, 0.07f);
+                        // white surf ring + depth contour lines every 10 m
+                        bool nearCoast = hl > 0f || hr > 0f || hd > 0f || hu > 0f;
+                        if (nearCoast) c = Color.Lerp(c, Color.white, 0.75f);
+                        else if (v < -3f)
+                        {
+                            float m = Mathf.Repeat(-v, 10f);
+                            if (m < 0.7f) c = Color.Lerp(c, Color.white, 0.12f);
+                        }
                     }
+                    // light paper grid every 128 m
+                    float wx2 = -WorldHalf + (x + 0.5f) / n * WorldLayout.TerrainSize;
+                    float wz2 = -WorldHalf + (y + 0.5f) / n * WorldLayout.TerrainSize;
+                    if (Mathf.Repeat(wx2, 256f) < 5.3f || Mathf.Repeat(wz2, 256f) < 5.3f) c = Color.Lerp(c, Color.white, 0.10f);
                     c.a = 1f;
                     px[y * n + x] = c;
                 }
@@ -271,23 +325,39 @@ namespace Sealebrities
             return t;
         }
 
-        /// Approximate island shape when no terrain exists (radius ~190 m with a wobbly coast).
+        /// Approximate island shape when no terrain exists (radius ~190 m with a wobbly coast + mini islands).
         static float ApproxHeight(float x, float z)
         {
             float d = Mathf.Sqrt(x * x + z * z);
             float a = Mathf.Atan2(z, x);
             float coast = WorldLayout.IslandRadius * (1f + 0.12f * Mathf.Sin(a * 3f + 0.7f) + 0.07f * Mathf.Sin(a * 7f + 2.1f));
-            if (d < coast) return Mathf.Lerp(WorldLayout.IslandPeak, 1f, Mathf.Pow(d / coast, 1.6f));
-            float o = d - coast;
-            return -Mathf.Min(150f, 2f + o * 0.12f + o * o * 0.0002f);
+            float best;
+            if (d < coast) best = Mathf.Lerp(WorldLayout.IslandPeak, 1f, Mathf.Pow(d / coast, 1.6f));
+            else
+            {
+                float o = d - coast;
+                best = -Mathf.Min(150f, 2f + o * 0.12f + o * o * 0.0002f);
+            }
+            best = Mathf.Max(best, Mini(x, z, WorldLayout.KelpIsland));
+            best = Mathf.Max(best, Mini(x, z, WorldLayout.WreckIsland));
+            best = Mathf.Max(best, Mini(x, z, WorldLayout.BlueDropIsland));
+            best = Mathf.Max(best, Mini(x, z, WorldLayout.TrenchIsland));
+            return best;
         }
 
-        static readonly float[] Stops = { -150f, -60f, -25f, -10f, -3f, 0f, 1.6f, 6f, 22f, 45f };
+        static float Mini(float x, float z, Vector3 c)
+        {
+            float d = Mathf.Sqrt((x - c.x) * (x - c.x) + (z - c.z) * (z - c.z));
+            float r = WorldLayout.MiniIslandRadius;
+            return d < r ? Mathf.Lerp(12f, 1f, d / r) : -Mathf.Min(150f, (d - r) * 0.2f + 2f);
+        }
+
+        static readonly float[] Stops = { -150f, -60f, -25f, -10f, -3f, 0f, 1.4f, 5f, 18f, 45f };
         static readonly Color[] StopColors =
         {
-            UIPalette.Rgb(0x061A30), UIPalette.Rgb(0x0B2E52), UIPalette.Rgb(0x135C86), UIPalette.Rgb(0x1E8DAE),
-            UIPalette.Rgb(0x48C7CF), UIPalette.Rgb(0x8FE3D9), UIPalette.Rgb(0xE6D7A6), UIPalette.Rgb(0x5E9A50),
-            UIPalette.Rgb(0x3B7340), UIPalette.Rgb(0x7D8A70)
+            UIPalette.Rgb(0x284F80), UIPalette.Rgb(0x2E5F93), UIPalette.Rgb(0x3778AB), UIPalette.Rgb(0x4F94C2),
+            UIPalette.Rgb(0x6FB8D2), UIPalette.Rgb(0x9ADBE0), UIPalette.Rgb(0xE6CFA0), UIPalette.Rgb(0x8DB15A),
+            UIPalette.Rgb(0x6E9445), UIPalette.Rgb(0x8A8C96)
         };
 
         static Color HeightColor(float h)

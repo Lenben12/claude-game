@@ -1,23 +1,28 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace Sealebrities
 {
-    /// Day/night cycle. The only writer of sun, moon, skybox, ambient light and reflection intensity.
-    /// Publishes EnvState every frame (before other modules update). Look: pastel sky, soft bright ambient (no black
-    /// shadows), warm-but-not-orange golden hour, navy moonlit nights (the moon becomes URP's main light and lights the
-    /// skybox). Below the surface sun and ambient are attenuated per channel with the camera depth: bright and readable
-    /// in the shallows, dimmer at 25 m, dark blue at 50-60 m (flashlight territory) and near black beyond 80 m.
+    /// Day/night cycle. The only writer of sun, moon, sky, ambient light and reflection intensity.
+    /// Publishes EnvState every frame (before other modules update). "How to Fish" look (art bible §1.2/1.3/2.1):
+    /// a real mid-blue sky with a saturated horizon, a 58° sun with strong cool-violet shadows (shadow strength 0.9,
+    /// darker bluish trilight ambient), golden hour at ~8°, bright moonlit nights. Below the surface sun and ambient are
+    /// attenuated per channel with the camera depth: bright turquoise in the shallows, dark blue at 50-60 m, near black
+    /// beyond 80 m.
     [DefaultExecutionOrder(-50)]
     public class WorldDayNight : MonoBehaviour
     {
-        public const float MenuTime = 0.70f;
+        /// Main menu time of day: golden hour (sun ≈ 8°, art bible §1.14).
+        public const float MenuTime = 0.717f;
         public const float Sunrise = 0.235f, Sunset = 0.805f;
-        const float MaxElevation = 72f, MaxNightDepth = 50f;
+        public const float MaxElevation = 58f;
+        const float MaxNightDepth = 50f;
         const float RiseAzimuth = 75f, SetAzimuth = 245f;     // compass degrees: rises ENE, sets WSW
         const float MoonTakeover = -7f;                       // sun elevation below which the moon is the main light
 
         Light sun, moon;
         Material sky, starMat, moonMat;
+        WorldSkyDome dome;
         ReflectionProbe probe;
         MeshRenderer starR, moonR;
         WorldClouds clouds;
@@ -25,9 +30,11 @@ namespace Sealebrities
 
         float lastProbeTime = -100f, lastProbeElev = -999f, lastProbeUw = -1f, lastGiTime = -100f;
         bool lastProbeMoon;
+        Color lastProbeColor;
         LightShadows sunShadowState = LightShadows.Soft;
-        Vector3 moonDir = Vector3.up;
-        bool moonMain;
+        Vector3 moonDir = Vector3.up, sunDirection = Vector3.up;
+        bool moonMain, subscribed;
+        float sunAzimuth;
 
         /// Time of day currently shown (0..1).
         public float TimeOfDay { get; private set; }
@@ -35,6 +42,8 @@ namespace Sealebrities
         public float SunElevation { get; private set; }
         /// Camera depth below the surface used for light attenuation (0 above water).
         public float CameraDepth { get; private set; }
+        /// The sky dome (null-safe: Valid is false when the fallback skybox is used).
+        public WorldSkyDome Dome => dome;
 
         static int IdBaseColor = -1, IdExposure, IdThickness, IdSkyTint, IdGround, IdSunSize, IdSunConv;
 
@@ -50,42 +59,31 @@ namespace Sealebrities
             IdSunConv = Shader.PropertyToID("_SunSizeConvergence");
         }
 
+        static Color Hex(string h) { ColorUtility.TryParseHtmlString(h, out var c); return c; }
+
         // ------------------------------------------------------------------ keyframes (by sun elevation in degrees)
-        static readonly float[] SunKeys = { -4f, 0f, 5f, 12f, 22f, 40f, 70f };
+        // sun colour and intensity (art bible §1.2): warm white by day, peach at 12°, orange at 5°, coral at sunset
+        static readonly float[] SunKeys = { -3f, 0f, 2f, 5f, 10f, 12f, 30f };
         static readonly Color[] SunColors =
         {
-            new Color(1f, 0.50f, 0.36f), new Color(1f, 0.62f, 0.46f), new Color(1f, 0.75f, 0.58f), new Color(1f, 0.86f, 0.71f),
-            new Color(1f, 0.93f, 0.83f), new Color(1f, 0.97f, 0.92f), new Color(1f, 0.99f, 0.96f),
+            Hex("#FF9E6A"), Hex("#FF9E6A"), Hex("#FFB37C"), Hex("#FFC58A"), Hex("#FFD6A6"), Hex("#FFDDB0"), Hex("#FFF2DE"),
         };
+        static readonly float[] SunIntensity = { 0f, 0.35f, 0.70f, 0.90f, 1.15f, 1.19f, 1.35f };
 
-        static readonly float[] AmbKeys = { -18f, -6f, 0f, 12f, 30f, 60f };
-        static readonly Color[] AmbSky =
-        {
-            new Color(0.12f, 0.15f, 0.28f), new Color(0.22f, 0.24f, 0.38f), new Color(0.52f, 0.50f, 0.64f),
-            new Color(0.60f, 0.66f, 0.82f), new Color(0.66f, 0.75f, 0.90f), new Color(0.68f, 0.78f, 0.93f),
-        };
-        static readonly Color[] AmbEquator =
-        {
-            new Color(0.10f, 0.12f, 0.21f), new Color(0.24f, 0.22f, 0.31f), new Color(0.68f, 0.54f, 0.50f),
-            new Color(0.76f, 0.68f, 0.60f), new Color(0.72f, 0.76f, 0.78f), new Color(0.72f, 0.77f, 0.80f),
-        };
-        static readonly Color[] AmbGround =
-        {
-            new Color(0.06f, 0.07f, 0.11f), new Color(0.10f, 0.10f, 0.14f), new Color(0.32f, 0.27f, 0.24f),
-            new Color(0.42f, 0.38f, 0.32f), new Color(0.48f, 0.46f, 0.40f), new Color(0.50f, 0.48f, 0.42f),
-        };
+        // ambient trilight – reduced and cool so shadows read strong and violet (art bible §1.3)
+        static readonly float[] AmbKeys = { -12f, -4f, 0f, 10f, 30f };
+        // (art polish: the dawn / golden keys are bluer-neutral instead of lavender – at wake-up time the hut interior is
+        // lit almost only by this and read purple; How to Fish mornings are warm sand + blue sky, not violet)
+        // (noon key a touch bluer so shadows on sand read cool grey like How to Fish, not warm brown; night keys
+        // brighter: the moonlit island measured grass #1B2F2F / sea #0A255D against #2F4A3A / #2C4F80)
+        static readonly Color[] AmbSky = { Hex("#33447A"), Hex("#48528A"), Hex("#6A72A2"), Hex("#8494BE"), Hex("#7C96C8") };
+        static readonly Color[] AmbEquator = { Hex("#2A3658"), Hex("#545672"), Hex("#8A7E80"), Hex("#A89C8E"), Hex("#8A8EA6") };
+        static readonly Color[] AmbGround = { Hex("#161C32"), Hex("#2C2C3C"), Hex("#463C46"), Hex("#5E5050"), Hex("#5E5662") };
+        /// The sky probe mostly feeds the sea's Fresnel reflection: at full strength the sea 50-150 m away read
+        /// #8AB3DE instead of How to Fish's #4F7FAE, so the probe is dimmed above water (glints come from the sun).
+        const float ProbeAboveWater = 0.72f;   // (0.55 made the horizon band darker than the near sea)
 
-        static readonly float[] FogKeys = { -18f, -6f, 0f, 8f, 18f, 35f, 60f };
-        static readonly Color[] FogColors =
-        {
-            // golden hour: a light peach-lilac haze (a beige haze turned the far sea sand-colored)
-            new Color(0.05f, 0.08f, 0.17f), new Color(0.17f, 0.18f, 0.31f), new Color(0.80f, 0.68f, 0.70f), new Color(0.84f, 0.81f, 0.82f),
-            new Color(0.83f, 0.87f, 0.90f), new Color(0.76f, 0.86f, 0.95f), new Color(0.74f, 0.85f, 0.95f),
-        };
-
-        // sun-lit sky (values calibrated against the procedural sky's scattering math for a pastel look)
-        // pastel blue by day, periwinkle at golden hour, lavender/violet at dusk (a thinner atmosphere avoids the
-        // procedural sky's mustard-yellow low-sun horizon)
+        // fallback procedural skybox (only when the dome is unavailable)
         static readonly float[] SkyKeys = { -7f, -4f, -1f, 3f, 8f, 20f, 40f };
         static readonly float[] Exposure = { 0.05f, 0.35f, 1.2f, 2.1f, 2.45f, 2.75f, 2.8f };
         static readonly float[] Thickness = { 0.9f, 0.9f, 0.88f, 0.86f, 0.92f, 1.0f, 1.0f };
@@ -97,31 +95,33 @@ namespace Sealebrities
             new Color(0.60f, 0.44f, 0.60f), new Color(0.45f, 0.50f, 0.63f), new Color(0.40f, 0.50f, 0.64f),
         };
         static readonly Color SkyGroundDay = new Color(0.40f, 0.55f, 0.66f), SkyGroundNight = new Color(0.04f, 0.06f, 0.13f);
-
-        // moon-lit night sky: deep navy zenith, soft blue horizon
         static readonly Color NightTint = new Color(0.28f, 0.38f, 0.75f);
         const float NightThickness = 0.7f, NightExposure = 0.45f;
 
-        // underwater: per-channel light left at a camera depth (red fades first, but the shallows stay sand-colored)
+        // underwater: per-channel light left at a camera depth (red fades first, but the shallows stay sand-coloured)
         static readonly float[] DepthKeys = { 0f, 4f, 10f, 18f, 25f, 40f, 55f, 80f, 120f };
-        static readonly float[] AttR = { 1f, 0.93f, 0.80f, 0.60f, 0.46f, 0.24f, 0.11f, 0.035f, 0.012f };
+        // (the shallows keep more red: the reef sand measured grey-green #B4BE99 instead of the warm #DCCB94 target)
+        static readonly float[] AttR = { 1f, 0.97f, 0.86f, 0.64f, 0.48f, 0.24f, 0.11f, 0.035f, 0.012f };
         static readonly float[] AttG = { 1f, 0.98f, 0.93f, 0.82f, 0.70f, 0.47f, 0.27f, 0.085f, 0.025f };
         static readonly float[] AttB = { 1f, 1f, 0.98f, 0.91f, 0.82f, 0.60f, 0.38f, 0.13f, 0.04f };
 
-        // underwater scattered light (multiplied by daylight and depth attenuation): bright and only slightly aqua in
-        // the shallows so sand stays sand-colored; the per-channel attenuation turns it blue with depth
-        static readonly Color WaterSky = new Color(0.72f, 0.85f, 0.90f);
-        static readonly Color WaterEquator = new Color(0.52f, 0.70f, 0.78f);
-        static readonly Color WaterGround = new Color(0.32f, 0.44f, 0.48f);
+        // underwater ambient (art bible §2.1): bright saturated teal in the shallows, scaled down with depth
+        // (a touch less cyan than the bible's first values so the warm sun keeps the sand sandy, not mint)
+        static readonly Color WaterSky = Hex("#8EC2D8");
+        static readonly Color WaterEquator = Hex("#6AA8C4");
+        static readonly Color WaterGround = Hex("#46829A");
+        static readonly float[] UwAmbKeys = { 0f, 3f, 10f, 18f, 25f, 40f, 55f, 80f, 120f };
+        static readonly float[] UwAmbScale = { 1f, 1f, 0.85f, 0.70f, 0.55f, 0.35f, 0.18f, 0.06f, 0.02f };
 
-        public void Init(Light sun, Light moon, Material sky, ReflectionProbe probe,
+        public void Init(Light sun, Light moon, Material sky, WorldSkyDome dome, ReflectionProbe probe,
                          MeshRenderer stars, Material starMat, MeshRenderer moonDisc, Material moonMat, WorldClouds clouds)
         {
             InitIds();
-            this.sun = sun; this.moon = moon; this.sky = sky; this.probe = probe;
+            this.sun = sun; this.moon = moon; this.sky = sky; this.dome = dome; this.probe = probe;
             starR = stars; this.starMat = starMat;
             moonR = moonDisc; this.moonMat = moonMat;
             this.clouds = clouds;
+            Subscribe();
         }
 
         /// Applies the lighting immediately (used right after building so the first rendered frame is lit).
@@ -129,6 +129,33 @@ namespace Sealebrities
         {
             Apply();
             FollowCamera();
+        }
+
+        void OnEnable() { if (sun != null) Subscribe(); }
+        void OnDisable() { Unsubscribe(); }
+
+        void Subscribe()
+        {
+            if (subscribed) return;
+            subscribed = true;
+            RenderPipelineManager.beginCameraRendering += OnBeginCamera;
+        }
+
+        void Unsubscribe()
+        {
+            if (!subscribed) return;
+            subscribed = false;
+            RenderPipelineManager.beginCameraRendering -= OnBeginCamera;
+        }
+
+        /// Every game camera (player view, photo camera, intro shots) gets the sky dome centred on itself.
+        void OnBeginCamera(ScriptableRenderContext ctx, Camera c)
+        {
+            if (dome == null || !dome.Valid || c == null) return;
+            if (c.cameraType != CameraType.Game && c.cameraType != CameraType.SceneView) return;
+            Vector3 p = c.transform.position;
+            bool above = p.y > Waves.HeightAt(p.x, p.z) - 0.02f;
+            dome.Follow(p, above && (c.cullingMask & 1) != 0);
         }
 
         void Update() => Apply();
@@ -151,8 +178,8 @@ namespace Sealebrities
             if (t >= Sunrise && t <= Sunset)
             {
                 float f = (t - Sunrise) / (Sunset - Sunrise);
-                float s = Mathf.Sin(Mathf.PI * f);
-                // mornings brighten quickly; evenings keep a long, low golden hour
+                float s = Mathf.Max(0f, Mathf.Sin(Mathf.PI * Mathf.Clamp01(f)));   // sin(PI) is -8.7e-8 in float: Pow would give NaN at exactly Sunset
+                // mornings brighten quickly; evenings keep a long, low golden hour; never overhead (side light)
                 elevation = MaxElevation * Mathf.Pow(s, f < 0.5f ? 1.6f : 2.6f);
                 azimuth = Mathf.Lerp(RiseAzimuth, SetAzimuth, f);
             }
@@ -190,16 +217,17 @@ namespace Sealebrities
             TimeOfDay = t;
             SunPosition(t, out float elev, out float az);
             SunElevation = elev;
+            sunAzimuth = az;
 
             Vector3 sunDir = Direction(elev, az);
+            sunDirection = sunDir;
             sun.transform.rotation = Quaternion.LookRotation(-sunDir, Vector3.up);
             moonDir = -sunDir;
             float moonElev = -elev;
             moon.transform.rotation = Quaternion.LookRotation(sunDir, Vector3.up);
 
-            float horizon = SmoothStep(-3f, 8f, elev);
-            float sinE = Mathf.Sin(Mathf.Max(0f, elev) * Mathf.Deg2Rad);
-            float sun01 = horizon * (0.42f + 0.58f * Mathf.Clamp01(sinE / 0.94f));
+            float sunI = Eval(SunKeys, SunIntensity, elev);
+            float sun01 = Mathf.Clamp01(sunI / 1.35f);
             float night01 = 1f - SmoothStep(-12f, 2f, elev);
 
             // ---- camera depth -> per-channel light attenuation
@@ -214,7 +242,7 @@ namespace Sealebrities
             float uw = SmoothStep(0f, 1.2f, depth);
             Color att = DepthAttenuation(depth);
 
-            // ---- main light: the sun by day, the moon at night (it then also lights the skybox -> navy night sky)
+            // ---- main light: the sun by day, the moon at night
             bool wantMoon = elev < MoonTakeover;
             if (wantMoon != moonMain)
             {
@@ -224,41 +252,55 @@ namespace Sealebrities
             var mainLight = moonMain ? moon : sun;
             if (RenderSettings.sun != mainLight) RenderSettings.sun = mainLight;
 
-            // ---- sun
+            // ---- sun: strong, crisp shadows by day (the shadow colour comes from the cool ambient)
             Color sunCol = Eval(SunKeys, SunColors, elev);
             sun.color = new Color(sunCol.r * att.r, sunCol.g * att.g, sunCol.b * att.b, 1f);
-            sun.intensity = Mathf.Max(0.002f, 1.55f * sun01);
-            sun.shadowStrength = Mathf.Lerp(0.45f, 0.62f, sun01);
-            var wantShadows = sun01 > 0.02f && depth < 60f ? LightShadows.Soft : LightShadows.None;
+            // a little less sun under water keeps the shallow sand out of the ACES shoulder (warm sand, not milky)
+            sun.intensity = Mathf.Max(0.002f, sunI * Mathf.Lerp(1f, 0.82f, uw));
+            sun.shadowStrength = Mathf.Lerp(0.6f, 0.9f, SmoothStep(0f, 10f, elev)) * Mathf.Lerp(1f, 0.75f, uw);
+            var wantShadows = sunI > 0.03f && depth < 60f ? LightShadows.Soft : LightShadows.None;
             if (wantShadows != sunShadowState) { sun.shadows = wantShadows; sunShadowState = wantShadows; }
 
-            // ---- moon
-            float moonI = 0.38f * night01 * SmoothStep(-2f, 10f, moonElev);
+            // ---- moon: bright, cool moonlight (art bible: 0.45, #A9BCFF)
+            float moonI = 0.6f * night01 * SmoothStep(-2f, 12f, moonElev);
             bool moonOn = moonMain || moonI > 0.001f;
             if (moon.enabled != moonOn) moon.enabled = moonOn;
             if (moonOn)
             {
                 moon.intensity = Mathf.Max(0.002f, moonI);
-                moon.color = new Color(0.62f * att.r, 0.72f * att.g, 1f * att.b, 1f);
+                // a little less blue than #A9BCFF: moonlit grass measured cyan-grey (#1B2E2F) instead of green-grey
+                moon.color = new Color(0.72f * att.r, 0.80f * att.g, 1f * att.b, 1f);
             }
 
-            // ---- ambient (trilight, soft and bright: shadows are never black)
+            // ---- ambient (trilight): darker and bluer above water, bright teal in the shallows
             Color aSky = Eval(AmbKeys, AmbSky, elev), aEq = Eval(AmbKeys, AmbEquator, elev), aGr = Eval(AmbKeys, AmbGround, elev);
-            Color rawSky = aSky;
-            float dayLevel = Mathf.Lerp(0.05f, 1f, sun01);
-            aSky = Color.Lerp(aSky, WaterSky * dayLevel, uw) * att;
-            aEq = Color.Lerp(aEq, WaterEquator * dayLevel, uw) * att;
-            aGr = Color.Lerp(aGr, WaterGround * dayLevel, uw) * att;
+            if (uw > 0f)
+            {
+                float day = Mathf.Lerp(0.07f, 1f, sun01) * Eval(UwAmbKeys, UwAmbScale, depth);
+                // keep a hint of the per-channel colour shift (red fades first) on top of the teal table
+                float nb = Mathf.Max(att.b, 0.01f);
+                var tint = new Color(Mathf.Lerp(1f, att.r / nb, 0.5f), Mathf.Lerp(1f, att.g / nb, 0.5f), 1f, 1f);
+                aSky = Color.Lerp(aSky, WaterSky * tint * day, uw);
+                aEq = Color.Lerp(aEq, WaterEquator * tint * day, uw);
+                aGr = Color.Lerp(aGr, WaterGround * tint * day, uw);
+            }
             RenderSettings.ambientSkyColor = aSky;
             RenderSettings.ambientEquatorColor = aEq;
             RenderSettings.ambientGroundColor = aGr;
 
+            // ---- sky dome colours, fog colour (= horizon away from the sun × 0.94, pre-compensated for the grade)
+            float domeVis = FogVisibility(WorldSkyDome.Radius);
+            Color fogLin = RenderSettings.fogColor.linear;
+            if (dome != null) dome.Update(sunDir, elev, az, domeVis, fogLin, false, uw < 0.5f);
+
             // ---- environment facts for FX / filming / fauna
-            EnvState.SkyFogColor = Eval(FogKeys, FogColors, elev);
+            EnvState.SkyFogColor = dome != null ? dome.FogColor : new Color(0.52f, 0.70f, 0.86f);
             EnvState.SunIntensity01 = sun01;
             EnvState.Night01 = night01;
+            WorldVisibility.Publish(depth, night01, uw > 0.5f);
+            PropMats.SetDaylight(sun01);
 
-            // ---- skybox
+            // ---- fallback skybox
             if (sky != null)
             {
                 if (moonMain)
@@ -288,12 +330,17 @@ namespace Sealebrities
             float now = Time.unscaledTime;
             if (probe != null)
             {
-                probe.intensity = reflect;
-                bool changed = Mathf.Abs(elev - lastProbeElev) > 0.5f || Mathf.Abs(uw - lastProbeUw) > 0.5f || moonMain != lastProbeMoon;
+                // full sky reflection at golden hour (the menu sea glows warm), dimmed at high sun
+                float probeAbove = Mathf.Lerp(0.85f, ProbeAboveWater, SmoothStep(8f, 30f, elev));
+                probe.intensity = reflect * Mathf.Lerp(probeAbove, 1f, uw);
+                Color pc = dome != null && dome.Valid ? dome.ReflectionColor : probe.backgroundColor;
+                bool colorChanged = Mathf.Abs(pc.r - lastProbeColor.r) + Mathf.Abs(pc.g - lastProbeColor.g) + Mathf.Abs(pc.b - lastProbeColor.b) > 0.01f;
+                bool changed = colorChanged || Mathf.Abs(elev - lastProbeElev) > 0.5f || Mathf.Abs(uw - lastProbeUw) > 0.5f || moonMain != lastProbeMoon;
                 if (changed && now - lastProbeTime > 1.5f)
                 {
+                    if (dome != null && dome.Valid) probe.backgroundColor = pc;
                     probe.RenderProbe();
-                    lastProbeTime = now; lastProbeElev = elev; lastProbeUw = uw; lastProbeMoon = moonMain;
+                    lastProbeTime = now; lastProbeElev = elev; lastProbeUw = uw; lastProbeMoon = moonMain; lastProbeColor = pc;
                 }
             }
             if (now - lastGiTime > 6f)
@@ -312,11 +359,13 @@ namespace Sealebrities
             float moonA = SmoothStep(-4f, 2f, moonElev) * Mathf.Lerp(0.35f, 1f, night01) * hide;
             SetLayer(moonR, moonMat, new Color(boost, 0.99f * boost, 0.96f * boost, moonA));
 
-            // ---- clouds: lit like the world, plus a soft glow floor from the sky so shaded sides stay fluffy
+            // ---- clouds: lit like the world, plus a bright emission floor so undersides stay ≥ #DCE5F1 by day
             if (clouds != null && c != null)
             {
-                // (emission is given in gamma space: ~0.8 here is ~0.6 linear, enough for soft light-grey undersides)
-                Color glow = rawSky * (0.85f * (1f - 0.8f * night01)) + new Color(0.02f, 0.025f, 0.04f);
+                float golden = (1f - night01) * SmoothStep(0f, 6f, elev) * (1f - SmoothStep(12f, 22f, elev));
+                Color floor = Color.Lerp(new Color(0.80f, 0.84f, 0.90f), new Color(0.74f, 0.64f, 0.74f), golden);
+                float level = Mathf.Lerp(0.14f, 0.9f, 1f - night01) * Mathf.Lerp(0.55f, 1f, SmoothStep(-4f, 10f, elev));
+                Color glow = floor * level + new Color(0.02f, 0.025f, 0.05f);
                 glow.a = 1f;
                 clouds.Tick(c.transform.position, Time.deltaTime, uw < 0.5f, glow);
             }
@@ -381,11 +430,15 @@ namespace Sealebrities
                 float s = d * 0.075f;
                 t.localScale = new Vector3(s, s, s);
             }
+            // the gradient dome also follows the main camera here (other cameras re-centre it before they render)
+            if (dome != null) dome.Follow(p, p.y > Waves.HeightAt(p.x, p.z) - 0.02f);
         }
 
         void OnDestroy()
         {
+            Unsubscribe();
             clouds?.Destroy();
+            dome?.Destroy();
         }
 
         // ------------------------------------------------------------------ helpers

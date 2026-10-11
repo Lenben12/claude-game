@@ -65,17 +65,15 @@ namespace Sealebrities
             float fz = CabZ1 - WT * 0.5f;
             const float winY0 = 1.25f, winY1 = 1.9f, winC = (winY0 + winY1) * 0.5f, winH = winY1 - winY0;
 
-            // front wall: white panels, two big windows in chunky teal frames
+            // front wall: white panels and ONE wide windscreen in a chunky teal frame (no centre mullion: the driver
+            // sits on the centre line and must see the bow and the water ahead - playtest)
             cab.Box(new Vector3(0f, (Y0 + winY0) * 0.5f, fz), new Vector3(2f * WX, winY0 - Y0, WT));
             cab.Box(new Vector3(0f, (winY1 + CabY1) * 0.5f, fz), new Vector3(2f * WX, CabY1 - winY1, WT));
             frame.Box(new Vector3(-WX + 0.04f, winC, fz), new Vector3(0.08f, winH, WT + 0.02f));
-            frame.Box(new Vector3(0f, winC, fz), new Vector3(0.09f, winH, WT + 0.02f));
             frame.Box(new Vector3(WX - 0.04f, winC, fz), new Vector3(0.08f, winH, WT + 0.02f));
             frame.Box(new Vector3(0f, winY0, fz), new Vector3(2f * WX + 0.02f, 0.06f, WT + 0.03f));
             frame.Box(new Vector3(0f, winY1, fz), new Vector3(2f * WX + 0.02f, 0.06f, WT + 0.03f));
-            float paneW = WX - 0.1f, paneX = 0.045f + paneW * 0.5f;
-            glass.Box(new Vector3(-paneX, winC, fz), new Vector3(paneW, winH, 0.012f));
-            glass.Box(new Vector3(paneX, winC, fz), new Vector3(paneW, winH, 0.012f));
+            glass.Box(new Vector3(0f, winC, fz), new Vector3(2f * WX - 0.16f, winH, 0.012f));
 
             // side walls with long windows
             float midZ = (CabZ0 + CabZ1) * 0.5f, lenZ = CabZ1 - CabZ0;

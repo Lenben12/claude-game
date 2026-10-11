@@ -90,6 +90,19 @@ namespace Sealebrities
             return c;
         }
 
+        /// A fresh, inactive copy of the species model WITHOUT creature logic (co-op proxies of the host's animals).
+        /// Shares the lazily built template with the real creatures, so a prewarmed site costs nothing extra.
+        public GameObject CloneModel(SpeciesDef s, Transform parent)
+        {
+            if (s == null) return null;
+            var tpl = Template(s);
+            var inst = Object.Instantiate(tpl, templateRoot);   // inactive in hierarchy: no Awake yet
+            inst.name = s.id + "_net";
+            inst.SetActive(false);
+            inst.transform.SetParent(parent != null ? parent : liveRoot, false);
+            return inst;
+        }
+
         public void Return(FaunaCreature c)
         {
             if (c == null || c.species == null) return;

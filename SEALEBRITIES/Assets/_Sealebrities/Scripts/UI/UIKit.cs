@@ -5,27 +5,56 @@ using UnityEngine.UIElements;
 
 namespace Sealebrities
 {
-    /// Colors of the SEALEBRITIES interface (navy panels, coral, sun, lagoon, live red, money green).
+    /// Colors of the SEALEBRITIES interface (art bible §1.14): bright and sunny – white, sand, turquoise, coral – on
+    /// light frosted cards. The HUD never uses boxes: white text/icons with a thin dark outline.
+    /// The legacy names (Panel, Raised, Text …) are kept for older call sites and now describe the LIGHT theme
+    /// (dark ink text on light cards).
     public static class UIPalette
     {
+        // ---- HUD palette (floating text over the 3D world)
+        public static readonly Color White = Color.white;
+        public static readonly Color Sand = Rgb(0xF6E7C8);
+        public static readonly Color Turquoise = Rgb(0x3FC1C9);
+        public static readonly Color Coral = Rgb(0xFF7A5C);
+        public static readonly Color Sun = Rgb(0xF2C94C);
+        public static readonly Color Leaf = Rgb(0x9BE564);
+        public static readonly Color Warn = Rgb(0xFFB347);
+        public static readonly Color Danger = Rgb(0xFF5A5A);
+        public static readonly Color AirFull = Rgb(0x6FE3D3);
+        public static readonly Color DepthSub = Rgb(0xCFE8F0);
+        /// Text outline color of every HUD label (rgba(20,24,40,0.75)).
+        public static readonly Color Outline = new Color(20f / 255f, 24f / 255f, 40f / 255f, 0.75f);
+
+        // ---- light surfaces (cards, phone, menus)
+        public static readonly Color Ink = Rgb(0x1B2433);
+        public static readonly Color InkSoft = Rgb(0x5A6478);
+        public static readonly Color Silhouette = Rgb(0x8C96A3);
+        public static readonly Color Card = Rgb(0xF6F1E6);
+        public static readonly Color CardAlt = Rgb(0xE9EEF2);
+        public static readonly Color Badge = Rgb(0xFF4D4D);
+        /// Darker accent variants that stay readable as text on light cards.
+        public static readonly Color TurquoiseInk = Rgb(0x1C8E96);
+        public static readonly Color SunInk = Rgb(0xB8861B);
+        public static readonly Color LeafInk = Rgb(0x2F9A4E);
+        public static readonly Color CoralInk = Rgb(0xE0553A);
+
+        // ---- legacy names (light theme)
         public static readonly Color Navy = Rgb(0x0D1B2A);
-        public static readonly Color Panel = new Color(Navy.r, Navy.g, Navy.b, 0.85f);
-        public static readonly Color PanelSolid = Rgb(0x0F2133);
-        public static readonly Color Deep = Rgb(0x060E18);
-        public static readonly Color Raised = Rgb(0x15283C);
-        public static readonly Color Raised2 = Rgb(0x1E3651);
-        public static readonly Color Coral = Rgb(0xFF6B4A);
-        public static readonly Color Sun = Rgb(0xFFC24B);
-        public static readonly Color Lagoon = Rgb(0x2EC4C0);
-        public static readonly Color Live = Rgb(0xFF2D55);
-        public static readonly Color Money = Rgb(0x3DDC84);
-        public static readonly Color Sky = Rgb(0x5AA9FF);
-        public static readonly Color Violet = Rgb(0x9D6BFF);
-        public static readonly Color Text = Rgb(0xF2F6FA);
-        public static readonly Color TextDim = Rgb(0xA9B8C9);
-        public static readonly Color TextFaint = Rgb(0x6A7E94);
-        public static readonly Color Line = new Color(1f, 1f, 1f, 0.08f);
-        public static readonly Color Shadow = new Color(0f, 0f, 0f, 0.55f);
+        public static readonly Color Panel = new Color(Card.r, Card.g, Card.b, 0.95f);
+        public static readonly Color PanelSolid = Card;
+        public static readonly Color Deep = Ink;
+        public static readonly Color Raised = Color.white;
+        public static readonly Color Raised2 = Rgb(0xEEF1F4);
+        public static readonly Color Lagoon = Turquoise;
+        public static readonly Color Live = Rgb(0xFF4D4D);
+        public static readonly Color Money = LeafInk;
+        public static readonly Color Sky = Rgb(0x4FA3E0);
+        public static readonly Color Violet = Rgb(0x8E6CD9);
+        public static readonly Color Text = Ink;
+        public static readonly Color TextDim = InkSoft;
+        public static readonly Color TextFaint = Silhouette;
+        public static readonly Color Line = new Color(Ink.r, Ink.g, Ink.b, 0.10f);
+        public static readonly Color Shadow = new Color(0f, 0f, 0f, 0.25f);
 
         public static Color Rgb(int hex) => new Color(((hex >> 16) & 255) / 255f, ((hex >> 8) & 255) / 255f, (hex & 255) / 255f, 1f);
         public static Color A(Color c, float a) { c.a = a; return c; }
@@ -33,14 +62,14 @@ namespace Sealebrities
         public static Color Darken(Color c, float t) { var r = Color.Lerp(c, Color.black, t); r.a = c.a; return r; }
 
         /// Readable text color on top of a colored background.
-        public static Color OnColor(Color bg) => (bg.r * 0.299f + bg.g * 0.587f + bg.b * 0.114f) > 0.62f ? Deep : Color.white;
+        public static Color OnColor(Color bg) => (bg.r * 0.299f + bg.g * 0.587f + bg.b * 0.114f) > 0.66f ? Ink : Color.white;
 
         public static Color RarityColor(Rarity r)
         {
             switch (r)
             {
-                case Rarity.Common: return TextDim;
-                case Rarity.Uncommon: return Lagoon;
+                case Rarity.Common: return Silhouette;
+                case Rarity.Uncommon: return Turquoise;
                 case Rarity.Rare: return Sky;
                 case Rarity.Epic: return Violet;
                 default: return Sun;
@@ -49,13 +78,11 @@ namespace Sealebrities
 
         public static Color DifficultyColor(Difficulty d)
         {
-            switch (d)
+            switch (DifficultySettings.Normalize(d))
             {
-                case Difficulty.Snorkeler: return Lagoon;
-                case Difficulty.OpenWater: return Sky;
-                case Difficulty.Advanced: return Sun;
-                case Difficulty.Technical: return Coral;
-                default: return Live;
+                case Difficulty.Snorkeler: return Turquoise;
+                case Difficulty.OpenWater: return Sun;
+                default: return Coral;
             }
         }
     }
@@ -65,7 +92,65 @@ namespace Sealebrities
     /// Colors of a button, kept in Button.userData so hover callbacks can read them.
     public class UIBtnSkin
     {
-        public Color bg, fg, hover;
+        public Color bg, fg, hover, border;
+    }
+
+    /// Fredoka (Resources/Fonts/Fredoka-Variable.ttf) for every panel. Built once; falls back to the theme font.
+    public static class UIFonts
+    {
+        static bool loaded;
+        static bool available;
+        static FontDefinition definition;
+
+        const string PrewarmGlyphs = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_abcdefghijklmnopqrstuvwxyzÄÖÜäöüß€·–—…„“”°×−";
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { loaded = false; available = false; definition = default; }
+
+        public static bool Available { get { Load(); return available; } }
+
+        static void Load()
+        {
+            if (loaded) return;
+            loaded = true;
+            Font font = null;
+            try { font = Resources.Load<Font>("Fonts/Fredoka-Variable"); }
+            catch (Exception e) { Debug.LogWarning("Sealebrities UI: Fredoka could not be loaded. " + e.Message); }
+            if (font == null)
+            {
+                Debug.LogWarning("Sealebrities UI: Resources/Fonts/Fredoka-Variable not found – using the default font.");
+                return;
+            }
+            try
+            {
+                var asset = UnityEngine.TextCore.Text.FontAsset.CreateFontAsset(font, 90, 9,
+                    UnityEngine.TextCore.LowLevel.GlyphRenderMode.SDFAA, 1024, 1024,
+                    UnityEngine.TextCore.Text.AtlasPopulationMode.Dynamic, true);
+                if (asset != null)
+                {
+                    asset.name = "SB_Fredoka_SDF";
+                    // rasterise the common glyphs now (boot, behind the loading screen) instead of on first use in a
+                    // toast or phone app (a few dozen new 90 pt glyphs can take several ms mid-game)
+                    try { asset.TryAddCharacters(PrewarmGlyphs); }
+                    catch (Exception e) { Debug.LogWarning("Sealebrities UI: glyph prewarm failed: " + e.Message); }
+                    definition = FontDefinition.FromSDFFont(asset);
+                    available = true;
+                    return;
+                }
+            }
+            catch (Exception e) { Debug.LogWarning("Sealebrities UI: SDF font asset failed, using the plain font. " + e.Message); }
+            definition = FontDefinition.FromFont(font);
+            available = true;
+        }
+
+        /// Sets Fredoka on a panel root (inherited by every child). Returns false when the font is missing.
+        public static bool Apply(VisualElement root)
+        {
+            Load();
+            if (!available || root == null) return false;
+            root.style.unityFontDefinition = definition;
+            return true;
+        }
     }
 
     /// Element builders with inline styles (no USS files needed).
@@ -124,6 +209,23 @@ namespace Sealebrities
         public static void Shadow(Label l, float blur = 6f, float alpha = 0.65f)
         {
             l.style.textShadow = new TextShadow { offset = new Vector2(0f, 2f), blurRadius = blur, color = new Color(0f, 0f, 0f, alpha) };
+        }
+
+        /// HUD look: thin dark outline + soft drop shadow (art bible §1.14). Works on any label.
+        public static void Outline(Label l, float width = 1.5f, float shadowAlpha = 0.35f)
+        {
+            l.style.unityTextOutlineWidth = width;
+            l.style.unityTextOutlineColor = UIPalette.Outline;
+            l.style.textShadow = new TextShadow { offset = new Vector2(0f, 2f), blurRadius = 4f, color = new Color(0f, 0f, 0f, shadowAlpha) };
+        }
+
+        /// Floating HUD label: white (or colored) Fredoka text with outline and shadow, no background.
+        public static Label HudText(string text, float size, Color? color = null, bool bold = true)
+        {
+            var l = Text(text, size, color ?? Color.white, bold);
+            Outline(l, size >= 40f ? 2.2f : size >= 26f ? 1.8f : 1.5f);
+            l.pickingMode = PickingMode.Ignore;
+            return l;
         }
 
         public static VisualElement Spacer(float h)
@@ -214,6 +316,12 @@ namespace Sealebrities
             e.style.flexShrink = 0;
         }
 
+        public static void Center(VisualElement e)
+        {
+            e.style.alignItems = Align.Center;
+            e.style.justifyContent = Justify.Center;
+        }
+
         public static void Show(VisualElement e, bool show)
         {
             if (e == null) return;
@@ -234,6 +342,17 @@ namespace Sealebrities
             e.style.backgroundRepeat = new BackgroundRepeat(Repeat.NoRepeat, Repeat.NoRepeat);
         }
 
+        /// Background image that covers the box (cropping, keeps aspect) – photos and thumbnails.
+        public static void ImageCover(VisualElement e, Texture2D tex)
+        {
+            if (tex == null) { e.style.backgroundImage = StyleKeyword.None; return; }
+            e.style.backgroundImage = Background.FromTexture2D(tex);
+            e.style.backgroundSize = new BackgroundSize(BackgroundSizeType.Cover);
+            e.style.backgroundRepeat = new BackgroundRepeat(Repeat.NoRepeat, Repeat.NoRepeat);
+            e.style.backgroundPositionX = new BackgroundPosition(BackgroundPositionKeyword.Center);
+            e.style.backgroundPositionY = new BackgroundPosition(BackgroundPositionKeyword.Center);
+        }
+
         public static void IgnorePicking(VisualElement root)
         {
             root.pickingMode = PickingMode.Ignore;
@@ -249,7 +368,16 @@ namespace Sealebrities
             e.style.transitionDuration = durs;
         }
 
+        /// Soft drop shadow for light cards (a blurred dark copy is not available in UI Toolkit, so a
+        /// slightly darker bottom border fakes the lift).
+        public static void Lift(VisualElement e, float strength = 1f)
+        {
+            e.style.borderBottomWidth = Mathf.Max(e.style.borderBottomWidth.value, 3f * strength);
+            e.style.borderBottomColor = new Color(0.10f, 0.12f, 0.20f, 0.12f * strength);
+        }
+
         // ------------------------------------------------------------------ composite elements
+        /// Light frosted card (default) – pass a color for tinted cards.
         public static VisualElement Card(Color? bg = null, float radius = 16f, float padding = 14f)
         {
             var e = new VisualElement();
@@ -280,6 +408,22 @@ namespace Sealebrities
             return e;
         }
 
+        /// Red notification badge with a number (or "!" for 0 / a dot for -1).
+        public static Label BadgeLabel(int count, float size = 30f)
+        {
+            string t = count < 0 ? "" : count == 0 ? "!" : count > 99 ? "99+" : count.ToString();
+            var b = Text(t, size * 0.55f, Color.white, true);
+            b.pickingMode = PickingMode.Ignore;
+            b.style.position = Position.Absolute;
+            b.style.minWidth = size; b.style.height = size;
+            b.style.backgroundColor = UIPalette.Badge;
+            Radius(b, size * 0.5f);
+            Pad(b, 0f, size * 0.2f, 0f, size * 0.2f);
+            b.style.unityTextAlign = TextAnchor.MiddleCenter;
+            Border(b, Mathf.Max(2f, size * 0.08f), Color.white);
+            return b;
+        }
+
         public static Button Btn(string text, Action onClick, UIBtnKind kind = UIBtnKind.Primary, float size = 17f)
         {
             var b = new Button();
@@ -291,7 +435,7 @@ namespace Sealebrities
             b.style.unityTextAlign = TextAnchor.MiddleCenter;
             b.style.whiteSpace = WhiteSpace.Normal;
             Border(b, 0f, Color.clear);
-            Radius(b, 12f);
+            Radius(b, 14f);
             Pad(b, 11f, 20f, 11f, 20f);
             Margin(b, 0f);
             var skin = new UIBtnSkin();
@@ -301,6 +445,7 @@ namespace Sealebrities
             b.RegisterCallback<PointerLeaveEvent>(OnBtnLeave);
             b.RegisterCallback<PointerDownEvent>(OnBtnDown, TrickleDown.TrickleDown);
             b.RegisterCallback<PointerUpEvent>(OnBtnUp);
+            b.RegisterCallback<ClickEvent>(OnBtnClick);
             Transition(b, 0.12f, "background-color", "scale");
             return b;
         }
@@ -310,28 +455,32 @@ namespace Sealebrities
             switch (kind)
             {
                 case UIBtnKind.Primary: SetColors(b, UIPalette.Coral, Color.white); break;
-                case UIBtnKind.Secondary: SetColors(b, UIPalette.Raised2, UIPalette.Text); break;
-                case UIBtnKind.Ghost: SetColors(b, new Color(1f, 1f, 1f, 0.04f), UIPalette.TextDim); break;
-                case UIBtnKind.Accent: SetColors(b, UIPalette.Lagoon, UIPalette.Deep); break;
-                case UIBtnKind.Danger: SetColors(b, UIPalette.Raised2, UIPalette.Coral); break;
+                case UIBtnKind.Secondary: SetColors(b, Color.white, UIPalette.Ink, UIPalette.A(UIPalette.Ink, 0.12f)); break;
+                case UIBtnKind.Ghost: SetColors(b, new Color(1f, 1f, 1f, 0f), UIPalette.InkSoft); break;
+                case UIBtnKind.Accent: SetColors(b, UIPalette.Turquoise, Color.white); break;
+                case UIBtnKind.Danger: SetColors(b, Color.white, UIPalette.CoralInk, UIPalette.A(UIPalette.Coral, 0.45f)); break;
                 default: SetColors(b, UIPalette.Live, Color.white); break;
             }
         }
 
-        public static void SetColors(Button b, Color bg, Color fg)
+        public static void SetColors(Button b, Color bg, Color fg) => SetColors(b, bg, fg, Color.clear);
+
+        public static void SetColors(Button b, Color bg, Color fg, Color border)
         {
             var skin = b.userData as UIBtnSkin;
             if (skin == null) { skin = new UIBtnSkin(); b.userData = skin; }
-            skin.bg = bg; skin.fg = fg;
-            skin.hover = bg.a < 0.2f ? new Color(1f, 1f, 1f, 0.1f) : UIPalette.Lighten(bg, 0.14f);
+            skin.bg = bg; skin.fg = fg; skin.border = border;
+            skin.hover = bg.a < 0.2f ? UIPalette.A(UIPalette.Ink, 0.06f) : (bg.r + bg.g + bg.b > 2.7f ? UIPalette.Raised2 : UIPalette.Lighten(bg, 0.14f));
             b.style.backgroundColor = bg;
             b.style.color = fg;
+            if (border.a > 0f) Border(b, 2f, border);
+            else Border(b, 0f, Color.clear);
         }
 
         public static void SetEnabled(Button b, bool enabled)
         {
             b.SetEnabled(enabled);
-            b.style.opacity = enabled ? 1f : 0.4f;
+            b.style.opacity = enabled ? 1f : 0.45f;
             if (!enabled && b.userData is UIBtnSkin s) b.style.backgroundColor = s.bg;
         }
 
@@ -359,13 +508,15 @@ namespace Sealebrities
             if (e.currentTarget is Button b) b.style.scale = new Scale(Vector2.one);
         }
 
+        static void OnBtnClick(ClickEvent e) { UIAudio.Click(); }
+
         /// A clickable card-like element (not a Button, so it can hold arbitrary children).
         public static VisualElement Clickable(VisualElement e, Action onClick, Color normal, Color hover)
         {
             e.style.backgroundColor = normal;
             e.RegisterCallback<PointerEnterEvent>(_ => e.style.backgroundColor = hover);
             e.RegisterCallback<PointerLeaveEvent>(_ => e.style.backgroundColor = normal);
-            e.RegisterCallback<ClickEvent>(_ => onClick?.Invoke());
+            e.RegisterCallback<ClickEvent>(_ => { UIAudio.Click(); onClick?.Invoke(); });
             return e;
         }
 
@@ -374,7 +525,7 @@ namespace Sealebrities
             var sv = new ScrollView(ScrollViewMode.Vertical);
             sv.verticalScrollerVisibility = ScrollerVisibility.Hidden;
             sv.horizontalScrollerVisibility = ScrollerVisibility.Hidden;
-            sv.mouseWheelScrollSize = 60f;
+            sv.mouseWheelScrollSize = 80f;
             sv.focusable = false;
             sv.style.flexGrow = 1;
             // explicit layout of the internals so scrolling also works without a theme style sheet
@@ -392,17 +543,31 @@ namespace Sealebrities
             return sv;
         }
 
-        /// Keyboard key cap ("E", "Tab", …).
+        /// Keyboard key cap ("E", "Tab", …) – light cap with a dark border (cards / menus).
         public static Label KeyCap(string key, float size = 14f)
         {
-            var l = Text(key, size, UIPalette.Text, true);
-            l.style.backgroundColor = UIPalette.Raised2;
-            Border(l, 1f, new Color(1f, 1f, 1f, 0.18f));
-            l.style.borderBottomWidth = 3f;
+            var l = Text(key, size, UIPalette.Ink, true);
+            l.style.backgroundColor = Color.white;
+            Border(l, 2f, UIPalette.A(UIPalette.Ink, 0.25f));
+            l.style.borderBottomWidth = 4f;
             Radius(l, 7f);
-            Pad(l, 4f, 9f, 3f, 9f);
+            Pad(l, 3f, 9f, 2f, 9f);
             l.style.minWidth = 30f;
             l.style.unityTextAlign = TextAnchor.MiddleCenter;
+            l.style.flexShrink = 0;
+            return l;
+        }
+
+        /// HUD key cap: transparent, 2 px white outline, radius 6, outlined white text (art bible §1.14).
+        public static Label HudKeyCap(string key, float size = 32f)
+        {
+            var l = HudText(key, size * 0.56f, Color.white, true);
+            l.style.minWidth = size; l.style.height = size;
+            Border(l, 2f, Color.white);
+            Radius(l, 6f);
+            Pad(l, 0f, 7f, 0f, 7f);
+            l.style.unityTextAlign = TextAnchor.MiddleCenter;
+            l.style.backgroundColor = new Color(0.06f, 0.08f, 0.14f, 0.18f);
             l.style.flexShrink = 0;
             return l;
         }
@@ -479,6 +644,17 @@ namespace Sealebrities
 
         public static string Signed(long v) => (v >= 0 ? "+" : "−") + Loc.Number(Math.Abs(v));
         public static string SignedMoney(long v) => (v >= 0 ? "+" : "−") + Loc.Money(Math.Abs(v));
+
+        /// Compact number for tight spots: 950 · 12,4k · 1,2 Mio.
+        public static string Compact(long n)
+        {
+            long a = Math.Abs(n);
+            string s;
+            if (a >= 1000000) s = (a / 1000000f).ToString(a >= 10000000 ? "0" : "0.#", Loc.Culture) + Loc.Tr(" Mio.", "M");
+            else if (a >= 10000) s = (a / 1000f).ToString(a >= 100000 ? "0" : "0.#", Loc.Culture) + "k";
+            else s = Loc.Number(a);
+            return n < 0 ? "−" + s : s;
+        }
 
         public static bool InGame => GameManager.I != null && GameManager.I.InGame;
         public static GameState State => GameManager.I != null ? GameManager.I.State : null;

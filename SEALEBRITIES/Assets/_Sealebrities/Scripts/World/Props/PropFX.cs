@@ -149,6 +149,56 @@ namespace Sealebrities
             return ps;
         }
 
+        /// Subtle golden glints around a collectible (a few particles per second, started/stopped by distance).
+        public static ParticleSystem Sparkle(Transform parent, Vector3 pos, float radius)
+        {
+            var ps = Create(parent, "Sparkle", pos, Quaternion.identity, ParticleMat("sparkle", PropTex.Star, new Color(1f, 0.92f, 0.62f, 0.9f), true), 12);
+            var main = ps.main;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.7f, 1.2f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(0.02f, 0.12f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.07f, 0.16f);
+            main.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI);
+            main.gravityModifier = -0.02f;
+            main.playOnAwake = false;
+            var em = ps.emission;
+            em.rateOverTime = 3.5f;
+            var sh = ps.shape;
+            sh.shapeType = ParticleSystemShapeType.Sphere;
+            sh.radius = radius;
+            var col = ps.colorOverLifetime;
+            col.enabled = true;
+            col.color = new ParticleSystem.MinMaxGradient(Grad(Color.white, 0f, Color.white, 1f, Color.white, 0f));
+            var sz = ps.sizeOverLifetime;
+            sz.enabled = true;
+            sz.size = new ParticleSystem.MinMaxCurve(1f, new AnimationCurve(new Keyframe(0f, 0.2f), new Keyframe(0.4f, 1f), new Keyframe(1f, 0f)));
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            return ps;
+        }
+
+        /// White spray at the foot of a waterfall.
+        public static ParticleSystem Spray(Transform parent, Vector3 pos, float width)
+        {
+            var ps = Create(parent, "Spray", pos, Quaternion.Euler(-90f, 0f, 0f), ParticleMat("spray", PropTex.SoftDot, new Color(0.95f, 0.98f, 1f, 0.55f), false), 70);
+            var main = ps.main;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.9f, 1.6f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(0.6f, 1.6f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.35f, 0.9f);
+            main.gravityModifier = 0.12f;
+            var em = ps.emission;
+            em.rateOverTime = 26f;
+            var sh = ps.shape;
+            sh.shapeType = ParticleSystemShapeType.Box;
+            sh.scale = new Vector3(width, 0.3f, 0.3f);
+            var col = ps.colorOverLifetime;
+            col.enabled = true;
+            col.color = new ParticleSystem.MinMaxGradient(Grad(Color.white, 0.7f, Color.white, 0.4f, Color.white, 0f));
+            var sz = ps.sizeOverLifetime;
+            sz.enabled = true;
+            sz.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0f, 0.6f, 1f, 1.6f));
+            ps.Play(true);
+            return ps;
+        }
+
         /// Slowly drifting glowing specks (deep sea bioluminescence).
         public static ParticleSystem Specks(Transform parent, Vector3 center, float radius, int count, Color color)
         {

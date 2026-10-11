@@ -34,8 +34,35 @@ namespace Sealebrities
             if (valid) pos = c.transform.position;
         }
 
+        // C#-side frustum test for manual draw calls (grass): planes of the main camera once per frame, with a 20°
+        // wider field of view – Update runs before the player turns the camera this frame, so fast turns never pop
+        static readonly Plane[] planes = new Plane[6];
+        static int planesFrame = -1;
+        static bool planesValid;
+
+        /// True when the bounds may be visible to the main camera (always true without a camera).
+        public static bool InView(Bounds b)
+        {
+            int f = Time.frameCount;
+            if (f != planesFrame)
+            {
+                planesFrame = f;
+                Refresh();
+                Camera c = cached;
+                planesValid = false;
+                if (c != null && !c.orthographic)
+                {
+                    float fov = Mathf.Min(c.fieldOfView + 20f, 170f);
+                    Matrix4x4 proj = Matrix4x4.Perspective(fov, Mathf.Max(0.1f, c.aspect), c.nearClipPlane, c.farClipPlane);
+                    GeometryUtility.CalculateFrustumPlanes(proj * c.worldToCameraMatrix, planes);
+                    planesValid = true;
+                }
+            }
+            return !planesValid || GeometryUtility.TestPlanesAABB(planes, b);
+        }
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { cached = null; frame = -1; valid = false; }
+        static void ResetStatics() { cached = null; frame = -1; valid = false; planesFrame = -1; planesValid = false; }
     }
 
     /// The hut bed: sleep until the next morning.
@@ -46,7 +73,7 @@ namespace Sealebrities
         public string GetPrompt()
         {
             if (!CanInteract()) return null;
-            return Loc.Tr("E – Schlafen (bis morgen früh)", "E – Sleep (until morning)");
+            return PropPrompt.Interact("Schlafen (bis morgen früh)", "Sleep (until morning)");
         }
 
         public bool CanInteract() => GameManager.I != null && GameManager.I.InGame && Time.unscaledTime - lastUse > 3f;
@@ -65,26 +92,9 @@ namespace Sealebrities
                 return;
             }
             lastUse = Time.unscaledTime;
-            if (s.timeOfDay < GameManager.MorningTime)
-            {
-                // After midnight the clock rollover already started the new day (sponsors, uploads, history).
-                // GameManager.SleepToMorning would advance the day a second time, so only skip to the morning here.
-                // (Workaround until the lead moves this case into GameManager.SleepToMorning.)
-                Fader.FadeThrough(WakeUpSameDay, 2f);
-                return;
-            }
+            // GameManager.SleepToMorning handles both cases (before midnight: next day; after midnight: only skip to
+            // the morning of the already started day) and co-op (a guest's sleep is sent to the host, everybody sleeps).
             GameManager.I.SleepToMorning();
-        }
-
-        static void WakeUpSameDay()
-        {
-            var gm = GameManager.I;
-            if (gm == null || !gm.InGame) return;
-            var st = gm.State;
-            st.timeOfDay = GameManager.MorningTime;
-            Progression.ResolvePendingUploads();   // uploads made after midnight still arrive "overnight"
-            GameEvents.RaiseDayStarted(st.day);    // same day number: player wakes in the hut, reef/boat refresh
-            gm.Save();
         }
     }
 
@@ -241,6 +251,31 @@ namespace Sealebrities
         }
     }
 
+    /// Keeps an always-on light (cave glow, grotto lantern) enabled only while the camera is near (cheap per-frame check).
+    public class PropNearLight : MonoBehaviour
+    {
+        public Light lightRef;
+        public float range = 45f;
+        float nextCheck;
+
+        public static void Attach(Light l, float range)
+        {
+            if (l == null) return;
+            var n = l.gameObject.AddComponent<PropNearLight>();
+            n.lightRef = l;
+            n.range = range;
+            l.enabled = false;
+        }
+
+        void Update()
+        {
+            if (lightRef == null || Time.unscaledTime < nextCheck) return;
+            nextCheck = Time.unscaledTime + 0.4f;
+            bool near = PropCam.Valid && (PropCam.Position - transform.position).sqrMagnitude < range * range;
+            if (lightRef.enabled != near) lightRef.enabled = near;
+        }
+    }
+
     /// Gentle pendulum (tire swing).
     public class PropSwing : MonoBehaviour
     {
@@ -354,7 +389,9 @@ namespace Sealebrities
             Vector3 cam = PropCam.Position;
             bool camValid = PropCam.Valid;
             float t = Time.time;
-            float cull2 = cullDistance * cullDistance, anim2 = animDistance * animDistance;
+            // full-rate sway only within what can be seen under water (fog limit × 2.4)
+            float animD = FXVisibility.Underwater ? Mathf.Min(animDistance, FXVisibility.Meters * 2.4f) : animDistance;
+            float cull2 = cullDistance * cullDistance, anim2 = animD * animD;
             for (int i = 0; i < clusters.Count; i++)
             {
                 var c = clusters[i];
@@ -366,6 +403,9 @@ namespace Sealebrities
                     if (c.rend != null) c.rend.enabled = vis;
                 }
                 if (!vis) continue;
+                // off-screen clusters beyond 15 m are skipped (the pose is recomputed from Time.time, so they resume
+                // correctly; the SMR has fixed expanded bounds, so isVisible does not depend on the pose)
+                if (c.rend != null && !c.rend.isVisible && d2 > 225f) continue;
                 if (d2 > anim2 && ((frameIndex + i) % 3) != 0) continue;
                 var bones = c.bones;
                 for (int b = 0; b < bones.Length; b++)

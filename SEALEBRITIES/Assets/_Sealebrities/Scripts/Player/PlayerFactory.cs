@@ -4,16 +4,19 @@ using UnityEngine.Rendering.Universal;
 
 namespace Sealebrities
 {
-    /// Entry point of the Player module: builds the first-person diver with its camera, lamp and hands.
+    /// Entry point of the Player module: builds the first-person diver with its camera, lamp and hands, installs the
+    /// bean-diver factory (DiverModels.Build) and registers the player (Refs.Player, Divers).
     /// Hierarchy:  Player (CharacterController, PlayerController, PlayerInteractor, PlayerNarcosis; layer Ignore Raycast)
     ///               Head (pitch, eye height)
     ///                 Main Camera (Camera, AudioListener, URP data) – bob/shake offsets; other modules may attach models here
     ///                   Flashlight (spot Light, PlayerFlashlight)
-    ///                   ViewModel (PlayerHands)
+    ///                   ViewModel (PlayerHands: mitten hands, lamp, fallback rod, 3D phone)
+    /// Also: PlayerIntro (launch intro) and PlayerMenuCamera (crew on the dock in the main menu).
     public static class PlayerFactory
     {
         public static GameObject Create(Transform root)
         {
+            DiverBuilder.Install();
             var go = new GameObject("Player");
             go.layer = PlayerController.PlayerLayer;
             if (root != null) go.transform.SetParent(root, false);
@@ -60,10 +63,9 @@ namespace Sealebrities
                 urp.stopNaN = true;
             }
 
-            // ---- dive lamp: left/below the eye, converging on the screen center ~9 m ahead. The light sits just in
-            // front of the view model (the lamp head reaches ~0.65 m at the end of a swim stroke, the camera rigs stay
-            // right of the cone): a spot light only lights what is in front of it, so the hand lamp and the camera model
-            // are no longer blown out to white by their own light at a few centimeters.
+            // ---- dive lamp (art bible §2.6: warm #FFD9A0, spot 55°, ~14 m). Only lit while the lamp is in a hand; the
+            // light follows the lens of the hand lamp, a little in front of it, converging on the screen centre ~9 m
+            // ahead – a spot light only lights what is in front of it, so the view model is not blown out.
             var lightGo = new GameObject("Flashlight");
             lightGo.transform.SetParent(camGo.transform, false);
             Vector3 lp = new Vector3(-0.13f, -0.085f, 0.72f);
@@ -71,11 +73,11 @@ namespace Sealebrities
             lightGo.transform.localRotation = Quaternion.LookRotation((new Vector3(0f, 0f, 9f) - lp).normalized, Vector3.up);
             var light = lightGo.AddComponent<Light>();
             light.type = LightType.Spot;
-            light.spotAngle = 45f;
-            light.innerSpotAngle = 25f;
-            light.color = new Color(1f, 0.94f, 0.84f);
-            light.intensity = 6f;
-            light.range = 15f;
+            light.spotAngle = 55f;
+            light.innerSpotAngle = 32f;
+            light.color = LowPoly.Hex("#FFD9A0");
+            light.intensity = 3.5f;
+            light.range = 14f;
             light.shadows = LightShadows.None;
             light.renderMode = LightRenderMode.ForcePixel;
             light.enabled = false;

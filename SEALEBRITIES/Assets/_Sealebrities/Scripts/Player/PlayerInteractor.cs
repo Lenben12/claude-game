@@ -59,17 +59,42 @@ namespace Sealebrities
                 }
                 if (string.IsNullOrEmpty(prompt)) prompt = null;
             }
-            if (prompt == null && !can && pc.CanVaultHint)
-                prompt = Loc.Tr("Leertaste – Rausklettern", "Space – Climb out");
+            if (prompt == null && !can)
+            {
+                if (pc.CanLadderHint) prompt = ClimbPrompt(true);
+                else if (pc.CanVaultHint) prompt = ClimbPrompt(false);
+            }
 
             InteractionPrompt.Text = prompt;
             written = prompt;
 
-            if (can && GameInput.InteractPressed)
+            if (GameInput.InteractPressed)
             {
-                try { target.Interact(); }
-                catch (System.Exception e) { Debug.LogException(e); }
+                if (can)
+                {
+                    try { target.Interact(); }
+                    catch (System.Exception e) { Debug.LogException(e); }
+                }
+                else if (pc.CanLadderHint) pc.TryLadder();
+                else if (pc.CanVaultHint) pc.TryVault();
             }
+        }
+
+        // cached "Key – Verb" prompts (rebuilt only when the binding label or the language changes)
+        string ladderPrompt, vaultPrompt, promptKey;
+        Language promptLang;
+
+        string ClimbPrompt(bool ladder)
+        {
+            string key = GameInput.BindingLabel(GameAction.Jump);
+            if (!ReferenceEquals(key, promptKey) || promptLang != Loc.Current)
+            {
+                promptKey = key;
+                promptLang = Loc.Current;
+                ladderPrompt = key + Loc.Tr(" – Leiter hoch", " – Climb ladder");
+                vaultPrompt = key + Loc.Tr(" – Rausklettern", " – Climb out");
+            }
+            return ladder ? ladderPrompt : vaultPrompt;
         }
 
         void OnDisable() { Release(); }

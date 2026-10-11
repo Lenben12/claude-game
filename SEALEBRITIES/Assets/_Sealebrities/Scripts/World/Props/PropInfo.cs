@@ -14,6 +14,21 @@ namespace Sealebrities
         public static Vector3 DockLadderTop, DockLadderBottom;
         public static float HelipadTopY = float.NaN;
         public static Vector3 TreasureChest;
+        /// Floor center of the boathouse next to the dock start (zero when it could not be placed).
+        public static Vector3 Boathouse;
+        /// Lighthouse gallery floor (world) and the base of its exterior ladder.
+        public static Vector3 LighthouseGallery, LighthouseLadderFoot, LighthouseBench;
+        /// Points of interest as actually built (zero when a builder failed).
+        public static Vector3 WaterfallLip, WaterfallNiche, PoolCenter, CaveMouth, CaveChamber, Grotto, GrottoTable, GrottoCamera;
+        public static Vector3 BridgeNorth, BridgeSouth, BridgeMid, BridgeBelow;
+        public static Vector3 TidePoolsCenter, SecondBeachSpot, Hammock, HelmetSpot, RadioShack, RadioTowerBase;
+        /// Mini island centers (top surface) keyed like DiveSites ids: kelp_forest, wreck, blue_drop, deep_trench.
+        public static readonly List<Vector3> MiniIslandTops = new List<Vector3>();
+        /// Landmark spot per mini island (keys: kelp_forest, wreck, blue_drop, deep_trench).
+        public static readonly Dictionary<string, Vector3> MiniLandmarks = new Dictionary<string, Vector3>();
+        /// Golden shell spots on the mini island beaches.
+        public static readonly List<Vector3> MiniShellSpots = new List<Vector3>();
+        public static Vector3 Campfire, BayArch;
         public static Vector3 WreckCenter;
         public static Vector3 WhaleSkeleton;
 
@@ -33,7 +48,7 @@ namespace Sealebrities
         static void ResetStatics()
         {
             HutFloorY = float.NaN; HelipadTopY = float.NaN;
-            AnemoneSpots.Clear(); WreckHoles.Clear(); WreckHoleNormals.Clear(); VentPositions.Clear(); PathPoints.Clear();
+            AnemoneSpots.Clear(); WreckHoles.Clear(); WreckHoleNormals.Clear(); VentPositions.Clear(); PathPoints.Clear(); MiniIslandTops.Clear(); MiniLandmarks.Clear(); MiniShellSpots.Clear();
             IslandBuilt = false; UnderwaterBuilt = false;
         }
     }

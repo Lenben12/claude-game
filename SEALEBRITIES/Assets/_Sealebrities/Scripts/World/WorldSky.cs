@@ -3,8 +3,9 @@ using UnityEngine.Rendering;
 
 namespace Sealebrities
 {
-    /// Builds the low-poly sky: sun and moon lights, a pastel procedural skybox, a sky-only realtime reflection probe,
-    /// camera-centered faceted stars and moon, and drifting low-poly cloud puffs. WorldDayNight animates all of it.
+    /// Builds the How to Fish sky: sun and moon lights, the calibrated gradient sky dome with a sun disc
+    /// (WorldSkyDome; Unity's procedural skybox only as a fallback), a sky-only realtime reflection probe,
+    /// camera-centered faceted stars and moon, and big drifting low-poly cumulus clouds. WorldDayNight animates all of it.
     public static class WorldSky
     {
         public const int StarQueue = 2900, MoonQueue = 2905;
@@ -16,21 +17,21 @@ namespace Sealebrities
 
             DisableForeignDirectionalLights();
 
-            // ---- sun (shadow-casting main light by day, RenderSettings.sun so URP and the skybox use it)
+            // ---- sun (shadow-casting main light by day, RenderSettings.sun so URP uses it)
             var sunGo = new GameObject("Sun");
             sunGo.transform.SetParent(root.transform, false);
             var sun = sunGo.AddComponent<Light>();
             sun.type = LightType.Directional;
             sun.shadows = LightShadows.Soft;
-            sun.shadowStrength = 0.62f;
+            sun.shadowStrength = 0.9f;
             sun.shadowBias = 0.05f;
             sun.shadowNormalBias = 0.4f;
             sun.renderMode = LightRenderMode.ForcePixel;
-            sun.intensity = 1.4f;
-            sun.color = new Color(1f, 0.92f, 0.82f);
+            sun.intensity = 1.35f;
+            sun.color = new Color(1f, 0.95f, 0.87f);
             RenderSettings.sun = sun;
 
-            // ---- moon: soft bluish light, no shadows; becomes the main light (and lights the skybox) at night
+            // ---- moon: cool bluish light, no shadows; becomes the main light at night (moonlit, readable nights)
             var moonGo = new GameObject("Moon");
             moonGo.transform.SetParent(root.transform, false);
             var moon = moonGo.AddComponent<Light>();
@@ -38,15 +39,21 @@ namespace Sealebrities
             moon.shadows = LightShadows.None;
             moon.renderMode = LightRenderMode.ForcePixel;
             moon.intensity = 0f;
-            moon.color = new Color(0.62f, 0.72f, 1f);
+            moon.color = new Color(0.663f, 0.737f, 1f);
             moon.enabled = false;
 
             // shadow distance: URP asset value set by the editor setup (QualitySettings.shadowDistance is ignored by URP)
             QualitySettings.realtimeReflectionProbes = true;
 
-            // ---- skybox: Unity's procedural sky, tuned light and pastel (values animated by WorldDayNight)
+            // ---- the How to Fish gradient sky (exact art-bible colours) – vertex-coloured dome with the particles shader
+            var domeShader = MaterialLibrary.ParticlesUnlit;
+            if (domeShader != null && !domeShader.isSupported) domeShader = null;
+            var dome = new WorldSkyDome(root.transform, domeShader);
+
+            // ---- fallback skybox: Unity's procedural sky (only when the dome could not be built)
             Material sky = null;
-            var skyShader = Shader.Find("Skybox/Procedural");
+            var skyShader = dome.Valid ? null : Shader.Find("Skybox/Procedural");
+            if (dome.Valid) RenderSettings.skybox = null;   // the dome is the sky: no skybox pass draws over it
             if (skyShader != null)
             {
                 sky = new Material(skyShader) { name = "SB_Sky" };
@@ -61,14 +68,16 @@ namespace Sealebrities
                 sky.SetColor("_GroundColor", new Color(0.40f, 0.55f, 0.66f));
                 sky.SetFloat("_Exposure", 2.8f);
                 RenderSettings.skybox = sky;
+                Debug.LogWarning("Sealebrities: sky dome unavailable – using the procedural skybox fallback.");
             }
-            else Debug.LogWarning("Sealebrities: Skybox/Procedural shader not found – sky falls back to the camera background.");
+            else if (!dome.Valid) Debug.LogWarning("Sealebrities: no sky shader found – sky falls back to the camera background.");
 
             RenderSettings.ambientMode = AmbientMode.Trilight;
             RenderSettings.defaultReflectionMode = DefaultReflectionMode.Skybox;
             RenderSettings.reflectionIntensity = 1f;
 
-            // ---- sky-only reflection probe covering the whole map (the water's soft glints reflect the current sky)
+            // ---- sky-only reflection probe covering the whole map (the water's soft glints reflect the current sky;
+            // with the dome it is a calibrated sky colour, so the sea brightens toward the horizon like How to Fish)
             var probeGo = new GameObject("SkyReflection");
             probeGo.transform.SetParent(root.transform, false);
             probeGo.transform.position = new Vector3(0f, 20f, 0f);
@@ -78,7 +87,8 @@ namespace Sealebrities
             probe.timeSlicingMode = ReflectionProbeTimeSlicingMode.NoTimeSlicing;
             probe.resolution = 64;
             probe.hdr = true;
-            probe.clearFlags = ReflectionProbeClearFlags.Skybox;
+            probe.clearFlags = dome.Valid ? ReflectionProbeClearFlags.SolidColor : ReflectionProbeClearFlags.Skybox;
+            probe.backgroundColor = dome.ReflectionColor;
             probe.cullingMask = 0;
             probe.size = new Vector3(8000f, 3000f, 8000f);
             probe.center = Vector3.zero;
@@ -97,7 +107,7 @@ namespace Sealebrities
             var clouds = new WorldClouds(root.transform);
 
             var dn = root.AddComponent<WorldDayNight>();
-            dn.Init(sun, moon, sky, probe, stars, starMat, moonDisc, moonMat, clouds);
+            dn.Init(sun, moon, sky, dome, probe, stars, starMat, moonDisc, moonMat, clouds);
             WorldInfo.Sun = sun;
             dn.ApplyNow();
             return dn;

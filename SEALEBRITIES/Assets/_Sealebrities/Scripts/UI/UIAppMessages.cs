@@ -26,10 +26,11 @@ namespace Sealebrities
 
         readonly HashSet<string> seen = new HashSet<string>();
         string openChat;
+        int lastBadge;
 
         public override string Id => "messages";
         public override string Title => Loc.Tr("Nachrichten", "Messages");
-        public override Color Color => UIPalette.Money;
+        public override Color Color => UIPalette.Rgb(0x4FC3F7);
         public override UIGlyph.DrawFn Icon => UIGlyphs.Bubble;
 
         public override string HeaderTitle
@@ -53,7 +54,28 @@ namespace Sealebrities
             }
         }
 
-        public void ResetSession() { seen.Clear(); openChat = null; }
+        /// Number of unread chats (polled by the controller a few times per second to raise a push notification).
+        public int UnreadCount() => Badge;
+
+        public void ResetSession() { seen.Clear(); openChat = null; lastBadge = 0; }
+
+        /// Returns the newest unread chat (for the push notification), null when none.
+        public bool TryNewestUnread(out string name, out string line)
+        {
+            name = null; line = null;
+            if (UIKit.State == null) return false;
+            var chats = Chats();
+            for (int i = chats.Count - 1; i >= 0; i--)
+            {
+                if (seen.Contains(Key(chats[i]))) continue;
+                name = chats[i].name;
+                line = chats[i].sub;
+                return true;
+            }
+            return false;
+        }
+
+        public int LastNotifiedBadge { get => lastBadge; set => lastBadge = value; }
 
         static string Key(UIChat c) => c.id + "#" + c.lines.Count;
 
@@ -78,8 +100,8 @@ namespace Sealebrities
                                  "I'm too old to dive. But you've got your phone in a freezer bag … just film everything that lives underwater!"));
             gus.lines.Add(Loc.Tr("Je größer das Viech, desto mehr Leute gucken zu. Und denk dran: Clips sind erst sicher, wenn du wieder aus dem Wasser bist.",
                                  "The bigger the critter, the more people watch. And remember: clips are only safe once you're out of the water."));
-            gus.lines.Add(Loc.Tr("Fürs erste Geld: Angel am Steg ein paar Fische. Damit bestellst du bei Gary eine Pressluftflasche.",
-                                 "For your first money: catch a few fish at the dock. Then order an air tank from Gary."));
+            gus.lines.Add(Loc.Tr("Fürs erste Geld: Angel am Steg und biete die Fische im Fischmarkt an. Damit bestellst du bei Gary eine Pressluftflasche.",
+                                 "For your first money: fish at the dock and list them in the Fish Market. Then order an air tank from Gary."));
             if (Journal.DiscoveredCount >= 5)
                 gus.lines.Add(Loc.Tr("Ich hab dein Sealog gesehen – schon " + Journal.DiscoveredCount + " Arten! Weiter so, Kleines.",
                                      "I saw your Sealog – already " + Journal.DiscoveredCount + " species! Keep it up, kiddo."));
@@ -87,10 +109,10 @@ namespace Sealebrities
             list.Add(gus);
 
             var gary = new UIChat { id = "gary", name = Loc.Tr("Pilot Gary", "Pilot Gary"), initials = "PG", color = UIPalette.Coral, stamp = Loc.Tr("Tag 1", "Day 1") };
-            gary.lines.Add(Loc.Tr("Gary hier, Chopper-Lieferdienst! Bestell im Chopper Shop, ich bring's am nächsten Morgen zum Helipad.",
-                                  "Gary here, chopper delivery! Order in the Chopper Shop and I'll drop it at the helipad the next morning."));
-            gary.lines.Add(Loc.Tr("Eilig? Express kostet 50 % extra, dann bin ich in ein paar Minuten da. Die Kiste musst du selbst abholen.",
-                                  "In a hurry? Express costs 50 % extra and I'll be there in a few minutes. You pick up the crate yourself."));
+            gary.lines.Add(Loc.Tr("Gary hier, Chopper-Lieferdienst! Bestell im Chopper Shop – ich bring's noch am selben Tag, 2–3 Stunden später, zum Helipad.",
+                                  "Gary here, chopper delivery! Order in the Chopper Shop – I'll drop it at the helipad the same day, 2–3 hours later."));
+            gary.lines.Add(Loc.Tr("Eilig? Express kostet 50 % extra, dann bin ich in 45 Minuten da. Nach 20 Uhr flieg ich erst am nächsten Morgen.",
+                                  "In a hurry? Express costs 50 % extra and I'm there in 45 minutes. After 8 pm I only fly the next morning."));
             int open = s.deliveries.Count;
             if (open > 0)
                 gary.lines.Add(Loc.Tr(open == 1 ? "Ich hab 1 Lieferung für dich auf dem Plan." : $"Ich hab {open} Lieferungen für dich auf dem Plan.",
@@ -100,11 +122,11 @@ namespace Sealebrities
 
             if (s.followers >= Progression.MonetizationFollowers)
             {
-                var ft = new UIChat { id = "fintube", name = "FinTube Team", initials = "FT", color = UIPalette.Live, stamp = "100+" };
+                var ft = new UIChat { id = "fintube", name = "FinTube Team", initials = "FT", color = UIPalette.Danger, stamp = "100+" };
                 ft.lines.Add(Loc.Tr($"Glückwunsch zu {Loc.Number(Progression.MonetizationFollowers)} Followern! Ab sofort verdienst du Geld mit jedem Aufruf: {Progression.MoneyPerThousandViews:0} $ pro 1.000 Aufrufe.",
                                     $"Congrats on {Loc.Number(Progression.MonetizationFollowers)} followers! From now on you earn money with every view: ${Progression.MoneyPerThousandViews:0} per 1,000 views."));
-                ft.lines.Add(Loc.Tr("Tipp: Neue Arten und große Exemplare bringen die meisten Aufrufe. Lade dieselbe Art nicht jeden Tag hoch.",
-                                    "Tip: new species and big specimens bring the most views. Don't upload the same species every day."));
+                ft.lines.Add(Loc.Tr("Tipp: Neue Arten und große Exemplare bringen die meisten Aufrufe. Lade dieselbe Art höchstens alle 3 Tage hoch – und pro Tag gibt es ein Video.",
+                                    "Tip: new species and big specimens bring the most views. Upload the same species at most every 3 days – and there is one video per day."));
                 ft.sub = ft.lines[ft.lines.Count - 1];
                 list.Add(ft);
             }
@@ -125,11 +147,11 @@ namespace Sealebrities
                 for (int k = 0; k < Sponsors.GetLength(0); k++) if (Sponsors[k, 0] == siteId) { row = k; break; }
                 var site = DiveSites.Get(siteId);
                 string brand = row >= 0 ? Sponsors[row, 1] : "Sponsor";
-                long perDay = 150 * (i + 1);
-                var sp = new UIChat { id = "sponsor_" + siteId, name = brand, initials = brand.Substring(0, 1), color = UIPalette.Lagoon, stamp = Loc.Tr("Sponsor", "Sponsor") };
+                long perDay = Progression.SponsorPerPage * (i + 1);
+                var sp = new UIChat { id = "sponsor_" + siteId, name = brand, initials = brand.Substring(0, 1), color = UIPalette.Turquoise, stamp = Loc.Tr("Sponsor", "Sponsor") };
                 if (row >= 0) sp.lines.Add(Loc.Tr($"Hallo von {brand} – {Sponsors[row, 2]}!", $"Hello from {brand} – {Sponsors[row, 3]}!"));
-                sp.lines.Add(Loc.Tr($"Wir haben gesehen, dass du die komplette Tagebuch-Seite „{(site != null ? site.Name : siteId)}“ gefilmt hast. Wir möchten dich sponsern: {Loc.Money(perDay)} pro Tag!",
-                                    $"We saw you filmed the complete “{(site != null ? site.Name : siteId)}” journal page. We'd like to sponsor you: {Loc.Money(perDay)} per day!"));
+                sp.lines.Add(Loc.Tr($"Wir haben gesehen, dass du die komplette Sealog-Seite „{(site != null ? site.Name : siteId)}“ gefilmt hast. Wir möchten dich sponsern: {Loc.Money(perDay)} pro Tag!",
+                                    $"We saw you filmed the complete “{(site != null ? site.Name : siteId)}” Sealog page. We'd like to sponsor you: {Loc.Money(perDay)} per day!"));
                 sp.lines.Add(s.followers >= Progression.SponsorFollowers
                     ? Loc.Tr("Deal aktiv – die Zahlung kommt jeden Morgen.", "Deal active – payment arrives every morning.")
                     : Loc.Tr($"Der Deal startet, sobald du {Loc.Number(Progression.SponsorFollowers)} Follower hast.", $"The deal starts as soon as you have {Loc.Number(Progression.SponsorFollowers)} followers."));
@@ -165,21 +187,21 @@ namespace Sealebrities
         {
             bool unread = !seen.Contains(Key(c));
             var row = UIKit.Row();
-            UIKit.Pad(row, 10f, 10f, 10f, 10f);
-            UIKit.Radius(row, 14f);
-            row.style.marginBottom = 4f;
-            UIKit.Clickable(row, () => { openChat = c.id; Phone.Refresh(false); }, new Color(1f, 1f, 1f, unread ? 0.07f : 0.03f), new Color(1f, 1f, 1f, 0.12f));
-            row.Add(Avatar(c, 46f));
+            UIKit.Pad(row, 14f, 16f, 14f, 14f);
+            UIKit.Radius(row, 22f);
+            row.style.marginBottom = 8f;
+            UIKit.Clickable(row, () => { openChat = c.id; Phone.Refresh(false); }, Color.white, UIPalette.CardAlt);
+            row.Add(Avatar(c, 72f));
             var col = UIKit.Col();
-            col.style.marginLeft = 12f;
+            col.style.marginLeft = 14f;
             col.style.flexGrow = 1;
             col.style.flexShrink = 1;
             var top = UIKit.Row();
-            top.Add(UIKit.Text(c.name, 15f, UIPalette.Text, true));
+            top.Add(UIKit.Text(c.name, PhoneKit.Body, UIPalette.Ink, true));
             top.Add(UIKit.Flex());
-            top.Add(UIKit.Text(c.stamp, 11f, UIPalette.TextFaint));
+            top.Add(UIKit.Text(c.stamp, PhoneKit.Tiny, UIPalette.Silhouette));
             col.Add(top);
-            var sub = UIKit.Text(c.sub, 12.5f, unread ? UIPalette.Text : UIPalette.TextDim);
+            var sub = UIKit.Text(c.sub, PhoneKit.Small, unread ? UIPalette.Ink : UIPalette.InkSoft);
             sub.style.overflow = Overflow.Hidden;
             sub.style.textOverflow = TextOverflow.Ellipsis;
             sub.style.whiteSpace = WhiteSpace.NoWrap;
@@ -188,8 +210,8 @@ namespace Sealebrities
             row.Add(col);
             if (unread)
             {
-                var dot = UIKit.Dot(UIPalette.Sky, 10f);
-                dot.style.marginLeft = 8f;
+                var dot = UIKit.Dot(UIPalette.Badge, 18f);
+                dot.style.marginLeft = 10f;
                 row.Add(dot);
             }
             UIKit.IgnorePicking(row);
@@ -203,8 +225,7 @@ namespace Sealebrities
             UIKit.Size(a, size, size);
             UIKit.Radius(a, size * 0.5f);
             a.style.backgroundColor = c.color;
-            a.style.alignItems = Align.Center;
-            a.style.justifyContent = Justify.Center;
+            UIKit.Center(a);
             a.Add(UIKit.Text(c.initials, size * 0.36f, UIPalette.OnColor(c.color), true));
             return a;
         }
@@ -213,23 +234,23 @@ namespace Sealebrities
         {
             var head = UIKit.Col();
             head.style.alignItems = Align.Center;
-            head.style.marginBottom = 14f;
-            head.Add(Avatar(c, 64f));
-            var n = UIKit.Text(c.name, 17f, UIPalette.Text, true);
-            n.style.marginTop = 6f;
+            head.style.marginBottom = 18f;
+            head.Add(Avatar(c, 110f));
+            var n = UIKit.Text(c.name, PhoneKit.Big, UIPalette.Ink, true);
+            n.style.marginTop = 8f;
             head.Add(n);
-            head.Add(UIKit.Text(c.stamp, 11f, UIPalette.TextFaint));
             body.Add(head);
             foreach (var line in c.lines)
             {
-                var bubble = UIKit.Para(line, 14f, UIPalette.Text);
-                bubble.style.backgroundColor = UIPalette.Raised2;
-                bubble.style.borderTopLeftRadius = 6f; bubble.style.borderTopRightRadius = 16f;
-                bubble.style.borderBottomLeftRadius = 16f; bubble.style.borderBottomRightRadius = 16f;
-                UIKit.Pad(bubble, 10f, 14f, 10f, 14f);
-                bubble.style.marginBottom = 6f;
-                bubble.style.maxWidth = Length.Percent(88f);
+                var bubble = PhoneKit.T(line, PhoneKit.Body, UIPalette.Ink);
+                bubble.style.backgroundColor = Color.white;
+                bubble.style.borderTopLeftRadius = 8f; bubble.style.borderTopRightRadius = 26f;
+                bubble.style.borderBottomLeftRadius = 26f; bubble.style.borderBottomRightRadius = 26f;
+                UIKit.Pad(bubble, 16f, 20f, 16f, 20f);
+                bubble.style.marginBottom = 10f;
+                bubble.style.maxWidth = Length.Percent(90f);
                 bubble.style.alignSelf = Align.FlexStart;
+                UIKit.Lift(bubble, 0.6f);
                 body.Add(bubble);
             }
         }

@@ -167,6 +167,7 @@ namespace Sealebrities
             {
                 var c = list[i];
                 float dx = c.x - x, dz = c.y - z, rr = c.z + pad;
+                if (rr <= 0f) continue;   // a negative pad may shrink small circles away entirely
                 if (dx * dx + dz * dz < rr * rr) return true;
             }
             return false;

@@ -45,10 +45,10 @@ namespace Sealebrities
         public static IEnumerator Prepare()
         {
             if (Ready) yield break;
-            for (int i = 0; i < 8; i++) Branching.Add(BuildBranching(100 + i, PropMats.Coral(i)));
+            for (int i = 0; i < 8; i++) Branching.Add(BuildBranching(100 + i, PropMats.CoralColor(i)));
             if (PropRun.Due()) yield return null;
-            for (int i = 0; i < 4; i++) Brain.Add(BuildBrain(200 + i, PropMats.Brain(i)));
-            for (int i = 0; i < 4; i++) Table.Add(BuildTable(300 + i, PropMats.Table(i)));
+            for (int i = 0; i < 4; i++) Brain.Add(BuildBrain(200 + i, PropMats.BrainColor(i)));
+            for (int i = 0; i < 4; i++) Table.Add(BuildTable(300 + i, PropMats.TableColor(i)));
             for (int i = 0; i < 5; i++) Fan.Add(BuildFan(400 + i, PropMats.Fan(i)));
             for (int i = 0; i < 5; i++) Sponge.Add(BuildSponge(500 + i, PropMats.Sponge(i)));
             if (PropRun.Due()) yield return null;
@@ -58,27 +58,28 @@ namespace Sealebrities
         }
 
         // ------------------------------------------------------------------ builders
-        static PropModel BuildBranching(int seed, Material mat)
+        /// Branching coral in three flat tones (art bible §2.4): darker base (−25 %), mid branches, lighter tips (+15 %).
+        static PropModel BuildBranching(int seed, Color c)
         {
             var rng = new System.Random(seed);
             var mb = new PropModelBuilder();
-            var b = mb.B(mat);
+            var tones = new[] { mb.B(PropMats.ReefTip(c)), mb.B(PropMats.Flat(c)), mb.B(PropMats.ReefBase(c)) };
             int trunks = 3 + rng.Next(3);
             float maxH = 0f;
             for (int t = 0; t < trunks; t++)
             {
                 Vector3 dir = Quaternion.Euler(PropUtil.Range(rng, 10f, 45f), PropUtil.Range(rng, 0f, 360f), 0f) * Vector3.up;
                 Vector3 p = new Vector3(PropUtil.Range(rng, -0.07f, 0.07f), -0.05f, PropUtil.Range(rng, -0.07f, 0.07f));
-                Branch(b, rng, p, dir, PropUtil.Range(rng, 0.24f, 0.34f), 0.06f, 2, ref maxH);
+                Branch(tones, rng, p, dir, PropUtil.Range(rng, 0.24f, 0.34f), 0.07f, 2, ref maxH);
             }
             return mb.Build("CoralBranch" + seed, maxH, 0.6f);
         }
 
-        /// Boxy (4-sided) branch segments; tips are capped.
-        static void Branch(PropMeshBuilder b, System.Random rng, Vector3 p, Vector3 dir, float len, float r, int depth, ref float maxH)
+        /// Boxy (4-sided) branch segments; tips are capped. tones[depth] = 0 tips, 1 middle, 2 base.
+        static void Branch(PropMeshBuilder[] tones, System.Random rng, Vector3 p, Vector3 dir, float len, float r, int depth, ref float maxH)
         {
             Vector3 end = p + dir * len;
-            b.Rod(p, end, r, r * 0.82f, 4, depth == 0);
+            tones[Mathf.Clamp(depth, 0, 2)].Rod(p, end, r, r * 0.82f, 4, depth == 0);
             maxH = Mathf.Max(maxH, end.y + r);
             if (depth <= 0) return;
             int n = 2 + (rng.NextDouble() < 0.35 ? 1 : 0);
@@ -88,27 +89,48 @@ namespace Sealebrities
                 if (rnd.sqrMagnitude < 1e-4f) rnd = Vector3.up;
                 Vector3 nd = Vector3.Slerp(dir, rnd.normalized, PropUtil.Range(rng, 0.3f, 0.55f)) + Vector3.up * 0.35f;
                 nd = nd.sqrMagnitude > 1e-6f ? nd.normalized : Vector3.up;
-                Branch(b, rng, end - dir * r * 0.5f, nd, len * PropUtil.Range(rng, 0.7f, 0.9f), r * 0.78f, depth - 1, ref maxH);
+                Branch(tones, rng, end - dir * r * 0.5f, nd, len * PropUtil.Range(rng, 0.7f, 0.9f), r * 0.8f, depth - 1, ref maxH);
             }
         }
 
-        static PropModel BuildBrain(int seed, Material mat)
+        static readonly PropMeshBuilder Scratch = new PropMeshBuilder();
+
+        /// Faceted brain coral (half ico, detail 1) in two tones: lighter crown, base-colored flanks.
+        static PropModel BuildBrain(int seed, Color c)
         {
             var rng = new System.Random(seed);
             var mb = new PropModelBuilder();
             var radii = PropRocks.Jitter(rng, 1, 0.1f, 1, 0.35f);
-            mb.B(mat).Ico(new Vector3(0f, 0.05f, 0f), new Vector3(0.5f, 0.38f, 0.5f), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), 1, radii);
+            Scratch.Clear();
+            Scratch.Ico(new Vector3(0f, 0.05f, 0f), new Vector3(0.5f, 0.38f, 0.5f), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), 1, radii);
+            var top = mb.B(PropMats.ReefTip(c));
+            var mid = mb.B(PropMats.Flat(c));
+            var low = mb.B(PropMats.ReefBase(c));
+            var V = Scratch.V;
+            var T = Scratch.T;
+            for (int t = 0; t + 2 < T.Count; t += 3)
+            {
+                Vector3 a = V[T[t]], b = V[T[t + 1]], cc = V[T[t + 2]];
+                Vector3 n = Vector3.Cross(b - a, cc - a);
+                if (n.sqrMagnitude < 1e-12f) continue;
+                n.Normalize();
+                // checker the crown faces a little so the brain grooves read in two tones
+                var dst = n.y > 0.55f ? ((t / 3) % 3 == 0 ? mid : top) : (n.y < 0.05f ? low : mid);
+                dst.Face3(a, b, cc, n);
+            }
             return mb.Build("CoralBrain" + seed, 0.42f, 0.5f);
         }
 
-        /// Flat faceted plate on a short stem.
-        static PropModel BuildTable(int seed, Material mat)
+        /// Faceted table coral: a plate 0.12 m thick (not a paper-flat disc) on a short stem, lighter top, darker rim.
+        static PropModel BuildTable(int seed, Color c)
         {
             var rng = new System.Random(seed);
             var mb = new PropModelBuilder();
-            var b = mb.B(mat);
-            float R = 0.85f;
-            b.Cylinder(new Vector3(0f, -0.05f, 0f), Quaternion.identity, 0.1f, 0.07f, 0.36f, 5);
+            var topB = mb.B(PropMats.ReefTip(c));
+            var rimB = mb.B(PropMats.Flat(c));
+            var baseB = mb.B(PropMats.ReefBase(c));
+            float R = 0.8f;
+            baseB.Cylinder(new Vector3(0f, -0.05f, 0f), Quaternion.identity, 0.13f, 0.09f, 0.34f, 5);
             const int n = 8;
             var rimTop = new Vector3[n];
             var rimBot = new Vector3[n];
@@ -117,21 +139,21 @@ namespace Sealebrities
             {
                 float a = a0 + i * Mathf.PI * 2f / n;
                 float r = R * PropUtil.Range(rng, 0.8f, 1.05f);
-                float y = 0.36f + PropUtil.Range(rng, -0.03f, 0.05f);
+                float y = 0.4f + PropUtil.Range(rng, -0.03f, 0.05f);
                 rimTop[i] = new Vector3(Mathf.Cos(a) * r, y, Mathf.Sin(a) * r);
-                rimBot[i] = new Vector3(Mathf.Cos(a) * r * 0.97f, y - 0.06f, Mathf.Sin(a) * r * 0.97f);
+                rimBot[i] = new Vector3(Mathf.Cos(a) * r * 0.94f, y - 0.12f, Mathf.Sin(a) * r * 0.94f);
             }
-            Vector3 ct = new Vector3(0f, 0.32f, 0f), cb = new Vector3(0f, 0.28f, 0f);
+            Vector3 ct = new Vector3(0f, 0.37f, 0f), cb = new Vector3(0f, 0.27f, 0f);
             for (int i = 0; i < n; i++)
             {
                 int j = (i + 1) % n;
-                b.Face3(ct, rimTop[i], rimTop[j], Vector3.up);
-                b.Face3(cb, rimBot[i], rimBot[j], Vector3.down);
+                topB.Face3(ct, rimTop[i], rimTop[j], Vector3.up);
+                baseB.Face3(cb, rimBot[i], rimBot[j], Vector3.down);
                 Vector3 outward = (rimTop[i] + rimTop[j]) * 0.5f;
                 outward.y = 0f;
-                b.QuadAuto(rimTop[i], rimTop[j], rimBot[j], rimBot[i], Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, outward);
+                rimB.QuadAuto(rimTop[i], rimTop[j], rimBot[j], rimBot[i], Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, outward);
             }
-            return mb.Build("CoralTable" + seed, 0.42f, R);
+            return mb.Build("CoralTable" + seed, 0.46f, R);
         }
 
         /// Sea fan: a flat fan of triangles (inner fan + outer band) with slightly jittered facets, two-sided.
@@ -355,17 +377,28 @@ namespace Sealebrities
                 if (PropRun.Due()) yield return null;
             }
 
-            // ---------------------------------------------------------------- scattered corals
-            int scattered = 0;
+            // ---------------------------------------------------------------- coral patches 6–12 m across with sand gaps
+            // (art bible §2.4: grouped colonies, about one per 3 m², instead of evenly sprinkled "confetti")
+            int coralPatches = 0;
             attempts = 0;
-            while (scattered < 420 && attempts < 6000)
+            while (coralPatches < 24 && attempts < 3000)
             {
                 attempts++;
-                Vector2 o = PropUtil.InDisc(rng, site.radius);
+                Vector2 o = PropUtil.InDisc(rng, site.radius * 0.95f);
                 float x = c.x + o.x, z = c.z + o.y;
-                if (!Valid(x, z, out float g)) continue;
-                Vector3 n = PropGround.Normal(x, z, 0.8f);
-                if (Place(batch, rng, new Vector3(x, g, z), n, RandomType(rng, 4, 2, 2, 2, 2, 1), PropUtil.Range(rng, 0.7f, 1.1f))) scattered++;
+                if (!Valid(x, z, out float g) || spacing.Blocked(x, z)) continue;
+                float pr = PropUtil.Range(rng, 3f, 6f);
+                int n = Mathf.RoundToInt(Mathf.PI * pr * pr / 3f);
+                for (int k = 0; k < n; k++)
+                {
+                    Vector2 po = PropUtil.InDisc(rng, pr);
+                    float px = x + po.x, pz = z + po.y;
+                    if (!Valid(px, pz, out float pg)) continue;
+                    Vector3 nrm = PropGround.Normal(px, pz, 0.8f);
+                    Place(batch, rng, new Vector3(px, pg, pz), nrm, RandomType(rng, 5, 3, 1, 2, 3, 1), PropUtil.Range(rng, 0.75f, 1.2f));
+                }
+                spacing.Add(x, z, pr + 3.5f);
+                coralPatches++;
                 if (PropRun.Due()) yield return null;
             }
 

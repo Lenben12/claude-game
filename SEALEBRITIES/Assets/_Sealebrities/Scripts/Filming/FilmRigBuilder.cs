@@ -4,36 +4,55 @@ using UnityEngine.Rendering;
 namespace Sealebrities
 {
     /// Builds the procedural hand camera models, one per camera gear tier:
-    /// T0 phone in a freezer bag, T1 action cam on a stick, T2 underwater camcorder,
+    /// T0 phone in a freezer bag, T1 action cam on a short stick, T2 underwater camcorder,
     /// T3 pro camera in a housing with two strobe arms, T4 cinema rig.
     /// Model frame: +Z = lens direction (same as the view), +Y up, the screen faces -Z (toward the player's eye).
-    /// Static parts are merged into one mesh per material; animated parts stay separate.
+    ///
+    /// Art bible §1.13 (How to Fish look): the camera is small and tucked into the lower corner, held by ONE soft
+    /// mitten (glove #343849, pads #2A2D3A, cuff = the player's cuff color, ≤ 0.18 m of sleeve), smooth low-poly
+    /// shading. Every tier is scaled to ≤ 0.62× of its old size and additionally fitted so camera + hand stay inside
+    /// ~240 × 260 px at 1080p (T3/T4 pro rigs: ~300 px); rigs that would become too tiny are pushed slightly further
+    /// away instead (FilmCameraRig.distance). The rig root sits at the camera body's center.
+    /// Static parts are merged into one mesh per material; animated parts (screen, REC, tally, zoom lens, lamp
+    /// diffusers, cuff) stay separate.
     public static class FilmRigBuilder
     {
         sealed class Ctx
         {
-            public Transform root, stat, dyn;
+            public Transform root, content, model, stat, dyn;
             public FilmCameraRig rig;
+            public bool hasGrip;
+            public Vector3 grip;          // model space: center of the gripped handle
+            public Vector3 gripEuler;     // model space: handle axis = local +Y of this rotation
         }
 
-        // shared palette; FilmMaterials.Surface maps these to flat, matte toy tones (low-poly look)
-        static readonly Color Neoprene = new Color(0.055f, 0.06f, 0.075f);
-        static readonly Color SuitAccent = new Color(0.1f, 0.72f, 0.82f);
-        static readonly Color GlovePad = new Color(0.17f, 0.17f, 0.19f);
+        /// Old models were laid out at 1.0; the art bible asks for 0.62× (T2 camcorder ≤ 0.11 m long).
+        public const float ModelScale = 0.62f;
+
+        // art bible §1.13 – hand
+        public static readonly Color Glove = new Color(0.204f, 0.220f, 0.286f);       // #343849
+        public static readonly Color GlovePad = new Color(0.165f, 0.176f, 0.227f);    // #2A2D3A
+        public static readonly Color DefaultCuff = new Color(0.247f, 0.722f, 0.769f); // #3FB8C4
+
+        // camera palette; FilmMaterials.Surface maps these to flat, matte toy tones
         static readonly Color LensGlass = new Color(0.02f, 0.025f, 0.035f);
         static readonly Color Chrome = new Color(0.78f, 0.79f, 0.8f);
         static readonly Color Rubber = new Color(0.07f, 0.07f, 0.075f);
         static readonly Color AnodBlack = new Color(0.11f, 0.115f, 0.125f);
         static readonly Vector3 AlongZ = new Vector3(90f, 0f, 0f);   // rotates a +Y primitive to point along +Z
 
-        public static FilmCameraRig Build(int tier)
+        public static FilmCameraRig Build(int tier) => Build(tier, DefaultCuff);
+
+        public static FilmCameraRig Build(int tier, Color cuff)
         {
             tier = Mathf.Clamp(tier, 0, 4);
             var rig = new FilmCameraRig { tier = tier };
             var rootGo = new GameObject("HandCamera_T" + tier);
             var c = new Ctx { root = rootGo.transform, rig = rig };
-            c.stat = Node(c.root, "Static", Vector3.zero, Vector3.zero);
-            c.dyn = Node(c.root, "Dynamic", Vector3.zero, Vector3.zero);
+            c.content = Node(c.root, "Content", Vector3.zero, Vector3.zero);
+            c.model = Node(c.content, "Model", Vector3.zero, Vector3.zero);
+            c.stat = Node(c.model, "Static", Vector3.zero, Vector3.zero);
+            c.dyn = Node(c.model, "Dynamic", Vector3.zero, Vector3.zero);
             rig.root = rootGo;
 
             switch (tier)
@@ -45,7 +64,22 @@ namespace Sealebrities
                 default: BuildCinemaRig(c); break;
             }
 
-            rig.owned.AddRange(FilmMesh.CombineStatic(c.stat, c.root));
+            // ---- fit: ≤ 0.62×, small enough for the screen budget, but never tiny (then it moves back instead)
+            Bounds mb = FilmMesh.LocalBounds(c.model, c.model);
+            bool pro = tier >= 3;
+            float fitW = pro ? 0.17f : 0.105f, fitH = pro ? 0.16f : 0.12f, minScale = pro ? 0.4f : 0.5f;
+            float sFit = Mathf.Min(ModelScale, fitW / Mathf.Max(0.01f, mb.size.x), fitH / Mathf.Max(0.01f, mb.size.y));
+            float s = Mathf.Max(sFit, minScale);
+            rig.modelScale = s;
+            rig.distance = Mathf.Clamp(s / Mathf.Max(0.05f, sFit), 1f, 1.6f);
+            c.model.localScale = new Vector3(s, s, s);
+            c.content.localPosition = -mb.center * s;   // the camera body's center sits at the rig root
+
+            // ---- the gloved mitten on the grip (real size, not scaled with the camera)
+            Transform handStatic = null;
+            if (c.hasGrip) handStatic = BuildMitten(c, c.grip * s, c.gripEuler, cuff);
+
+            rig.owned.AddRange(FilmMesh.CombineStaticMany(c.content, c.stat, handStatic));
             if (rig.zoomPart != null) rig.zoomPartBase = rig.zoomPart.localPosition;
             return rig;
         }
@@ -56,6 +90,8 @@ namespace Sealebrities
             r.receiveShadows = true;
             r.allowOcclusionWhenDynamic = false;
             r.motionVectorGenerationMode = MotionVectorGenerationMode.ForceNoMotion;
+            r.lightProbeUsage = LightProbeUsage.BlendProbes;
+            r.reflectionProbeUsage = ReflectionProbeUsage.Off;
         }
 
         // ================================================================== helpers
@@ -103,7 +139,14 @@ namespace Sealebrities
         static Transform Ball(Transform parent, string name, Vector3 p, float radius, Material mat)
             => Part(parent, name, FilmMesh.Sphere(radius, 10), mat, p);
 
-        /// Device screen (state material, REC dot and storage bar) on the dynamic layer plus a static glossy bezel.
+        static void Grip(Ctx c, Vector3 pos, Vector3 euler)
+        {
+            c.hasGrip = true;
+            c.grip = pos;
+            c.gripEuler = euler;
+        }
+
+        /// Device screen (state material, REC dot and storage bar) on the dynamic layer plus a static bezel.
         static void Screen(Ctx c, Vector3 pos, Vector3 euler, float w, float h)
         {
             Quaternion rot = Quaternion.Euler(euler);
@@ -137,45 +180,42 @@ namespace Sealebrities
             c.rig.tally = t.GetComponent<MeshRenderer>();
         }
 
-        /// Gloved right hand gripping a vertical handle centered at 'grip'. The forearm leaves the view toward the lower right.
-        static void Hand(Ctx c, Vector3 grip, Vector3 euler, float size)
+        // ================================================================== the mitten (art bible §1.13)
+        /// Soft gloved mitten gripping a vertical handle at 'gripPos' (content space, real size): one fist blob with a
+        /// curled finger lobe and a separate thumb, a short colored cuff and ≤ 0.18 m of sleeve toward the lower right.
+        /// Returns the node with the static parts (merged later); the cuff stays separate for color changes.
+        static Transform BuildMitten(Ctx c, Vector3 gripPos, Vector3 gripEuler, Color cuff)
         {
-            var h = Node(c.stat, "Hand", grip, euler);
-            h.localScale = new Vector3(size, size, size);
-            var glove = FilmMaterials.Surface(Neoprene, 0.32f);
-            var pad = FilmMaterials.Surface(GlovePad, 0.2f);
-            var accent = FilmMaterials.Surface(SuitAccent, 0.45f);
+            var hand = Node(c.content, "Hand", gripPos, gripEuler);
+            var stat = Node(hand, "HandStatic", Vector3.zero, Vector3.zero);
+            var glove = FilmMaterials.Flat(Glove);
+            var pad = FilmMaterials.Flat(GlovePad);
 
-            // back of the hand on the right side of the handle
-            Part(h, "HandBack", RB(0.036f, 0.09f, 0.078f, 0.016f), glove, new Vector3(0.03f, -0.004f, 0.006f), new Vector3(0f, 0f, -5f));
-            // four fingers wrapped around the far side of the handle (chunky, slightly cartoonish)
-            for (int i = 0; i < 4; i++)
-            {
-                float y = 0.031f - i * 0.0205f;
-                float len = i == 3 ? 0.058f : 0.068f;
-                Part(h, "Finger", RB(len, 0.0195f, 0.027f, 0.0095f), glove, new Vector3(0.003f, y, 0.027f), new Vector3(0f, -8f, 0f));
-                Part(h, "FingerTip", RB(0.021f, 0.0185f, 0.03f, 0.009f), pad, new Vector3(-0.026f + (i == 3 ? 0.006f : 0f), y, 0.012f), new Vector3(0f, 25f, 0f));
-            }
-            // thumb on the near side, pointing up-left
-            Part(h, "Thumb", RB(0.023f, 0.062f, 0.025f, 0.0112f), glove, new Vector3(0.006f, 0.018f, -0.03f), new Vector3(0f, 0f, 24f));
-            Part(h, "ThumbTip", RB(0.021f, 0.022f, 0.023f, 0.0104f), pad, new Vector3(-0.007f, 0.046f, -0.031f), new Vector3(0f, 0f, 24f));
+            // fist: the handle (local Y axis through the origin) disappears into its left part
+            Part(stat, "Fist", FilmMesh.Ellipsoid(new Vector3(0.033f, 0.043f, 0.039f)), glove, new Vector3(0.016f, 0f, 0.003f));
+            // curled fingers over the far side of the handle (the mitten's front lobe)
+            Part(stat, "Fingers", FilmMesh.Ellipsoid(new Vector3(0.029f, 0.041f, 0.019f)), glove, new Vector3(-0.005f, -0.002f, 0.027f));
+            // thumb on the near side, pointing up-left, with a darker pad on the tip
+            var thumb = Node(stat, "ThumbPivot", new Vector3(-0.007f, 0.022f, -0.029f), new Vector3(0f, 0f, 28f));
+            Part(thumb, "Thumb", FilmMesh.Ellipsoid(new Vector3(0.013f, 0.026f, 0.014f), 8, 6), glove, Vector3.zero);
+            Part(thumb, "ThumbPad", FilmMesh.Ellipsoid(new Vector3(0.0105f, 0.012f, 0.011f), 8, 5), pad, new Vector3(-0.002f, 0.018f, -0.003f));
+            // palm pad peeking out below the thumb
+            Part(stat, "PalmPad", FilmMesh.Ellipsoid(new Vector3(0.022f, 0.026f, 0.011f), 8, 5), pad, new Vector3(0.006f, -0.014f, -0.031f));
 
-            // wrist cuff + forearm toward the lower right / back
-            Vector3 wrist = new Vector3(0.042f, -0.052f, -0.012f);
-            Vector3 dir = new Vector3(0.42f, -0.62f, -0.66f).normalized;
+            // cuff + sleeve down and back toward the player: it leaves the frame after a few centimeters
+            // ("the sleeve barely enters the frame"), so hand + item stay inside the on-screen budget
+            Vector3 wrist = new Vector3(0.03f, -0.038f, -0.02f);
+            Vector3 dir = new Vector3(0.2f, -0.8f, -0.55f).normalized;
             Quaternion along = Quaternion.FromToRotation(Vector3.up, dir);
-            Part(h, "Cuff", FilmMesh.Frustum(0.037f, 0.034f, 0.03f, 16, true, false), accent, wrist + dir * 0.012f, along, Vector3.one);
-            Part(h, "Forearm", FilmMesh.Frustum(0.038f, 0.044f, 0.36f, 16, true, false), glove, wrist + dir * 0.2f, along, Vector3.one);
-            Part(h, "SleeveStripe", FilmMesh.Frustum(0.0445f, 0.0455f, 0.018f, 16, false, false), accent, wrist + dir * 0.13f, along, Vector3.one);
+            var cuffT = Part(hand, "Cuff", FilmMesh.Frustum(0.031f, 0.034f, 0.04f, 10, true, false), FilmMaterials.Flat(cuff), wrist + dir * 0.02f, along, Vector3.one);
+            c.rig.cuff = cuffT.GetComponent<MeshRenderer>();
+            Part(stat, "Sleeve", FilmMesh.Frustum(0.034f, 0.04f, 0.14f, 10, false, false), glove, wrist + dir * 0.11f, along, Vector3.one);
+            return stat;
         }
 
         // ================================================================== T0: phone in a freezer bag
         static void BuildPhone(Ctx c)
         {
-            var r = c.rig;
-            r.hipPos = new Vector3(0.17f, -0.155f, 0.40f); r.hipRot = Quaternion.Euler(4f, -10f, -6f);
-            r.aimPos = new Vector3(0.085f, -0.105f, 0.34f); r.aimRot = Quaternion.Euler(2f, -4f, 0f);
-
             var body = FilmMaterials.Surface(new Color(0.1f, 0.1f, 0.115f), 0.78f, 0.25f);
             var frame = FilmMaterials.Surface(new Color(0.58f, 0.6f, 0.64f), 0.72f, 0.85f);
             var glass = FilmMaterials.Surface(LensGlass, 0.96f, 0.3f);
@@ -193,7 +233,6 @@ namespace Sealebrities
                 Part(c.stat, "Lens", FilmMesh.Cylinder(0.0062f, 0.0028f, 20), glass, p + new Vector3(0f, 0f, 0.0004f), AlongZ);
             }
             Part(c.stat, "Flash", FilmMesh.Cylinder(0.0035f, 0.002f, 12), FilmMaterials.Surface(new Color(0.95f, 0.9f, 0.75f), 0.6f), new Vector3(-0.044f, 0.024f, 0.0074f), AlongZ);
-            // side buttons
             Part(c.stat, "Button", RB(0.022f, 0.0035f, 0.003f, 0.0012f), frame, new Vector3(-0.03f, 0.0372f, 0f));
 
             Screen(c, new Vector3(0f, 0f, -0.0047f), Vector3.zero, 0.138f, 0.063f);
@@ -210,16 +249,13 @@ namespace Sealebrities
             Part(c.stat, "Drop", FilmMesh.Sphere(0.0026f, 8), water, new Vector3(-0.061f, -0.039f, -0.0083f));
             Part(c.stat, "Drop", FilmMesh.Sphere(0.003f, 8), water, new Vector3(0.024f, -0.04f, 0.0095f));
 
-            Hand(c, new Vector3(0.083f, -0.006f, 0.006f), Vector3.zero, 0.92f);
+            // held at its right end (the mitten wraps the last few centimeters)
+            Grip(c, new Vector3(0.07f, -0.006f, 0.006f), Vector3.zero);
         }
 
-        // ================================================================== T1: action cam on a stick
+        // ================================================================== T1: action cam on a short stick
         static void BuildActionCam(Ctx c)
         {
-            var r = c.rig;
-            r.hipPos = new Vector3(0.16f, -0.08f, 0.44f); r.hipRot = Quaternion.Euler(2f, -12f, -4f);
-            r.aimPos = new Vector3(0.075f, -0.078f, 0.39f); r.aimRot = Quaternion.Euler(0f, -4f, 0f);
-
             var body = FilmMaterials.Surface(new Color(0.08f, 0.08f, 0.088f), 0.35f, 0.1f);
             var glass = FilmMaterials.Surface(LensGlass, 0.96f, 0.3f);
             var chrome = FilmMaterials.Surface(Chrome, 0.8f, 0.9f);
@@ -242,30 +278,24 @@ namespace Sealebrities
             Part(c.stat, "Mount", RB(0.024f, 0.02f, 0.02f, 0.003f), plastic, new Vector3(0f, -0.04f, 0f));
             Part(c.stat, "ThumbScrew", FilmMesh.Cylinder(0.0065f, 0.034f, 12), FilmMaterials.Surface(new Color(1f, 0.45f, 0.1f), 0.45f), new Vector3(0f, -0.043f, 0f), new Vector3(0f, 0f, 90f));
 
-            // telescopic stick down to the hand
-            Vector3 top = new Vector3(0f, -0.05f, 0f), bottom = new Vector3(0.012f, -0.31f, -0.042f);
-            Rod(c.stat, "Stick1", top, Vector3.Lerp(top, bottom, 0.38f), 0.0072f, alu);
-            Rod(c.stat, "Stick2", Vector3.Lerp(top, bottom, 0.36f), Vector3.Lerp(top, bottom, 0.7f), 0.0088f, alu);
-            Rod(c.stat, "Stick3", Vector3.Lerp(top, bottom, 0.68f), bottom, 0.0104f, alu);
-            Rod(c.stat, "Collar", Vector3.Lerp(top, bottom, 0.355f), Vector3.Lerp(top, bottom, 0.385f), 0.0098f, plastic);
-            Rod(c.stat, "Collar", Vector3.Lerp(top, bottom, 0.675f), Vector3.Lerp(top, bottom, 0.705f), 0.0114f, plastic);
+            // short telescopic stick (collapsed) down to the hand
+            Vector3 top = new Vector3(0f, -0.05f, 0f), bottom = new Vector3(0.008f, -0.15f, -0.02f);
+            Rod(c.stat, "Stick1", top, Vector3.Lerp(top, bottom, 0.45f), 0.0072f, alu);
+            Rod(c.stat, "Stick2", Vector3.Lerp(top, bottom, 0.43f), bottom, 0.0088f, alu);
+            Rod(c.stat, "Collar", Vector3.Lerp(top, bottom, 0.42f), Vector3.Lerp(top, bottom, 0.47f), 0.0098f, plastic);
             // bright yellow floating grip (it floats if you drop it!)
-            Vector3 g0 = Vector3.Lerp(top, bottom, 0.74f), g1 = Vector3.Lerp(top, bottom, 1.04f);
-            Rod(c.stat, "FloatGrip", g0, g1, 0.0175f, FilmMaterials.Surface(new Color(1f, 0.8f, 0.1f), 0.15f), 16);
-            Rod(c.stat, "Strap", g1, g1 + new Vector3(0.02f, -0.035f, -0.01f), 0.0035f, plastic, 8);
+            Vector3 g0 = Vector3.Lerp(top, bottom, 0.5f), g1 = Vector3.Lerp(top, bottom, 1.08f);
+            Rod(c.stat, "FloatGrip", g0, g1, 0.0165f, FilmMaterials.Surface(new Color(1f, 0.8f, 0.1f), 0.15f), 16);
+            Rod(c.stat, "Strap", g1, g1 + new Vector3(0.016f, -0.026f, -0.008f), 0.0032f, plastic, 8);
 
             Vector3 dir = (top - bottom).normalized;
-            Vector3 gripCenter = Vector3.Lerp(g0, g1, 0.55f);
-            Hand(c, gripCenter, Quaternion.FromToRotation(Vector3.up, dir).eulerAngles, 0.95f);
+            Grip(c, Vector3.Lerp(g0, g1, 0.6f), Quaternion.FromToRotation(Vector3.up, dir).eulerAngles);
         }
 
         // ================================================================== T2: underwater camcorder
         static void BuildCamcorder(Ctx c)
         {
             var r = c.rig;
-            r.hipPos = new Vector3(0.19f, -0.17f, 0.47f); r.hipRot = Quaternion.Euler(3f, -10f, -5f);
-            r.aimPos = new Vector3(0.1f, -0.13f, 0.42f); r.aimRot = Quaternion.Euler(1f, -5f, 0f);
-
             var yellow = FilmMaterials.Surface(new Color(1f, 0.74f, 0.08f), 0.55f);
             var rubber = FilmMaterials.Surface(Rubber, 0.25f);
             var glass = FilmMaterials.Surface(LensGlass, 0.96f, 0.3f);
@@ -298,16 +328,13 @@ namespace Sealebrities
 
             // hand strap on the right side
             Part(c.stat, "HandStrap", RB(0.014f, 0.062f, 0.12f, 0.006f), rubber, new Vector3(0.05f, -0.004f, -0.006f));
-            Hand(c, new Vector3(0.064f, -0.012f, -0.012f), Vector3.zero, 1f);
+            Grip(c, new Vector3(0.064f, -0.012f, -0.012f), Vector3.zero);
         }
 
         // ================================================================== T3: pro camera in a housing with strobe arms
         static void BuildProHousing(Ctx c)
         {
             var r = c.rig;
-            r.hipPos = new Vector3(0.22f, -0.225f, 0.56f); r.hipRot = Quaternion.Euler(4f, -9f, -4f);
-            r.aimPos = new Vector3(0.1f, -0.205f, 0.5f); r.aimRot = Quaternion.Euler(2f, -4f, 0f);
-
             var housing = FilmMaterials.Surface(new Color(0.16f, 0.19f, 0.24f), 0.6f, 0.75f);
             var rubber = FilmMaterials.Surface(Rubber, 0.25f);
             var anod = FilmMaterials.Surface(AnodBlack, 0.55f, 0.7f);
@@ -334,7 +361,7 @@ namespace Sealebrities
             Screen(c, new Vector3(-0.012f, 0.012f, -0.0588f), Vector3.zero, 0.11f, 0.07f);
             Tally(c, new Vector3(0.078f, 0.058f, 0.058f), 0.004f);
 
-            // handles + articulated strobe arms
+            // handles + compact strobe arms folded up and forward (keeps the rig narrow on screen)
             for (int s = -1; s <= 1; s += 2)
             {
                 Part(c.stat, "HandleBar", RB(0.06f, 0.02f, 0.03f, 0.006f), anod, new Vector3(s * 0.12f, -0.066f, 0f));
@@ -342,29 +369,26 @@ namespace Sealebrities
                 Part(c.stat, "HandleCap", FilmMesh.Cylinder(0.013f, 0.012f, 14), chrome, new Vector3(s * 0.152f, 0.038f, 0f), Vector3.zero);
 
                 Vector3 j0 = new Vector3(s * 0.152f, 0.05f, 0f);
-                Vector3 j1 = new Vector3(s * 0.21f, 0.105f, 0.02f);
-                Vector3 j2 = new Vector3(s * 0.245f, 0.12f, 0.075f);
+                Vector3 j1 = new Vector3(s * 0.178f, 0.105f, 0.03f);
+                Vector3 j2 = new Vector3(s * 0.165f, 0.152f, 0.09f);
                 Ball(c.stat, "Joint", j0, 0.0145f, anod);
                 Rod(c.stat, "Arm", j0, j1, 0.0105f, anod);
                 Ball(c.stat, "Joint", j1, 0.0155f, anod);
                 Rod(c.stat, "Arm", j1, j2, 0.0105f, anod);
                 Ball(c.stat, "Joint", j2, 0.0145f, anod);
-                Part(c.stat, "StrobeHead", FilmMesh.Cylinder(0.031f, 0.055f, 22), FilmMaterials.Surface(new Color(0.13f, 0.13f, 0.14f), 0.45f, 0.4f), j2 + new Vector3(0f, 0f, 0.035f), AlongZ);
-                Part(c.stat, "StrobeRing", FilmMesh.Cylinder(0.0325f, 0.008f, 22), orange, j2 + new Vector3(0f, 0f, 0.058f), AlongZ);
-                var glow = Part(c.dyn, "StrobeDiffuser", FilmMesh.Cylinder(0.028f, 0.004f, 22), FilmMaterials.LampDiffuser(false), j2 + new Vector3(0f, 0f, 0.0635f), AlongZ);
+                Part(c.stat, "StrobeHead", FilmMesh.Cylinder(0.029f, 0.05f, 22), FilmMaterials.Surface(new Color(0.13f, 0.13f, 0.14f), 0.45f, 0.4f), j2 + new Vector3(0f, 0f, 0.033f), AlongZ);
+                Part(c.stat, "StrobeRing", FilmMesh.Cylinder(0.0305f, 0.008f, 22), orange, j2 + new Vector3(0f, 0f, 0.054f), AlongZ);
+                var glow = Part(c.dyn, "StrobeDiffuser", FilmMesh.Cylinder(0.026f, 0.004f, 22), FilmMaterials.LampDiffuser(false), j2 + new Vector3(0f, 0f, 0.0595f), AlongZ);
                 r.lampGlows.Add(glow.GetComponent<MeshRenderer>());
             }
 
-            Hand(c, new Vector3(0.152f, -0.03f, 0f), Vector3.zero, 1.05f);
+            Grip(c, new Vector3(0.152f, -0.03f, 0f), Vector3.zero);
         }
 
         // ================================================================== T4: cinema rig
         static void BuildCinemaRig(Ctx c)
         {
             var r = c.rig;
-            r.hipPos = new Vector3(0.25f, -0.275f, 0.64f); r.hipRot = Quaternion.Euler(4f, -8f, -4f);
-            r.aimPos = new Vector3(0.115f, -0.25f, 0.58f); r.aimRot = Quaternion.Euler(2f, -4f, 0f);
-
             var red = FilmMaterials.Surface(new Color(0.55f, 0.07f, 0.06f), 0.55f, 0.65f);
             var black = FilmMaterials.Surface(new Color(0.05f, 0.05f, 0.055f), 0.35f, 0.2f);
             var rubber = FilmMaterials.Surface(Rubber, 0.25f);
@@ -396,7 +420,7 @@ namespace Sealebrities
             Part(c.stat, "TopPost", RB(0.022f, 0.045f, 0.022f, 0.006f), anod, new Vector3(0f, 0.118f, 0.08f));
             Part(c.stat, "TopPost", RB(0.022f, 0.045f, 0.022f, 0.006f), anod, new Vector3(0f, 0.118f, -0.08f));
 
-            // side handles + LED panels on arms with yellow float collars
+            // side handles + upright LED panels on short arms with yellow float collars (compact silhouette)
             for (int s = -1; s <= 1; s += 2)
             {
                 Part(c.stat, "HandleBar", RB(0.07f, 0.024f, 0.035f, 0.007f), anod, new Vector3(s * 0.15f, -0.08f, 0f));
@@ -404,33 +428,33 @@ namespace Sealebrities
                 Part(c.stat, "HandleCap", FilmMesh.Cylinder(0.014f, 0.012f, 14), chrome, new Vector3(s * 0.19f, 0.028f, 0f), Vector3.zero);
 
                 Vector3 j0 = new Vector3(s * 0.19f, 0.042f, 0f);
-                Vector3 j1 = new Vector3(s * 0.25f, 0.11f, 0.035f);
-                Vector3 j2 = new Vector3(s * 0.275f, 0.135f, 0.07f);
+                Vector3 j1 = new Vector3(s * 0.212f, 0.105f, 0.035f);
+                Vector3 j2 = new Vector3(s * 0.2f, 0.16f, 0.08f);
                 Ball(c.stat, "Joint", j0, 0.016f, anod);
                 Rod(c.stat, "Arm", j0, j1, 0.012f, anod);
-                Rod(c.stat, "Float", Vector3.Lerp(j0, j1, 0.25f), Vector3.Lerp(j0, j1, 0.75f), 0.026f, foam, 16);
+                Rod(c.stat, "Float", Vector3.Lerp(j0, j1, 0.2f), Vector3.Lerp(j0, j1, 0.8f), 0.024f, foam, 16);
                 Ball(c.stat, "Joint", j1, 0.017f, anod);
                 Rod(c.stat, "Arm", j1, j2, 0.012f, anod);
                 Ball(c.stat, "Joint", j2, 0.016f, anod);
-                Vector3 panel = j2 + new Vector3(s * 0.005f, 0.02f, 0.03f);
-                Part(c.stat, "LEDPanel", RB(0.12f, 0.066f, 0.03f, 0.008f), FilmMaterials.Surface(new Color(0.18f, 0.18f, 0.2f), 0.45f, 0.5f), panel);
-                var glow = Part(c.dyn, "LEDDiffuser", FilmMesh.Box(new Vector3(0.106f, 0.052f, 0.004f)), FilmMaterials.LampDiffuser(false), panel + new Vector3(0f, 0f, 0.0155f));
+                Vector3 panel = j2 + new Vector3(s * 0.008f, 0.045f, 0.03f);
+                Part(c.stat, "LEDPanel", RB(0.062f, 0.1f, 0.03f, 0.008f), FilmMaterials.Surface(new Color(0.18f, 0.18f, 0.2f), 0.45f, 0.5f), panel);
+                var glow = Part(c.dyn, "LEDDiffuser", FilmMesh.Box(new Vector3(0.05f, 0.086f, 0.004f)), FilmMaterials.LampDiffuser(false), panel + new Vector3(0f, 0f, 0.0155f));
                 r.lampGlows.Add(glow.GetComponent<MeshRenderer>());
             }
 
             // monitor on an arm, right of center, with sun hood
-            Vector3 mon = new Vector3(0.07f, 0.205f, -0.1f);
+            Vector3 mon = new Vector3(0.06f, 0.2f, -0.1f);
             Rod(c.stat, "MonitorArm", new Vector3(0f, 0.165f, -0.06f), mon + new Vector3(-0.03f, -0.04f, 0.02f), 0.009f, anod);
             Ball(c.stat, "Joint", mon + new Vector3(-0.03f, -0.04f, 0.02f), 0.013f, anod);
-            Part(c.stat, "Monitor", RB(0.17f, 0.105f, 0.03f, 0.008f), black, mon);
-            Part(c.stat, "HoodTop", RB(0.172f, 0.004f, 0.045f, 0.0015f), black, mon + new Vector3(0f, 0.054f, -0.03f));
-            Part(c.stat, "HoodSide", RB(0.004f, 0.107f, 0.045f, 0.0015f), black, mon + new Vector3(-0.086f, 0f, -0.03f));
-            Part(c.stat, "HoodSide", RB(0.004f, 0.107f, 0.045f, 0.0015f), black, mon + new Vector3(0.086f, 0f, -0.03f));
-            Screen(c, mon + new Vector3(0f, 0f, -0.0165f), Vector3.zero, 0.15f, 0.088f);
+            Part(c.stat, "Monitor", RB(0.15f, 0.095f, 0.03f, 0.008f), black, mon);
+            Part(c.stat, "HoodTop", RB(0.152f, 0.004f, 0.045f, 0.0015f), black, mon + new Vector3(0f, 0.049f, -0.03f));
+            Part(c.stat, "HoodSide", RB(0.004f, 0.097f, 0.045f, 0.0015f), black, mon + new Vector3(-0.076f, 0f, -0.03f));
+            Part(c.stat, "HoodSide", RB(0.004f, 0.097f, 0.045f, 0.0015f), black, mon + new Vector3(0.076f, 0f, -0.03f));
+            Screen(c, mon + new Vector3(0f, 0f, -0.0165f), Vector3.zero, 0.132f, 0.078f);
             Tally(c, new Vector3(-0.09f, 0.075f, 0.131f), 0.005f);
             Part(c.stat, "RecButton", FilmMesh.Cylinder(0.011f, 0.008f, 16), FilmMaterials.Surface(new Color(0.9f, 0.1f, 0.08f), 0.5f), new Vector3(0.07f, -0.05f, -0.146f), AlongZ);
 
-            Hand(c, new Vector3(0.19f, -0.045f, 0f), Vector3.zero, 1.1f);
+            Grip(c, new Vector3(0.19f, -0.045f, 0f), Vector3.zero);
         }
     }
 }

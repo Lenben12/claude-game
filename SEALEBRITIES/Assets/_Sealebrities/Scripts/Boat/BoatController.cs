@@ -5,6 +5,10 @@ namespace Sealebrities
 {
     /// The player's boat "Rostlaube": buoyancy on Waves, driving from the helm, anchor, effects and engine audio.
     /// Implements IBoat (Refs.Boat). Local space: +Z bow, y = 0 design waterline, deck at BoatHull.DeckY.
+    /// Driving starts ONLY at the wheel: standing on the deck within HelmRange of the driver seat (feedback #8).
+    /// Co-op: while NetFlags.BoatRemote another machine simulates the boat – physics and driver input are skipped,
+    /// the rigidbody turns kinematic and the Net module moves Root (or calls ApplyRemotePose); passengers on deck are
+    /// carried by the player's platform code. The seat refuses while NetFlags.SeatTakenByOther.
     public class BoatController : MonoBehaviour, IBoat
     {
         // ------------------------------------------------------------------ tuning
@@ -13,6 +17,8 @@ namespace Sealebrities
         const float DampC = 1100f;       // N per m/s per point
         const float MaxSpeed = 11f;      // m/s at boatSpeed 1
         const float ExitMaxSpeed = 3f;   // the driver can only get up below this speed
+        /// Max horizontal distance between the player (on deck) and the driver seat to take the wheel.
+        public const float HelmRange = 2f;
 
         static readonly Vector3[] BuoyPts =
         {
@@ -22,10 +28,9 @@ namespace Sealebrities
             new Vector3(-0.45f, -0.3f, 2.6f), new Vector3(0.45f, -0.3f, 2.6f),
         };
 
-        static bool helpShown;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { helpShown = false; }
+        static void ResetStatics() { AnchorToggledLocally = null; }
 
         // ------------------------------------------------------------------ state
         Rigidbody rb;
@@ -49,6 +54,8 @@ namespace Sealebrities
         bool anchored;
         AnchorState anchorState = AnchorState.Stowed;
         Vector3 anchorPoint, anchorFloor;
+        Vector3 raiseLastStow;
+        bool raiseStowValid;
         LineRenderer rope;
         readonly Vector3[] ropePts = new Vector3[12];
 
@@ -59,11 +66,27 @@ namespace Sealebrities
         // controls hint shown as the interaction prompt while driving (PlayerInteractor is inactive while seated)
         string drivePrompt;
         Language drivePromptLang;
+        string dpFwd, dpBack, dpLeft, dpRight, dpAnchor, dpExit;
+
+        // co-op: simulated elsewhere (NetFlags.BoatRemote)
+        bool remote;
+        Vector3 remoteVel, lastRemotePos;
+        bool lastRemoteValid;
+        float remoteThrottle, remoteSteer, remoteControlsTime = -10f;
 
         // ------------------------------------------------------------------ IBoat
         public Transform Root => transform;
         public bool PlayerDriving => driving;
         public bool Anchored => anchored;
+        /// True while another co-op machine simulates the boat (NetFlags.BoatRemote).
+        public bool IsRemote => remote;
+
+        /// Raised when the LOCAL player drops (true) or raises (false) the anchor – the Net module forwards it to the
+        /// machine that simulates the boat (SetAnchoredRemote).
+        public static event System.Action<bool> AnchorToggledLocally;
+
+        /// The local player is on the deck next to the wheel, but another player is driving (shows "Besetzt").
+        public bool HelmOccupied => NetFlags.SeatTakenByOther && !driving && InHelmReach();
         public Vector3 RescuePoint => transform.TransformPoint(parts != null ? parts.rescueLocal : new Vector3(0f, 1.25f, -1.9f));
 
         public bool PlayerAboard
@@ -93,9 +116,13 @@ namespace Sealebrities
             {
                 rb.position = position;
                 rb.rotation = rot;
-                rb.linearVelocity = Vector3.zero;
-                rb.angularVelocity = Vector3.zero;
+                if (!rb.isKinematic)
+                {
+                    rb.linearVelocity = Vector3.zero;
+                    rb.angularVelocity = Vector3.zero;
+                }
             }
+            lastRemoteValid = false;
             transform.SetPositionAndRotation(position, rot);
             throttle = 0f;
             steer = 0f;
@@ -162,6 +189,7 @@ namespace Sealebrities
             GameEvents.ReturnedToMenu += OnReturnedToMenu;
             GameEvents.GearChanged += OnGearChanged;
             GameEvents.DayStarted += OnDayStarted;
+            BoatSurface.BoatBody = rb;
 
             PlaceAt(spawnPos, spawnYaw);
             DropAnchor(true);
@@ -177,6 +205,7 @@ namespace Sealebrities
             if (rope != null) Destroy(rope.gameObject);
             if (parts != null && parts.anchor != null && parts.anchor.parent != transform) Destroy(parts.anchor.gameObject);
             if (ReferenceEquals(Refs.Boat, this)) Refs.Boat = null;
+            if (BoatSurface.BoatBody == rb) BoatSurface.BoatBody = null;
         }
 
         void OnGameStarted()
@@ -186,17 +215,31 @@ namespace Sealebrities
             towing = false;
             anchorHintShown = false;
             OnGearChanged();
+            // a co-op guest takes pose and anchor from the owner's stream (placing it at the dock here would leave the
+            // anchor lying at the dock while the hull follows the owner out at sea)
+            if (Net.IsClient) return;
             anchored = true;
             PlaceAt(spawnPos, spawnYaw);
         }
 
         /// After a night's sleep the boat is back at the dock, like the player is back in the hut.
         /// Same "slept" check as the player module: the midnight rollover (clock not at morning) does not move it.
+        /// Online the player module teleports everybody to the hut on a slept morning, so a leftover driver seat or a
+        /// player still counted as aboard never keeps the boat out at sea (the Net module took the wheel back already).
         void OnDayStarted(int day)
         {
             var gm = GameManager.I;
-            if (driving || PlayerAboard || gm == null || !gm.InGame) return;
+            if (remote || gm == null || !gm.InGame) return;
             if (Mathf.Abs(gm.State.timeOfDay - GameManager.MorningTime) > 0.01f) return;
+            if (Net.IsOnline)
+            {
+                if (driving)
+                {
+                    driving = false;
+                    ClearDrivePrompt();
+                }
+            }
+            else if (driving || PlayerAboard) return;
             towing = false;
             anchored = true;
             PlaceAt(spawnPos, spawnYaw);   // re-drops the anchor at the dock
@@ -217,32 +260,57 @@ namespace Sealebrities
         }
 
         // ------------------------------------------------------------------ helm / ladder / anchor (called by interactables)
+        static IPlayer LocalPlayer
+        {
+            get
+            {
+                var p = Refs.Player;
+                if (p == null || (p is Object o && o == null)) return null;
+                return p;
+            }
+        }
+
+        /// The local player stands on the deck (not in the water, not seated) within HelmRange of the driver seat.
+        bool InHelmReach()
+        {
+            var p = LocalPlayer;
+            if (p == null || parts == null || parts.seat == null || p.IsInWater || p.IsUnderwater || p.IsSeated || p.IsFainting) return false;
+            Transform r = p.Root;
+            if (r == null || !PlayerAboard) return false;
+            Vector3 d = r.position - parts.seat.position;
+            d.y = 0f;
+            return d.sqrMagnitude <= HelmRange * HelmRange;
+        }
+
         public bool CanEnterHelm()
         {
-            var p = Refs.Player;
             // cooldown: the same E press that gets the driver up must not re-seat them through the interactor
             if (Time.frameCount == exitFrame || Time.time - exitTime < 0.4f) return false;
-            return !driving && p != null && GameManager.I != null && GameManager.I.InGame && !p.IsInWater && !p.IsSeated && !p.IsFainting;
+            if (driving || NetFlags.SeatTakenByOther || GameManager.I == null || !GameManager.I.InGame) return false;
+            return InHelmReach();
         }
 
         public void EnterHelm()
         {
             if (!CanEnterHelm()) return;
-            Refs.Player.SetSeated(parts.seat);
+            Hands.StowAll();   // both hands on the wheel
+            LocalPlayer.SetSeated(parts.seat);
             driving = true;
             seatedFrame = Time.frameCount;
             seatedTime = Time.time;
             throttle = 0f;
-            if (!helpShown)
+            // the controls are shown as the centre prompt while seated – no duplicate toast on the first sit
+            if (anchored)
             {
-                helpShown = true;
-                GameEvents.RaiseToast(Loc.Tr("W/S Gas, A/D lenken, Q Anker, E aussteigen", "W/S throttle, A/D steer, Q anchor, E get up"));
-            }
-            else if (anchored)
-            {
-                GameEvents.RaiseToast(Loc.Tr("Der Anker ist unten – Q zum Lichten", "The anchor is down – Q to raise it"));
+                GameEvents.RaiseToast(AnchorHint());
                 anchorHintShown = true;
             }
+        }
+
+        string AnchorHint()
+        {
+            string q = GameInput.BindingLabel(GameAction.Anchor);
+            return Loc.Tr($"Der Anker ist unten – {q} zum Lichten", $"The anchor is down – {q} to raise it");
         }
 
         public void ExitHelm()
@@ -268,10 +336,10 @@ namespace Sealebrities
         public void ClimbAboard()
         {
             if (!CanClimbAboard()) return;
-            var p = Refs.Player;
+            var p = LocalPlayer;
             Vector3 pos = transform.TransformPoint(parts.ladderDeckLocal);
             p.TeleportTo(pos, transform.eulerAngles.y);
-            p.RefillAir();
+            // no instant refill: the tank is refilled by resting on the deck (Player module, feedback #17)
             if (GameManager.I != null && GameManager.I.InGame) Footage.BankDive();
             BoatSynth.PlayAt(BoatSynth.Splash, pos, 0.35f, 1.2f, 30f);
         }
@@ -294,6 +362,7 @@ namespace Sealebrities
             BoatSynth.PlayAt(BoatSynth.Thunk, pos, 0.45f, 1.15f, 30f);
         }
 
+        /// Local player action (winch or the anchor key). Forwarded to the simulating machine in co-op.
         public void ToggleAnchor()
         {
             if (anchored) RaiseAnchor();
@@ -301,6 +370,103 @@ namespace Sealebrities
             {
                 DropAnchor(false);
                 if (driving) throttle = 0f;
+            }
+            AnchorToggledLocally?.Invoke(anchored);
+        }
+
+        /// Co-op: applies the anchor state decided on another machine (no event, short toast only when it changes).
+        public void SetAnchoredRemote(bool down) => SetAnchoredRemote(down, false);
+
+        /// Co-op: instant = silent correction from the owner's stream (drop-in join, slept morning, toggle races):
+        /// down → the anchor lies under the CURRENT roller; up → stowed on deck. No toast, no animation.
+        public void SetAnchoredRemote(bool down, bool instant)
+        {
+            if (!instant)
+            {
+                if (down == anchored) return;
+                if (down) DropAnchor(false);
+                else RaiseAnchor();
+                return;
+            }
+            if (parts == null || parts.anchor == null) return;
+            if (down)
+            {
+                if (anchored && !AnchorFar) return;
+                DropAnchor(true);
+                return;
+            }
+            if (!anchored && anchorState == AnchorState.Stowed) return;
+            anchored = false;
+            parts.anchor.SetParent(transform, false);
+            parts.anchor.localPosition = parts.anchorStowLocal;
+            parts.anchor.localRotation = Quaternion.identity;
+            anchorState = AnchorState.Stowed;
+            raiseStowValid = false;
+            if (rope != null) rope.enabled = false;
+        }
+
+        /// The anchor lies on the seabed far away from the roller (stale state after a remote pose jump).
+        public bool AnchorFar
+        {
+            get
+            {
+                if (anchorState != AnchorState.Down || parts == null || parts.anchor == null) return false;
+                Vector3 d = parts.anchor.position - transform.TransformPoint(parts.rollerLocal);
+                d.y = 0f;
+                return d.sqrMagnitude > 60f * 60f;
+            }
+        }
+
+        /// Co-op: throttle / steering of the remote driver for the wheel, outboard, engine sound and smoke on this machine.
+        public void SetRemoteControls(float throttleInput, float steerInput)
+        {
+            remoteThrottle = Mathf.Clamp(throttleInput, -1f, 1f);
+            remoteSteer = Mathf.Clamp(steerInput, -1f, 1f);
+            remoteControlsTime = Time.time;
+        }
+
+        /// Co-op: pose from the simulating machine (alternative to setting Root directly). Keeps the kinematic body in sync.
+        public void ApplyRemotePose(Vector3 position, Quaternion rotation)
+        {
+            if (rb != null && rb.isKinematic)
+            {
+                rb.position = position;
+                rb.rotation = rotation;
+            }
+            transform.SetPositionAndRotation(position, rotation);
+        }
+
+        /// Follows NetFlags.BoatRemote. The Net module (NetBoatSync) normally switches the rigidbody itself (it also
+        /// hands over the last streamed velocity); the body is only touched here when it is not yet in the right mode.
+        void SetRemote(bool on)
+        {
+            remote = on;
+            lastRemoteValid = false;
+            beachedTimer = 0f;
+            flippedTimer = 0f;
+            if (rb == null) return;
+            if (on)
+            {
+                if (!rb.isKinematic)
+                {
+                    rb.linearVelocity = Vector3.zero;
+                    rb.angularVelocity = Vector3.zero;
+                    rb.isKinematic = true;
+                    rb.interpolation = RigidbodyInterpolation.None;
+                }
+            }
+            else
+            {
+                if (rb.isKinematic)
+                {
+                    rb.isKinematic = false;
+                    rb.interpolation = RigidbodyInterpolation.Interpolate;
+                    rb.position = transform.position;
+                    rb.rotation = transform.rotation;
+                    rb.linearVelocity = Vector3.ClampMagnitude(remoteVel, MaxSpeed * 1.5f);
+                    rb.angularVelocity = Vector3.zero;
+                }
+                if (anchored) anchorPoint = transform.position;
             }
         }
 
@@ -332,6 +498,7 @@ namespace Sealebrities
         {
             anchored = false;
             anchorState = AnchorState.Raising;
+            raiseStowValid = false;
             anchorHintShown = false;
             GameEvents.RaiseToast(Loc.Tr("Anker gelichtet", "Anchor raised"));
         }
@@ -340,13 +507,17 @@ namespace Sealebrities
         void Update()
         {
             float dt = Time.deltaTime;
-            var p = Refs.Player;
+            var p = LocalPlayer;
             bool inGame = GameManager.I != null && GameManager.I.InGame;
 
-            if (driving && Time.time - seatedTime > 0.5f && (p == null || !p.IsSeated)) driving = false;
+            bool wantRemote = NetFlags.BoatRemote;
+            if (wantRemote != remote) SetRemote(wantRemote);
 
-            bool canControl = driving && inGame && !UIState.BlocksGameplay;
-            if (canControl && Time.frameCount != seatedFrame && Time.time - seatedTime > 0.25f && GameInput.InteractPressed)
+            if (driving && Time.time - seatedTime > 0.5f && (p == null || !p.IsSeated)) driving = false;
+            // (co-op: a lost race for the seat is resolved by the Net module, which calls ExitHelm)
+
+            bool seatedInput = driving && inGame && !UIState.BlocksGameplay;
+            if (seatedInput && Time.frameCount != seatedFrame && Time.time - seatedTime > 0.25f && GameInput.InteractPressed)
             {
                 if (Mathf.Abs(forwardSpeed) > ExitMaxSpeed)
                 {
@@ -359,23 +530,36 @@ namespace Sealebrities
                 else
                 {
                     ExitHelm();
-                    canControl = false;
+                    seatedInput = false;
                 }
             }
             if (inGame && !UIState.BlocksGameplay && GameInput.AnchorPressed && (driving || PlayerAboard)) ToggleAnchor();
 
             // controls hint (UIHud hides prompts while menus block gameplay)
-            if (canControl) InteractionPrompt.Text = DrivePrompt();
+            if (seatedInput) InteractionPrompt.Text = DrivePrompt();
             else if (!driving) ClearDrivePrompt();
 
+            // driver input only when this machine simulates the boat
+            bool canControl = seatedInput && !remote;
             float tThr = canControl ? GameInput.Move.y : 0f;
             float tSteer = canControl ? GameInput.Move.x : 0f;
             if (anchored && canControl && Mathf.Abs(tThr) > 0.1f && !anchorHintShown)
             {
                 anchorHintShown = true;
-                GameEvents.RaiseToast(Loc.Tr("Der Anker ist unten – Q zum Lichten", "The anchor is down – Q to raise it"));
+                GameEvents.RaiseToast(AnchorHint());
             }
             if (anchored) tThr *= 0.15f;
+            if (remote && Time.time - remoteControlsTime < 0.75f)
+            {
+                tThr = remoteThrottle;
+                tSteer = remoteSteer;
+            }
+            else if (remote)
+            {
+                // no control stream: estimate the throttle from the speed for the engine effects
+                tThr = NetFlags.BoatDriverId >= 0 ? Mathf.Clamp(forwardSpeed / (MaxSpeed * boatSpeedMult), -1f, 1f) : 0f;
+                tSteer = 0f;
+            }
             throttle = Mathf.MoveTowards(throttle, tThr, dt * (Mathf.Abs(tThr) > Mathf.Abs(throttle) ? 1.4f : 2.5f));
             steer = Mathf.MoveTowards(steer, tSteer, dt * 2.2f);
 
@@ -383,12 +567,24 @@ namespace Sealebrities
             UpdateFx(dt);
         }
 
+        /// The throttle/steer input of THIS machine's driver (Net module streams it to the others).
+        public float DriverThrottle => driving && !remote ? throttle : 0f;
+        public float DriverSteer => driving && !remote ? steer : 0f;
+
+        bool EngineOn => driving || (remote && NetFlags.BoatDriverId >= 0);
+
         string DrivePrompt()
         {
-            if (drivePrompt == null || drivePromptLang != Loc.Current)
+            string f = GameInput.BindingLabel(GameAction.Forward), b = GameInput.BindingLabel(GameAction.Back);
+            string l = GameInput.BindingLabel(GameAction.Left), r = GameInput.BindingLabel(GameAction.Right);
+            string q = GameInput.BindingLabel(GameAction.Anchor), e = GameInput.BindingLabel(GameAction.Interact);
+            if (drivePrompt == null || drivePromptLang != Loc.Current || !ReferenceEquals(f, dpFwd) || !ReferenceEquals(b, dpBack)
+                || !ReferenceEquals(l, dpLeft) || !ReferenceEquals(r, dpRight) || !ReferenceEquals(q, dpAnchor) || !ReferenceEquals(e, dpExit))
             {
                 drivePromptLang = Loc.Current;
-                drivePrompt = Loc.Tr("W/S Gas · A/D Lenken · Q Anker · E Aufstehen", "W/S throttle · A/D steer · Q anchor · E get up");
+                dpFwd = f; dpBack = b; dpLeft = l; dpRight = r; dpAnchor = q; dpExit = e;
+                drivePrompt = Loc.Tr($"{f}/{b} Gas · {l}/{r} Lenken · {q} Anker · {e} Aufstehen",
+                                     $"{f}/{b} throttle · {l}/{r} steer · {q} anchor · {e} get up");
             }
             return drivePrompt;
         }
@@ -405,7 +601,7 @@ namespace Sealebrities
             parts.steeringWheel.localRotation = parts.wheelBaseRot * Quaternion.Euler(0f, 0f, -wheelAngle);
             parts.outboardPivot.localRotation = Quaternion.Euler(0f, -steer * 25f, 0f);
             parts.throttleLever.localRotation = parts.leverBaseRot * Quaternion.Euler(throttle * 35f, 0f, 0f);
-            if (driving)
+            if (EngineOn)
             {
                 propAngle = Mathf.Repeat(propAngle + (220f + throttle * 2400f) * dt, 360f);
                 radarAngle = Mathf.Repeat(radarAngle + 80f * dt, 360f);
@@ -418,7 +614,7 @@ namespace Sealebrities
         {
             float speed = Mathf.Abs(forwardSpeed);
             float thr = Mathf.Abs(throttle);
-            bool engineOn = driving;
+            bool engineOn = EngineOn;
 
             BoatParticles.SetRate(smoke, engineOn ? Mathf.Lerp(4f, 22f, thr) : 0f);
             float spray = (submerged01 > 0.2f && speed > 3f) ? (speed - 3f) * 14f : 0f;
@@ -437,7 +633,7 @@ namespace Sealebrities
                 }
             }
 
-            float target = engineOn ? 0.22f + 0.4f * thr : 0f;
+            float target = engineOn ? (0.22f + 0.4f * thr) * Settings.SfxVolume : 0f;
             engineSrc.volume = Mathf.MoveTowards(engineSrc.volume, target, dt * 0.8f);
             engineSrc.pitch = 0.7f + 0.75f * thr + speed * 0.015f;
             if (engineSrc.volume > 0.001f) { if (!engineSrc.isPlaying) engineSrc.Play(); }
@@ -461,11 +657,32 @@ namespace Sealebrities
         void LateUpdate()
         {
             float dt = Time.deltaTime;
+            if (remote && dt > 0f) TrackRemoteMotion(dt);
             // wake emitter sits on the water behind the stern
             Vector3 w = transform.TransformPoint(parts.sternWakeLocal);
             w.y = Waves.HeightAt(w.x, w.z) + 0.05f;
             wakeEmitter.position = w;
             UpdateAnchor(dt);
+        }
+
+        /// Remote-driven boat: estimate the velocity from the pose stream (effects + a smooth hand-over to local physics).
+        void TrackRemoteMotion(float dt)
+        {
+            Vector3 pos = transform.position;
+            if (lastRemoteValid)
+            {
+                Vector3 v = (pos - lastRemotePos) / dt;
+                if (v.sqrMagnitude > 40f * 40f) v = Vector3.zero;   // teleport / snap
+                remoteVel = Vector3.Lerp(remoteVel, v, 1f - Mathf.Exp(-6f * dt));
+            }
+            else remoteVel = Vector3.zero;
+            lastRemotePos = pos;
+            lastRemoteValid = true;
+            Vector3 fwd = transform.forward;
+            fwd.y = 0f;
+            forwardSpeed = fwd.sqrMagnitude > 1e-4f ? Vector3.Dot(remoteVel, fwd.normalized) : 0f;
+            Vector3 stern = transform.TransformPoint(new Vector3(0f, -0.3f, -2f));
+            submerged01 = Waves.HeightAt(stern.x, stern.z) > stern.y ? 1f : 0f;
         }
 
         void UpdateAnchor(float dt)
@@ -487,6 +704,11 @@ namespace Sealebrities
                 case AnchorState.Raising:
                 {
                     Vector3 stow = transform.TransformPoint(parts.anchorStowLocal);
+                    // the boat may drive off faster than the winch pulls (6–8 m/s): the anchor comes along with the
+                    // boat and is winched in relative to it, so the rope never stretches back across the deck
+                    if (raiseStowValid) a.position += stow - raiseLastStow;
+                    raiseLastStow = stow;
+                    raiseStowValid = true;
                     a.position = Vector3.MoveTowards(a.position, stow, 5f * dt);
                     a.rotation = Quaternion.Slerp(a.rotation, transform.rotation, dt * 3f);
                     if ((a.position - stow).sqrMagnitude < 0.01f)
@@ -518,7 +740,7 @@ namespace Sealebrities
         // ------------------------------------------------------------------ physics
         void FixedUpdate()
         {
-            if (rb == null) return;
+            if (rb == null || remote || NetFlags.BoatRemote || rb.isKinematic) return;   // co-op: simulated on another machine
             float dt = Time.fixedDeltaTime;
             Vector3 pos = rb.position;
             Quaternion rot = rb.rotation;

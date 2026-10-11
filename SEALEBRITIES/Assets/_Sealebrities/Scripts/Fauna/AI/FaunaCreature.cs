@@ -69,7 +69,14 @@ namespace Sealebrities
         internal float accumDt;
         internal float distToPlayer = 999f;
         internal float distXZ = 999f;
+        /// Distance to the LOCAL camera (rendering culling, lure light). Equals distToPlayer in single player;
+        /// in co-op distToPlayer is the distance to the nearest diver.
+        internal float distLocal = 999f;
         internal bool pendingDespawn;
+        /// Co-op replication id (1..65535) of a real creature, 0 for hallucinations. Assigned by the spawner on every
+        /// (re)activation, so a pooled object that becomes a new animal also gets a new id.
+        internal int netId;
+        public int NetId => netId;
 
         // ------------------------------------------------------------------ visuals
         internal Transform tr;
@@ -320,14 +327,19 @@ namespace Sealebrities
             float at = Mathf.Max(activityTarget, speedAct);
             activity = Mathf.MoveTowards(activity, at, dt * (at > activity ? 2.5f : 0.6f));
 
-            // ---- distance culling (renderers + lure light)
-            bool shouldCull = culled ? distToPlayer > cullDistance - 5f : distToPlayer > cullDistance + 5f;
+            // ---- distance culling (renderers + lure light). Seen from above the water (dock, beach, boat) animals are
+            // hidden by the nearly opaque sea: cull them beyond 35 m, and deeper than 5 m beyond the 12 m scan range.
+            bool above = !FXVisibility.Underwater;
+            float lim = above ? Mathf.Min(cullDistance, 35f) : cullDistance;
+            bool shouldCull = culled ? distLocal > lim - 5f : distLocal > lim + 5f;
+            if (above && pos.y < surfaceY - 5f && distLocal > FilmShotEvaluator.MaxScanRange) shouldCull = true;
             if (hallucination) shouldCull = false;
             if (shouldCull != culled) SetCulled(shouldCull);
             if (anim != null)
             {
-                anim.SetLureEnabled(!culled && distToPlayer < 50f);
-                if (!culled)
+                anim.SetLureEnabled(!culled && distLocal < 50f);
+                // the swim cycle only runs while a camera actually sees the animal (frustum, far clip, photo camera)
+                if (!culled && AnyRendererVisible())
                     anim.Animate(dt, spd / Mathf.Max(0.05f, cruise), lengthM, activity, yawRate, bellPulse, cloak,
                                  lureMul * (hallucination ? ghostAlpha : 1f), FaunaContext.Time + slot * 1.7f);
             }
@@ -493,12 +505,22 @@ namespace Sealebrities
             lastYaw = newYaw;
         }
 
+        bool AnyRendererVisible()
+        {
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                var r = renderers[i];
+                if (r != null && r.enabled && r.isVisible) return true;
+            }
+            return false;
+        }
+
         void SetCulled(bool c)
         {
             culled = c;
             for (int i = 0; i < renderers.Length; i++)
                 if (renderers[i] != null) renderers[i].enabled = !c && rendererDefault[i];
-            if (anim != null) anim.SetLureEnabled(!c && distToPlayer < 50f);
+            if (anim != null) anim.SetLureEnabled(!c && distLocal < 50f);
         }
 
         void UpdateBounds()

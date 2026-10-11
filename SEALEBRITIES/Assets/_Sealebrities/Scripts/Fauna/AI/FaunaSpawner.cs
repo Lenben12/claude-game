@@ -1,24 +1,39 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
 namespace Sealebrities
 {
     /// Spawns, pools, ticks and despawns all creatures (ICreatureSpawner, registered as Refs.Spawner).
-    /// Keeps a per-site target population within ~110 m of the player while in game, prefers spawning out of view or
-    /// in the fog, despawns animals more than 150 m away, caps the active count at 160 and updates far creatures
+    /// Keeps a per-site target population within ~80 m of the player while in game, prefers spawning out of view or
+    /// in the fog, despawns animals more than 120 m away, caps the active count at 160 and updates far creatures
     /// at a lower rate. No per-frame allocations.
+    /// Co-op (host / offline authority): every diver in FaunaContext.DiverList gets its own population, creatures react
+    /// to the diver nearest to them and a creature is only despawned when it is far from ALL divers.
+    /// Co-op client (NetFlags.CreaturesRemote): no real animals are spawned here (the host's animals arrive as net
+    /// proxies); only local narcosis hallucinations exist.
     public sealed class FaunaSpawner : MonoBehaviour, ICreatureSpawner
     {
         public const int MaxActive = 160;
         public const int MaxHallucinations = 6;
-        public const float PopulationRadius = 110f;
-        public const float CountRadius = 120f;
-        public const float DespawnDistance = 150f;
+        // Population ring tuned for the 15–20 m underwater visibility (art bible §2.2 / fauna checklist): the same
+        // per-site counts live in a smaller ring, so about twice as many animals are actually within sight.
+        // Previous values: population 110 m, count 120 m, despawn 150 m, nearest spawn 14 m, in-view guard 35 m.
+        public const float PopulationRadius = 80f;
+        public const float CountRadius = 85f;
+        public const float DespawnDistance = 120f;
+        public const float MinSpawnDistance = 12f;
+        /// Spawn points closer than this must be out of view (beyond it the underwater fog hides the pop-in).
+        public const float InViewSpawnGuard = 24f;
         public const float SiteFalloff = 150f;
         public const float NearLodDistance = 60f;
         public const float FarLodDistance = 110f;
 
         FaunaPool pool;
+        readonly int[] nearPer = new int[FaunaContext.MaxDivers];
+        int netSerial;
+        float remotePrewarmTimer;
         readonly List<FaunaCreature> active = new List<FaunaCreature>(MaxActive + 16);
         readonly List<FaunaSchool> schools = new List<FaunaSchool>(64);
         readonly Stack<FaunaSchool> schoolPool = new Stack<FaunaSchool>(32);
@@ -41,6 +56,11 @@ namespace Sealebrities
         /// Dive site whose fauna is currently being populated (null in open water / on land far from sites).
         public DiveSite CurrentSite => currentSite;
         public int ActiveCount => active.Count;
+        /// Live creatures including hallucinations (read-only; used by the Net module to replicate the host's animals).
+        public IReadOnlyList<FaunaCreature> ActiveCreatures => active;
+
+        /// A fresh inactive copy of a species model without creature logic (co-op proxies on clients).
+        public GameObject CloneModel(SpeciesDef s, Transform parent) => s == null ? null : pool.CloneModel(s, parent);
 
         // ================================================================== lifecycle
 
@@ -78,7 +98,13 @@ namespace Sealebrities
         }
 
         void OnReturnedToMenu() { DespawnAll(); lockHintSite = null; }
-        void OnGameStarted() { DespawnAll(); lockHintSite = null; FaunaContext.CalmUntil = Time.time + 5f; }
+        void OnGameStarted()
+        {
+            DespawnAll();
+            lockHintSite = null;
+            FaunaContext.CalmUntil = Time.time + 5f;
+            FaunaContext.SessionCalmUntil = Time.time + 5f;
+        }
         void OnPlayerFainted() { FaunaContext.CalmUntil = Time.time + 30f; }
 
         /// After a night's sleep (screen is black, clock set to morning) the reef gets fresh animals and sizes.
@@ -96,6 +122,7 @@ namespace Sealebrities
         public ICreature Spawn(SpeciesDef species, Vector3 position, float sizeCm, bool hallucination)
         {
             if (species == null) return null;
+            if (!hallucination && NetFlags.CreaturesRemote) return null;   // co-op client: the host owns the real animals
             FaunaContext.Capture();
 
             if (hallucination)
@@ -165,17 +192,24 @@ namespace Sealebrities
             c.slot = serial++ % 6;
             c.listIndex = active.Count;
             active.Add(c);
-            if (halluc) hallucinationCount++;
+            if (halluc)
+            {
+                hallucinationCount++;
+                c.netId = 0;
+            }
             else
             {
                 individuals.TryGetValue(s, out int n);
                 individuals[s] = n + 1;
+                netSerial = netSerial >= 65535 ? 1 : netSerial + 1;
+                c.netId = netSerial;
             }
             if (school != null) school.members.Add(c);
             if (FaunaContext.HasPlayer)
             {
                 c.distToPlayer = Vector3.Distance(p, FaunaContext.PlayerPos);
                 c.distXZ = FaunaNav.DistXZ(p, FaunaContext.PlayerPos);
+                c.distLocal = FaunaContext.DiverCount > 1 ? Vector3.Distance(p, FaunaContext.DiverList[0].head) : c.distToPlayer;
             }
             c.Activate(this, s, cm, halluc, p, school, leashC, leashR);
             return c;
@@ -267,21 +301,29 @@ namespace Sealebrities
                 if (WorldInfo.Built && (frame % 8) == 0) PrewarmStartSite();
                 return;
             }
-            if (UIState.PauseOpen) return;   // frozen while the pause menu is open
+            // frozen while the pause menu is open (offline only: in co-op the world keeps running for the others)
+            if (UIState.PauseOpen && !Net.IsOnline) return;
             float dt = Time.deltaTime;
             if (dt <= 0f) return;
             dt = Mathf.Min(dt, 0.1f);
 
             bool hasPlayer = FaunaContext.HasPlayer;
             Vector3 pp = FaunaContext.PlayerPos;
+            bool remoteFauna = NetFlags.CreaturesRemote;
+            if (remoteFauna) DropRealCreatures();   // co-op client: the host's animals arrive as net proxies
+            // co-op: more than one diver → every creature reacts to (and is kept alive by) its nearest diver
+            bool multi = hasPlayer && FaunaContext.DiverCount > 1;
+            if (multi) Array.Clear(nearPer, 0, nearPer.Length);
 
             // schools first (leaders move, members follow)
             for (int i = schools.Count - 1; i >= 0; i--)
             {
                 var s = schools[i];
                 if (s.members.Count == 0) { ReleaseSchoolAt(i); continue; }
+                if (multi) FaunaContext.SetFocus(FaunaContext.NearestDiver(s.leaderPos, out _));
                 s.Tick(dt);
             }
+            if (multi) FaunaContext.SetFocus(0);
 
             despawnTimer -= dt;
             bool despawnCheck = despawnTimer <= 0f;
@@ -289,31 +331,47 @@ namespace Sealebrities
 
             int near = 0;
             ticking = true;
+            // full-rate ticks only where animals can be seen: under water the fog limit (8–19 m) + a margin
+            float nearLodD = FXVisibility.Underwater ? Mathf.Clamp(FXVisibility.Meters + 15f, 25f, NearLodDistance) : NearLodDistance;
+            float farLodD = Mathf.Max(nearLodD * 1.8f, nearLodD + 10f);
             for (int i = 0; i < active.Count; i++)
             {
                 var c = active[i];
                 if (c == null) { if (!ReferenceEquals(c, null)) c.pendingDespawn = true; continue; }
                 if (c.pendingDespawn) continue;
 
-                float d3 = 0f, dxz = 0f;
+                float d3 = 0f, dxz = 0f, dxzAll = 0f, dLocal = 0f;
                 if (hasPlayer)
                 {
                     Vector3 cp = c.pos;
-                    float dx = cp.x - pp.x, dy = cp.y - pp.y, dz = cp.z - pp.z;
-                    dxz = Mathf.Sqrt(dx * dx + dz * dz);
-                    d3 = Mathf.Sqrt(dx * dx + dy * dy + dz * dz);
+                    if (multi && !c.hallucination)
+                    {
+                        MeasureDivers(cp, out d3, out dxz, out dxzAll, out dLocal);
+                    }
+                    else
+                    {
+                        // single player (and hallucinations, which only ever exist for the local diver)
+                        if (multi) FaunaContext.SetFocus(0);
+                        Vector3 lp = multi ? FaunaContext.DiverList[0].head : pp;
+                        float dx = cp.x - lp.x, dy = cp.y - lp.y, dz = cp.z - lp.z;
+                        dxz = Mathf.Sqrt(dx * dx + dz * dz);
+                        d3 = Mathf.Sqrt(dx * dx + dy * dy + dz * dz);
+                        dxzAll = dxz;
+                        dLocal = d3;
+                    }
                 }
                 c.distToPlayer = d3;
                 c.distXZ = dxz;
+                c.distLocal = dLocal;
 
                 if (!c.hallucination)
                 {
-                    if (hasPlayer && despawnCheck && dxz > DespawnDistance) { c.pendingDespawn = true; continue; }
-                    if (dxz < CountRadius) near++;
+                    if (hasPlayer && despawnCheck && dxzAll > DespawnDistance) { c.pendingDespawn = true; continue; }
+                    if (!multi && dxz < CountRadius) near++;
                 }
 
                 c.accumDt += dt;
-                int interval = d3 < NearLodDistance ? 1 : (d3 < FarLodDistance ? 3 : 6);
+                int interval = d3 < nearLodD ? 1 : (d3 < farLodD ? 3 : 6);
                 if (interval == 1 || ((frame + c.slot) % interval) == 0)
                 {
                     float step = Mathf.Min(c.accumDt, 0.3f);
@@ -322,6 +380,7 @@ namespace Sealebrities
                 }
             }
             ticking = false;
+            if (multi) FaunaContext.SetFocus(0);
 
             // sweep despawns (swap-remove, iterate backwards)
             for (int i = active.Count - 1; i >= 0; i--)
@@ -329,9 +388,104 @@ namespace Sealebrities
                 var c = active[i];
                 if (ReferenceEquals(c, null) || c == null || c.pendingDespawn) DespawnAt(i);
             }
-            nearCount = near;
+            nearCount = multi ? nearPer[0] : near;
 
-            if (hasPlayer) Populate(dt, pp);
+            if (hasPlayer)
+            {
+                Populate(dt, pp);
+                if (multi && !remoteFauna) PopulateRemote();
+            }
+        }
+
+        /// Co-op: distances from a creature to every diver. Focuses the nearest one (3D, head) for the behavior tick,
+        /// counts the creature for every diver it is near and reports the smallest horizontal distance (despawn).
+        void MeasureDivers(Vector3 cp, out float d3, out float dxz, out float dxzAll, out float dLocal)
+        {
+            var list = FaunaContext.DiverList;
+            int n = FaunaContext.DiverCount;
+            int best = 0;
+            float best3 = float.MaxValue, bestXZ = 0f, minXZ = float.MaxValue;
+            dLocal = 0f;
+            for (int k = 0; k < n; k++)
+            {
+                Vector3 h = list[k].head;
+                float dx = cp.x - h.x, dy = cp.y - h.y, dz = cp.z - h.z;
+                float xz2 = dx * dx + dz * dz;
+                float s3 = xz2 + dy * dy;
+                float xz = Mathf.Sqrt(xz2);
+                if (xz < CountRadius) nearPer[k]++;
+                if (xz < minXZ) minXZ = xz;
+                if (s3 < best3) { best3 = s3; best = k; bestXZ = xz; }
+                if (k == 0) dLocal = Mathf.Sqrt(s3);
+            }
+            FaunaContext.SetFocus(best);
+            d3 = Mathf.Sqrt(best3);
+            dxz = bestXZ;
+            dxzAll = minXZ;
+        }
+
+        /// Co-op client: real animals that existed before the session switched to remote fauna are removed.
+        void DropRealCreatures()
+        {
+            if (active.Count <= hallucinationCount || ticking) return;
+            for (int i = active.Count - 1; i >= 0; i--)
+            {
+                var c = active[i];
+                if (ReferenceEquals(c, null) || c == null || !c.hallucination) DespawnAt(i);
+            }
+        }
+
+        /// Co-op host: keeps the site population around every remote diver too (the local one is handled by Populate).
+        void PopulateRemote()
+        {
+            var list = FaunaContext.DiverList;
+            int n = FaunaContext.DiverCount;
+            remotePrewarmTimer -= Time.deltaTime;
+            if (remotePrewarmTimer <= 0f)
+            {
+                // pre-build the models of the sites the other divers are heading to (no hitch when they arrive)
+                remotePrewarmTimer = 0.5f;
+                for (int k = 1; k < n; k++) QueuePrewarm(list[k].head);
+            }
+            for (int k = 1; k < n; k++)
+            {
+                if (active.Count >= MaxActive) break;
+                Vector3 hp = list[k].head;
+                var site = FindSite(hp, out float w);
+                if (site == null) continue;
+                if (GameManager.I != null && !Progression.IsSiteUnlocked(site)) continue;
+                int target = Mathf.RoundToInt(TargetFor(site.id) * w);
+                int have = nearPer[k];
+                if (have >= target) continue;
+
+                FaunaContext.SetFocus(k);   // spawn out of THIS diver's view
+                int groups = have < target / 2 ? 2 : 1;
+                for (int g = 0; g < groups; g++)
+                {
+                    int got = SpawnGroup(site, hp);
+                    if (got <= 0) break;
+                    have += got;
+                    if (have >= target || active.Count >= MaxActive) break;
+                }
+                nearPer[k] = have;
+                FaunaContext.SetFocus(0);
+            }
+        }
+
+        void QueuePrewarm(Vector3 p)
+        {
+            DiveSite near = null;
+            float bestOut = float.MaxValue;
+            var all = DiveSites.All;
+            for (int i = 0; i < all.Count; i++)
+            {
+                var s = all[i];
+                float outside = FaunaNav.DistXZ(p, s.center) - s.radius;
+                if (outside < 300f && outside < bestOut) { bestOut = outside; near = s; }
+            }
+            if (near == null || !siteSpecies.TryGetValue(near.id, out var species)) return;
+            for (int i = 0; i < species.Count; i++)
+                if (!pool.HasTemplate(species[i]) && !prewarmQueue.Contains(species[i])) prewarmQueue.Add(species[i]);
         }
 
         // ================================================================== population
@@ -389,6 +543,7 @@ namespace Sealebrities
                 }
                 if (!Progression.IsSiteUnlocked(currentSite)) return;
             }
+            if (NetFlags.CreaturesRemote) return;   // co-op client: the host populates the reef
 
             int target = Mathf.RoundToInt(TargetFor(currentSite.id) * siteWeight);
             if (nearCount >= target || active.Count >= MaxActive) return;
@@ -553,7 +708,7 @@ namespace Sealebrities
             for (int attempt = 0; attempt < 10; attempt++)
             {
                 float ang = (float)rng.NextDouble() * Mathf.PI * 2f;
-                float dist = Mathf.Lerp(14f, PopulationRadius, (float)rng.NextDouble());   // uniform in distance → denser near the diver
+                float dist = Mathf.Lerp(MinSpawnDistance, PopulationRadius, (float)rng.NextDouble());   // uniform in distance → denser near the diver
                 var p = new Vector3(pp.x + Mathf.Cos(ang) * dist, 0f, pp.z + Mathf.Sin(ang) * dist);
                 if (FaunaNav.DistXZ(p, site.center) > site.radius + 60f) continue;
 
@@ -571,7 +726,7 @@ namespace Sealebrities
                 p.y = y;
 
                 // spawn in the fog or out of view: never pop in right in front of the camera
-                if (dist < 35f && FaunaContext.InView(p)) continue;
+                if (dist < InViewSpawnGuard && FaunaContext.InView(p)) continue;
                 result = p;
                 return true;
             }

@@ -3,63 +3,73 @@ using UnityEngine.UIElements;
 
 namespace Sealebrities
 {
-    /// Phone settings: language, mouse sensitivity, difficulty info, save, save & main menu.
+    /// Phone settings: the shared settings screen (compact) plus save / main menu (host & offline) or
+    /// leave session (co-op client).
     public class UIAppSettings : UIPhoneApp
     {
+        UISettingsView view;
+
         public override string Id => "settings";
         public override string Title => Loc.Tr("Einstellungen", "Settings");
-        public override Color Color => UIPalette.Rgb(0x5B6B7F);
+        public override Color Color => UIPalette.Rgb(0x9AA3AE);
         public override UIGlyph.DrawFn Icon => UIGlyphs.Gear;
+
+        public UISettingsView View => view;
+        public override bool LiveUpdates => false;
+
+        public override void OnClose() { view?.CancelCapture(); }
 
         public override void Build(VisualElement body)
         {
             var gm = GameManager.I;
             if (gm == null) return;
-            var s = gm.State;
+            if (view == null) view = new UISettingsView(true);
+            view.Root.RemoveFromHierarchy();
+            body.Add(view.Root);
+            view.Refresh();
 
-            body.Add(UIWidgets.SectionTitle(Loc.Tr("Sprache", "Language")));
-            body.Add(UIWidgets.LanguageSelector(14f));
-
-            body.Add(UIWidgets.SectionTitle(Loc.Tr("Steuerung", "Controls")));
-            body.Add(UIWidgets.SensitivityRow());
-
-            body.Add(UIWidgets.SectionTitle(Loc.Tr("Schwierigkeit", "Difficulty")));
-            var d = s.difficulty;
-            var card = UIKit.Card(UIPalette.A(UIPalette.Raised, 0.95f), 14f, 14f);
-            card.style.borderLeftWidth = 4f;
-            card.style.borderLeftColor = UIPalette.DifficultyColor(d);
-            card.Add(UIKit.Text(Loc.DifficultyName(d), 17f, UIPalette.DifficultyColor(d), true));
-            var desc = UIKit.Para(DifficultySettings.Description(d), 13f, UIPalette.TextDim);
-            desc.style.marginTop = 4f;
-            card.Add(desc);
-            var fixedNote = UIKit.Text(Loc.Tr("Die Schwierigkeit gilt für den ganzen Spielstand.", "The difficulty applies to the whole save."), 11.5f, UIPalette.TextFaint);
-            fixedNote.style.marginTop = 6f;
-            card.Add(fixedNote);
-            body.Add(card);
-
-            body.Add(UIWidgets.SectionTitle(Loc.Tr("Spielstand", "Save game")));
-            var save = UIKit.Btn(Loc.Tr("Jetzt speichern", "Save now"), () =>
+            body.Add(PhoneKit.Section(Loc.Tr("Spielstand", "Save game"), UIGlyphs.House));
+            if (!Net.IsClient)
             {
-                if (GameManager.I == null) return;
-                GameManager.I.Save();
-                GameEvents.RaiseToast(Loc.Tr("Spiel gespeichert.", "Game saved."));
-            }, UIBtnKind.Secondary, 15f);
-            save.style.marginBottom = 8f;
-            body.Add(save);
-            var menu = UIKit.Btn(Loc.Tr("Speichern & Hauptmenü", "Save & main menu"), () =>
-            {
-                Fader.FadeThrough(() =>
+                var save = PhoneKit.IconButton(UIGlyphs.Check, Loc.Tr("Speichern", "Save"), () =>
                 {
-                    Phone.Close();
-                    if (GameManager.I != null) GameManager.I.ReturnToMenu();
-                }, 1.2f);
-            }, UIBtnKind.Primary, 15f);
-            body.Add(menu);
+                    if (GameManager.I == null) return;
+                    GameManager.I.Save();
+                    GameEvents.RaiseToast(Loc.Tr("Gespeichert.", "Saved."));
+                }, UIBtnKind.Secondary, PhoneKit.Body);
+                save.style.marginBottom = 10f;
+                body.Add(save);
+                var menu = PhoneKit.IconButton(UIGlyphs.House, Loc.Tr("Speichern & Hauptmenü", "Save & main menu"), () =>
+                {
+                    Fader.FadeThrough(() =>
+                    {
+                        Phone.Close();
+                        if (Net.IsOnline && Net.Leave != null) Net.Leave();
+                        if (GameManager.I != null && GameManager.I.InGame) GameManager.I.ReturnToMenu();
+                    }, 1.2f);
+                }, UIBtnKind.Primary, PhoneKit.Body);
+                body.Add(menu);
+            }
+            else
+            {
+                var leave = PhoneKit.IconButton(UIGlyphs.Crew, Loc.Tr("Sitzung verlassen", "Leave session"), () =>
+                {
+                    Fader.FadeThrough(() =>
+                    {
+                        Phone.Close();
+                        if (Net.Leave != null) Net.Leave();
+                        if (GameManager.I != null && GameManager.I.InGame) GameManager.I.ReturnToMenu();
+                    }, 1.2f);
+                }, UIBtnKind.Primary, PhoneKit.Body);
+                body.Add(leave);
+            }
 
-            var info = UIKit.Text("ClamOS 1.0 · SEALEBRITIES", 11f, UIPalette.TextFaint);
+            var info = UIKit.Text("ClamOS 2.0 · SEALEBRITIES", PhoneKit.Tiny, UIPalette.Silhouette);
             info.style.alignSelf = Align.Center;
             info.style.marginTop = 24f;
             body.Add(info);
         }
+
+        public override void Tick(float dt) { view?.Tick(dt); }
     }
 }

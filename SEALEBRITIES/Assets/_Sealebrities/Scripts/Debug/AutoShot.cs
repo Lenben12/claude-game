@@ -9,9 +9,11 @@ namespace Sealebrities
 {
     /// Automated screenshot tour for build verification. Does nothing unless the game is started with
     ///     SEALEBRITIES.exe -autoshot "C:/some/output/folder"
-    /// It disables saving, waits for the boot, starts an Open Water game with good test gear and captures
-    /// 01_menu.png … 12_night.png (menu, island, hut/dock/boat, Sealog, reef, kelp, wreck, drop-off, trench, night),
-    /// writes autoshot_log.txt and quits. Every shot is guarded: a failing shot is logged and the tour continues.
+    /// It disables saving, waits for the boot (the launch intro skips itself for -autoshot), starts an Open Water game
+    /// with good test gear and captures 01_menu.png … 12_night.png (menu crew on the dock, island, hut/dock/boat,
+    /// Sealog on the raised 3D phone, reef with the camera in hand, kelp, wreck, drop-off, trench with camera + lamp in
+    /// both hands, night), writes autoshot_log.txt and quits. Scenery shots are taken with empty hands.
+    /// Every shot is guarded: a failing shot is logged and the tour continues.
     public sealed class AutoShot : MonoBehaviour
     {
         const float BootTimeout = 900f;
@@ -31,6 +33,7 @@ namespace Sealebrities
             string dir = ParseOutputDir(Environment.GetCommandLineArgs());
             if (dir == null) return;
             GameManager.SavingDisabled = true;   // never touch the player's save
+            GameManager.AutomatedRun = true;
             var go = new GameObject("SB_AutoShot");
             DontDestroyOnLoad(go);
             go.AddComponent<AutoShot>().outDir = dir;
@@ -78,8 +81,10 @@ namespace Sealebrities
             }
             Note("boot ready after " + BootState.BootSeconds.ToString("0.0") + " s" + (BootState.HadErrors ? " (boot had errors)" : ""));
 
-            // 01 – main menu over the island
+            // 01 – main menu: the bean-diver crew on the dock at golden hour (the launch intro skips itself for -autoshot)
+            if (PlayerIntro.Playing) PlayerIntro.Skip();
             yield return Wait(3f);
+            if (GameObject.Find("MenuCrew") == null) Note("WARNING: no menu crew on the dock (PlayerMenuCamera)");
             yield return Capture("01_menu");
 
             // start a game with test gear and a partly filled journal
@@ -94,8 +99,82 @@ namespace Sealebrities
             yield return Guard(ShotBlueDrop(), "10_blue_drop");
             yield return Guard(ShotTrench(), "11_trench_night");
             yield return Guard(ShotNightIsland(), "12_night");
+            // art comparison shots (How to Fish references: dock + island at noon, open sea, a sunny morning, the jungle)
+            yield return Guard(ShotDockSea(), "13_dock_island / 14_sea_horizon");
+            yield return Guard(ShotMorning(), "15_morning_beach");
+            yield return Guard(ShotJungle(), "16_jungle");
+            yield return Guard(ShotHutMorning(), "17_hut_morning");
 
             Finish(saved >= 12 ? 0 : 1);
+        }
+
+        // 17 – waking up in the hut at 06:30 (the interior read purple in the playtest)
+        IEnumerator ShotHutMorning()
+        {
+            SetTime(0.271f);
+            yield return EnsureOnLand();
+            Vector3 p = PlayerController.ResolveSpawn(out float yaw);
+            Vector3 eye = p + Vector3.up * 1.6f;
+            FreeCamera(eye, eye + Quaternion.Euler(0f, yaw, 0f) * Vector3.forward * 5f);
+            yield return Wait(6.5f);
+            yield return Capture("17_hut_morning");
+        }
+
+        // 13/14 – from the dock end: back toward the island (How to Fish "2.png") and out to the open sea at noon
+        IEnumerator ShotDockSea()
+        {
+            SetTime(0.5f);
+            yield return EnsureOnLand();
+            Vector3 end = WorldInfo.DockEndPosition != Vector3.zero ? WorldInfo.DockEndPosition : WorldLayout.DockEnd + Vector3.up * 1.3f;
+            Vector3 eye = end + Vector3.up * 0.4f;
+            FreeCamera(eye, new Vector3(WorldLayout.Hut.x, eye.y - 2.5f, WorldLayout.Hut.z - 4f));
+            yield return Wait(6.5f);
+            yield return MeasureFps("dock_island");
+            yield return Capture("13_dock_island");
+            Pose(eye, eye + new Vector3(1f, -0.12f, -0.35f) * 10f);
+            yield return Wait(2f);
+            yield return Capture("14_sea_horizon");
+        }
+
+        // 15 – a sunny morning on the beach (07:00): blue sky with a warm glow, no lavender cast
+        IEnumerator ShotMorning()
+        {
+            SetTime(0.292f);
+            yield return EnsureOnLand();
+            Vector3 beach = FindBeach(new Vector3(150f, 0f, 60f));
+            Vector3 eye = new Vector3(beach.x, Mathf.Max(beach.y, Waves.SeaLevel) + 1.7f, beach.z);
+            FreeCamera(eye, new Vector3(WorldLayout.DockEnd.x, 1.5f, WorldLayout.DockEnd.z));
+            yield return Wait(6.5f);
+            yield return Capture("15_morning_beach");
+        }
+
+        // 16 – jungle path toward the lighthouse hill at noon (How to Fish "3.png": layered grass, bushes, canopy)
+        IEnumerator ShotJungle()
+        {
+            SetTime(0.5f);
+            yield return EnsureOnLand();
+            Vector3 g = Ground(new Vector3(55f, 0f, 30f));
+            Vector3 eye = g + Vector3.up * 1.7f;
+            FreeCamera(eye, Ground(new Vector3(0f, 0f, 75f)) + Vector3.up * 3f);
+            yield return Wait(6.5f);
+            yield return MeasureFps("jungle");
+            yield return Capture("16_jungle");
+        }
+
+        /// Average frame rate over 3 s (unscaled) written to the AutoShot log (performance regression check).
+        IEnumerator MeasureFps(string label)
+        {
+            float t = 0f, worst = 0f;
+            int frames = 0;
+            while (t < 3f)
+            {
+                yield return null;
+                float dt = Time.unscaledDeltaTime;
+                t += dt;
+                frames++;
+                if (dt > worst) worst = dt;
+            }
+            Note("fps " + label + ": avg " + (frames / Mathf.Max(t, 0.001f)).ToString("0.0") + ", worst frame " + (worst * 1000f).ToString("0") + " ms");
         }
 
         IEnumerator StartGame()
@@ -106,7 +185,9 @@ namespace Sealebrities
             yield return Frames(3);
 
             var s = gm.State;
-            foreach (var id in new[] { "tank_t5", "lamp_t3", "cam_t2", "fins_t1", "boat_t1" })
+            // past the tutorial, so no quest push cards cover the shots
+            gm.SetQuestIndex(TutorialQuests.Finished);
+            foreach (var id in new[] { "tank_t5", "lamp_t3", "cam_t2", "fins_t1", "boat_t1", "rod_t1" })
                 if (GearDatabase.Get(id) != null && !s.ownedItems.Contains(id)) s.ownedItems.Add(id);
             GameEvents.RaiseGearChanged();
 
@@ -168,13 +249,22 @@ namespace Sealebrities
             yield return Capture("03_hut_dock_boat");
         }
 
-        // 04/05 – the phone: Sealog index and a species page with its biggest specimen
+        // 04/05 – the phone (old 3D phone raised in the left hand, UI rendered onto its screen): Sealog index and a
+        // species page with its biggest specimen
         IEnumerator ShotPhone()
         {
             Vector3 dock = WorldInfo.DockEndPosition != Vector3.zero ? WorldInfo.DockEndPosition : WorldLayout.DockEnd + Vector3.up * 1.3f;
+            Hands.StowAll();
             yield return Stand(dock + new Vector3(-6f, 0.05f, 0f), 262f);
             if (!UIModule.DebugOpenPhone("sealog")) Note("WARNING: phone did not open");
-            yield return Wait(1.5f);
+            float t = 0f;
+            while (!PhoneDisplay.Raised && t < 2f)
+            {
+                t += Time.unscaledDeltaTime;
+                yield return null;
+            }
+            Note(PhoneDisplay.Raised ? "phone raised in 3D" : "WARNING: 3D phone not raised – the flat 2D phone is shown");
+            yield return Wait(1.2f);
             yield return Capture("04_sealog");
             UIModule.DebugOpenPhone("sealog:green_turtle");
             yield return Wait(1.2f);
@@ -198,6 +288,7 @@ namespace Sealebrities
             Vector3 look = anchor + Vector3.up * 0.6f;
             yield return Dive(eye, look);
             ClearCrowd();
+            Hold(HoldItem.Camera);   // hotbar: the camera in the right hand (small How-to-Fish style model)
 
             Vector3 f = (look - eye).normalized, r = Vector3.Cross(Vector3.up, f).normalized;
             Spawn("clownfish", anchor + Vector3.up * 0.45f + r * 0.3f, SizeTier.Large);
@@ -330,7 +421,8 @@ namespace Sealebrities
             Vector3 toCenter = Flat(site.center - rim);
             Vector3 target = eye + toCenter * 8f + Vector3.down * 2.5f;
             yield return Dive(eye, target);
-            if (lamp != null) lamp.SetOn(true);
+            Hold(HoldItem.Camera);
+            if (lamp != null) lamp.SetOn(true);   // also takes the lamp into the left hand (hotbar)
             else Note("WARNING: no flashlight component found");
             ClearCrowd();
             Vector3 f = (target - eye).normalized, r = Vector3.Cross(Vector3.up, f).normalized;
@@ -339,6 +431,7 @@ namespace Sealebrities
             yield return Wait(6.5f);
             yield return Capture("11_trench_night");
             if (lamp != null) lamp.SetOn(false);
+            Hands.StowAll();
         }
 
         // 12 – the island at night (hut lamp, dock lantern, torches, campfire, lighthouse beams)
@@ -376,13 +469,23 @@ namespace Sealebrities
             if (UIState.PhoneOpen) UIModule.DebugOpenPhone("close");
         }
 
-        /// Free camera (player frozen where he stands): only for above-water views.
+        /// Free camera (player frozen where he stands): only for above-water views. Empty hands, so no view model
+        /// floats in front of the scenery.
         void FreeCamera(Vector3 eye, Vector3 lookAt)
         {
             CloseStrayPhone();
+            Hands.StowAll();
             if (pc == null || cam == null) return;
             pc.enabled = false;
             Pose(eye, lookAt);
+        }
+
+        /// Takes a hotbar item into its hand (no-op when it is already held or not on the hotbar).
+        void Hold(HoldItem item)
+        {
+            if (Hands.IsHeld(item)) return;
+            if (Hands.Find(item, out Hand h, out int slot)) Hands.Select(h, slot);
+            if (!Hands.IsHeld(item)) Note("WARNING: could not take " + item + " into a hand");
         }
 
         void Pose(Vector3 eye, Vector3 lookAt)

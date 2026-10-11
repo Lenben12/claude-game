@@ -21,17 +21,31 @@ namespace Sealebrities
 
         static float T => Time.time;
 
+        // per component, precomputed once (same float expressions as before → bit-identical heights):
+        // wave number, phase speed, direction and amplitude. HeightAt runs ~3,000× per frame (ocean mesh).
+        static readonly int N = Components.Length;
+        static readonly float[] K = new float[N], S = new float[N], DX = new float[N], DZ = new float[N], A = new float[N];
+
+        static Waves()
+        {
+            for (int i = 0; i < N; i++)
+            {
+                var c = Components[i];
+                float k = 2f * Mathf.PI / c.w;
+                K[i] = k;
+                S[i] = Mathf.Sqrt(9.81f / k);
+                DX[i] = c.x;
+                DZ[i] = c.y;
+                A[i] = c.z;
+            }
+        }
+
         public static float HeightAt(float x, float z)
         {
             float t = T;
             float h = 0f;
-            for (int i = 0; i < Components.Length; i++)
-            {
-                var c = Components[i];
-                float k = 2f * Mathf.PI / c.w;
-                float speed = Mathf.Sqrt(9.81f / k);
-                h += c.z * Mathf.Sin(k * (c.x * x + c.y * z - speed * t));
-            }
+            for (int i = 0; i < N; i++)
+                h += A[i] * Mathf.Sin(K[i] * (DX[i] * x + DZ[i] * z - S[i] * t));
             return SeaLevel + h * Strength;
         }
 

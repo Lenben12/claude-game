@@ -169,10 +169,12 @@ namespace Sealebrities
             return Make("BoatBackfire", d, 0.9f);
         }
 
-        /// 3D one-shot at a world position (temporary AudioSource object).
+        /// 3D one-shot at a world position (temporary AudioSource object). Scaled by the SFX volume setting.
         public static void PlayAt(AudioClip clip, Vector3 pos, float volume, float pitch = 1f, float maxDistance = 60f)
         {
             if (clip == null) return;
+            volume *= Settings.SfxVolume;
+            if (volume <= 0.001f) return;
             var go = new GameObject("BoatOneShot");
             go.transform.position = pos;
             var src = go.AddComponent<AudioSource>();

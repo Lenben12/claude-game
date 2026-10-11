@@ -7,6 +7,7 @@ using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 using UnityEngine.UIElements;
 
@@ -148,8 +149,10 @@ namespace Sealebrities.EditorTools
             Try("always included shaders cleanup", RemoveHeavyAlwaysIncludedShaders);
             if (AddAlwaysIncludedShaders) Try("always included shaders", SetupAlwaysIncludedShaders);
             Try("URP asset", SetupRenderPipelineAssets);
-            Try("PC URP asset (MSAA 4x, soft shadows)", SetupPcPipelineAsset);
+            Try("PC URP asset (MSAA 4x, soft shadows, How to Fish shadows)", SetupPcPipelineAsset);
             Try("PC renderer (screen space ambient occlusion)", SetupPcRendererSsao);
+            Try("PC renderer without SSAO (Low graphics tier)", SetupPcRendererNoAo);
+            Try("post-processing variant guard (ACES, HQ bloom)", SetupPostVariantGuard);
             Try("fog shader variants", SetupFogVariants);
             Try("boot scene", SetupScene);
             Try("build settings", () =>
@@ -313,6 +316,9 @@ namespace Sealebrities.EditorTools
                 m.EnableKeyword("_SUNDISK_HIGH_QUALITY");
                 Save("SB_SkyboxProcedural", m);
             }
+            // art bible §1.2 option B: a runtime gradient cubemap sky on Skybox/Cubemap (World) must survive stripping
+            Shader cube = Shader.Find("Skybox/Cubemap");
+            if (cube != null) Save("SB_SkyboxCubemap", new Material(cube) { name = "SB_SkyboxCubemap" });
         }
 
         /// Moves the include materials of the old look from Resources/ShaderIncludes to Obsolete/ShaderIncludes
@@ -504,7 +510,7 @@ namespace Sealebrities.EditorTools
             {
                 var so = new SerializedObject(a);
                 bool changed = false;
-                changed |= SetFloat(so, "m_ShadowDistance", 150f);            // World: soft sun shadows up to 150 m
+                changed |= SetFloat(so, "m_ShadowDistance", 120f);            // art bible §1.3 (High tier; FX lowers it per tier)
                 changed |= SetBool(so, "m_SupportsLightCookies", true);       // FX: caustics are a sun cookie
                 changed |= SetBool(so, "m_SupportsHDR", true);
                 changed |= SetBool(so, "m_MainLightShadowsSupported", true);
@@ -517,16 +523,26 @@ namespace Sealebrities.EditorTools
         }
 
         // ------------------------------------------------------------------ low-poly look: PC renderer + URP asset
+        // These are the High-tier defaults of the "How to Fish" art bible (§1.3 / §1.5). At runtime the FX module
+        // (FXGraphics) applies the player's graphics tier (Low / Medium / High) on top of them.
         const string PcPipelineAssetPath = "Assets/Settings/PC_RPAsset.asset";
         const string PcRendererPath = "Assets/Settings/PC_Renderer.asset";
+        const string PcRendererNoAoPath = "Assets/Settings/PC_Renderer_NoAO.asset";
+        const string DefaultVolumeProfilePath = "Assets/Settings/DefaultVolumeProfile.asset";
         const string SsaoTypeName = "UnityEngine.Rendering.Universal.ScreenSpaceAmbientOcclusion";
         const string SsaoAssemblyQualifiedName = SsaoTypeName + ", Unity.RenderPipelines.Universal.Runtime";
         const int MsaaSamples = 4;
-        // A small radius: the AO stays a soft contact shadow in the creases. With 0.3 m the sample disc around the
-        // first-person hands/lamp/camera (0.3-0.5 m from the eye) covered half the screen and left a blotchy,
-        // dirty-looking pattern on their flat colors.
-        const float SsaoIntensity = 0.6f;
-        const float SsaoRadius = 0.18f;
+        const int SoftShadowQualityMedium = 2;      // SoftShadowQuality.Medium
+        const int ShadowmapResolution = 2048;
+        const int ShadowCascades = 2;
+        const float Cascade2Split = 0.25f;
+        const float ShadowDepthBias = 1.0f;
+        const float ShadowNormalBias = 0.6f;
+        // Art bible: intensity 1.0, radius 0.30 m, direct lighting 0.25 – and 0.22 m if the view-model hands blotch.
+        // The hands are small now, but the earlier blotching with 0.3 m makes 0.24 m the safer middle.
+        const float SsaoIntensity = 1.0f;
+        const float SsaoRadius = 0.24f;
+        const float SsaoDirectLighting = 0.25f;
 
         static RenderPipelineAsset PcPipelineAsset()
         {
@@ -549,22 +565,31 @@ namespace Sealebrities.EditorTools
             bool changed = false;
             if (so.FindProperty("m_MSAA") == null) Debug.LogWarning("SEALEBRITIES setup: m_MSAA not found on " + asset.name + ".");
             changed |= SetInt(so, "m_MSAA", MsaaSamples);
+            changed |= SetFloat(so, "m_RenderScale", 1f);
             if (so.FindProperty("m_SoftShadowsSupported") == null) Debug.LogWarning("SEALEBRITIES setup: m_SoftShadowsSupported not found on " + asset.name + ".");
             changed |= SetBool(so, "m_SoftShadowsSupported", true);
-            var quality = so.FindProperty("m_SoftShadowQuality");
-            if (quality != null && quality.intValue <= 0)
-            {
-                quality.intValue = 2;   // Medium: soft enough, cheaper than High on a GTX 1060
-                changed = true;
-            }
+            changed |= SetInt(so, "m_SoftShadowQuality", SoftShadowQualityMedium);   // Medium: soft but defined penumbra
+            // strong How-to-Fish sun shadows: 2048 map, 2 cascades split at 25 %, 120 m (the cascade count stays 2 on
+            // every tier: URP strips the single-cascade shadow variants once the asset uses cascades)
+            changed |= SetInt(so, "m_MainLightShadowmapResolution", ShadowmapResolution);
+            changed |= SetInt(so, "m_ShadowCascadeCount", ShadowCascades);
+            changed |= SetFloat(so, "m_Cascade2Split", Cascade2Split);
+            changed |= SetFloat(so, "m_ShadowDistance", 120f);
+            changed |= SetFloat(so, "m_ShadowDepthBias", ShadowDepthBias);
+            changed |= SetFloat(so, "m_ShadowNormalBias", ShadowNormalBias);
+            // nothing samples the camera opaque/depth textures (no custom shaders, SSAO renders its own depth-normals):
+            // the copies only cost a full-screen blit / depth pass every frame
+            changed |= SetBool(so, "m_RequireOpaqueTexture", false);
+            changed |= SetBool(so, "m_RequireDepthTexture", false);
             if (changed)
             {
                 so.ApplyModifiedPropertiesWithoutUndo();
                 EditorUtility.SetDirty(asset);
                 AssetDatabase.SaveAssets();
-                Debug.Log("SEALEBRITIES setup: " + asset.name + " -> MSAA " + MsaaSamples + "x, soft shadows on.");
+                Debug.Log("SEALEBRITIES setup: " + asset.name + " -> MSAA " + MsaaSamples + "x, soft shadows (medium), shadow map " +
+                          ShadowmapResolution + " / " + ShadowCascades + " cascades / 120 m, no opaque/depth copies.");
             }
-            else Debug.Log("SEALEBRITIES setup: " + asset.name + " already has MSAA " + MsaaSamples + "x and soft shadows.");
+            else Debug.Log("SEALEBRITIES setup: " + asset.name + " already has the How to Fish render settings.");
         }
 
         static ScriptableObject PcRendererData()
@@ -663,6 +688,10 @@ namespace Sealebrities.EditorTools
             changed |= SetBool(fso, "m_Active", true);
             changed |= SetFloatLogged(fso, "m_Settings.Intensity", SsaoIntensity, data.name);
             changed |= SetFloatLogged(fso, "m_Settings.Radius", SsaoRadius, data.name);
+            changed |= SetFloatLogged(fso, "m_Settings.DirectLightingStrength", SsaoDirectLighting, data.name);
+            changed |= SetInt(fso, "m_Settings.Samples", 1);        // AOSampleOption.Medium
+            changed |= SetBool(fso, "m_Settings.Downsample", false);   // full resolution on High (FX halves it on Medium)
+            changed |= SetInt(fso, "m_Settings.BlurQuality", 0);    // bilateral (High)
             changed |= SetBool(fso, "m_Settings.AfterOpaque", false);   // AO only on ambient light, under the fog
             if (changed) fso.ApplyModifiedPropertiesWithoutUndo();
 
@@ -678,9 +707,139 @@ namespace Sealebrities.EditorTools
             else Debug.Log("SEALEBRITIES setup: Screen Space Ambient Occlusion already configured on " + data.name + ".");
         }
 
-        /// The FX module turns fog on at runtime (exponential squared), but the boot scene itself has fog off: with
-        /// "Automatic" fog stripping the player build would drop every fog shader variant and the underwater fog
-        /// would vanish in builds. Keep EXP + EXP2 explicitly; linear fog is never used (fewer variants).
+        /// Low graphics tier: SSAO off. URP strips the "SSAO off" shader variants as soon as EVERY renderer of the
+        /// pipeline has SSAO, so simply disabling the feature at runtime would hit missing variants in a build. A copy
+        /// of the PC renderer with its SSAO inactive is added as renderer #1: both variants stay in the build and the
+        /// FX module switches the camera to this renderer on Low. Idempotent.
+        static void SetupPcRendererNoAo()
+        {
+            var asset = PcPipelineAsset();
+            var main = PcRendererData();
+            if (asset == null || main == null)
+            {
+                Debug.LogWarning("SEALEBRITIES setup: PC pipeline asset or renderer missing: no-AO renderer skipped.");
+                return;
+            }
+
+            var noAo = AssetDatabase.LoadAssetAtPath<ScriptableObject>(PcRendererNoAoPath);
+            if (noAo == null)
+            {
+                string from = AssetDatabase.GetAssetPath(main);
+                if (string.IsNullOrEmpty(from) || !AssetDatabase.CopyAsset(from, PcRendererNoAoPath))
+                {
+                    Debug.LogWarning("SEALEBRITIES setup: could not copy " + from + " to " + PcRendererNoAoPath + ".");
+                    return;
+                }
+                AssetDatabase.ImportAsset(PcRendererNoAoPath, ImportAssetOptions.ForceSynchronousImport);
+                noAo = AssetDatabase.LoadAssetAtPath<ScriptableObject>(PcRendererNoAoPath);
+                if (noAo == null) { Debug.LogWarning("SEALEBRITIES setup: " + PcRendererNoAoPath + " did not import."); return; }
+                noAo.name = Path.GetFileNameWithoutExtension(PcRendererNoAoPath);
+            }
+
+            // every SSAO feature of the copy inactive
+            Type ssaoType = FindType(SsaoAssemblyQualifiedName, SsaoTypeName);
+            var so = new SerializedObject(noAo);
+            var features = so.FindProperty("m_RendererFeatures");
+            bool featureChanged = false;
+            if (features != null && features.isArray)
+            {
+                for (int i = 0; i < features.arraySize; i++)
+                {
+                    var o = features.GetArrayElementAtIndex(i).objectReferenceValue;
+                    if (o == null || ssaoType == null || !ssaoType.IsInstanceOfType(o)) continue;
+                    var fso = new SerializedObject(o);
+                    if (SetBool(fso, "m_Active", false))
+                    {
+                        fso.ApplyModifiedPropertiesWithoutUndo();
+                        EditorUtility.SetDirty(o);
+                        featureChanged = true;
+                    }
+                }
+            }
+            if (featureChanged)
+            {
+                EditorUtility.SetDirty(noAo);
+                if (noAo is ScriptableRendererData rd) rd.SetDirty();
+            }
+
+            // renderer list of the PC pipeline asset: [0] PC_Renderer (default), [1] PC_Renderer_NoAO
+            var aso = new SerializedObject(asset);
+            var list = aso.FindProperty("m_RendererDataList");
+            if (list == null || !list.isArray)
+            {
+                Debug.LogWarning("SEALEBRITIES setup: m_RendererDataList not found on " + asset.name + ": no-AO renderer not registered.");
+                return;
+            }
+            bool present = false;
+            for (int i = 0; i < list.arraySize; i++)
+                if (list.GetArrayElementAtIndex(i).objectReferenceValue == noAo) { present = true; break; }
+            if (!present)
+            {
+                int n = list.arraySize;
+                list.arraySize = n + 1;
+                list.GetArrayElementAtIndex(n).objectReferenceValue = noAo;
+                aso.ApplyModifiedPropertiesWithoutUndo();
+                EditorUtility.SetDirty(asset);
+            }
+            if (!present || featureChanged)
+            {
+                AssetDatabase.SaveAssets();
+                Debug.Log("SEALEBRITIES setup: " + PcRendererNoAoPath + " (SSAO off) registered on " + asset.name + " for the Low graphics tier.");
+            }
+        }
+
+        /// The FX volume profile is created at runtime, but "Strip Unused Post Processing Variants" only keeps the
+        /// post variants used by volume profile assets. The pipeline's default profile (always in the build) gets
+        /// ACES tonemapping and high-quality bloom filtering so the ACES / HQ-bloom uber variants survive; its bloom
+        /// intensity stays 0, so nothing changes visually for cameras without the FX volume.
+        static void SetupPostVariantGuard()
+        {
+            VolumeProfile profile = null;
+            var asset = PcPipelineAsset();
+            if (asset != null)
+            {
+                var p = new SerializedObject(asset).FindProperty("m_VolumeProfile");
+                if (p != null) profile = p.objectReferenceValue as VolumeProfile;
+            }
+            if (profile == null) profile = AssetDatabase.LoadAssetAtPath<VolumeProfile>(DefaultVolumeProfilePath);
+            if (profile == null)
+            {
+                Debug.LogWarning("SEALEBRITIES setup: default volume profile not found: post variant guard skipped.");
+                return;
+            }
+            bool changed = false;
+            if (profile.TryGet(out Tonemapping tm) && tm != null)
+            {
+                if (!tm.mode.overrideState || tm.mode.value != TonemappingMode.ACES)
+                {
+                    tm.mode.overrideState = true;
+                    tm.mode.value = TonemappingMode.ACES;
+                    EditorUtility.SetDirty(tm);
+                    changed = true;
+                }
+            }
+            else Debug.LogWarning("SEALEBRITIES setup: " + profile.name + " has no Tonemapping component (ACES variants may be stripped).");
+            if (profile.TryGet(out Bloom bloom) && bloom != null)
+            {
+                if (!bloom.highQualityFiltering.overrideState || !bloom.highQualityFiltering.value)
+                {
+                    bloom.highQualityFiltering.overrideState = true;
+                    bloom.highQualityFiltering.value = true;
+                    EditorUtility.SetDirty(bloom);
+                    changed = true;
+                }
+            }
+            if (changed)
+            {
+                EditorUtility.SetDirty(profile);
+                AssetDatabase.SaveAssets();
+                Debug.Log("SEALEBRITIES setup: " + profile.name + " -> ACES + HQ bloom (keeps the runtime FX post variants in builds).");
+            }
+        }
+
+        /// The FX module turns fog on at runtime (exponential above water, exponential squared under water), but the
+        /// boot scene itself has fog off: with "Automatic" fog stripping the player build would drop every fog shader
+        /// variant and the fog would vanish in builds. Keep EXP + EXP2 explicitly; linear fog is never used.
         static void SetupFogVariants()
         {
             var assets = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/GraphicsSettings.asset");

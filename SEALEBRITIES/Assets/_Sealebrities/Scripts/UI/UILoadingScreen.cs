@@ -3,122 +3,178 @@ using UnityEngine.UIElements;
 
 namespace Sealebrities
 {
-    /// Boot loading screen: title, "Live from the Deep" pill, progress bar, status text, rotating tips and rising bubbles.
+    /// The SEALEBRITIES water logo: white Fredoka letters whose lower part is filled with turquoise water,
+    /// dark outline, soft shadow (art bible §1.14).
+    public static class UILogo
+    {
+        public static VisualElement Build(float fontSize, float width, float height, TextAnchor align)
+        {
+            var host = new VisualElement { pickingMode = PickingMode.Ignore };
+            UIKit.Size(host, width, height);
+            host.Add(Label(Color.white, fontSize, width, height, align));
+            var clip = new VisualElement { pickingMode = PickingMode.Ignore };
+            clip.style.position = Position.Absolute;
+            clip.style.left = 0; clip.style.right = 0;
+            clip.style.top = height * 0.58f;
+            clip.style.bottom = 0;
+            clip.style.overflow = Overflow.Hidden;
+            var teal = Label(UIPalette.Turquoise, fontSize, width, height, align);
+            teal.style.top = -height * 0.58f;
+            clip.Add(teal);
+            host.Add(clip);
+            return host;
+        }
+
+        static Label Label(Color c, float size, float w, float h, TextAnchor align)
+        {
+            var l = UIKit.Text("SEALEBRITIES", size, c, true);
+            l.style.position = Position.Absolute;
+            l.style.left = 0; l.style.top = 0;
+            l.style.width = w; l.style.height = h;
+            l.style.unityTextAlign = align;
+            l.style.letterSpacing = size * 0.02f;
+            l.style.unityTextOutlineWidth = Mathf.Max(2f, size * 0.025f);
+            l.style.unityTextOutlineColor = new Color(0x1B / 255f, 0x24 / 255f, 0x33 / 255f, 0.6f);
+            l.style.textShadow = new TextShadow { offset = new Vector2(0f, size * 0.04f), blurRadius = 8f, color = new Color(0f, 0f, 0f, 0.3f) };
+            l.pickingMode = PickingMode.Ignore;
+            return l;
+        }
+    }
+
+    /// Loading screen (GDD 15.40, art bible §1.14): underwater gradient, slanted light bands, rising bubbles,
+    /// a low-poly fish crossing every few seconds, the water logo, a rounded progress bar and real ocean facts + tips.
     public class UILoadingScreen
     {
+        static readonly string[,] Facts =
+        {
+            { "Der Ozean bedeckt rund 71 % der Erdoberfläche.", "The ocean covers about 71 % of Earth's surface." },
+            { "Mehr als die Hälfte unseres Sauerstoffs stammt aus dem Meer – vor allem von winzigem Plankton.", "More than half of the oxygen we breathe comes from the ocean – mostly from tiny plankton." },
+            { "Der Marianengraben ist an seiner tiefsten Stelle fast 11.000 Meter tief.", "The Mariana Trench is almost 11,000 meters deep at its deepest point." },
+            { "Der Blauwal ist das größte Tier, das je gelebt hat. Allein sein Herz wiegt rund 180 kg.", "The blue whale is the largest animal that ever lived. Its heart alone weighs about 180 kg." },
+            { "Oktopusse haben drei Herzen und blaues Blut.", "Octopuses have three hearts and blue blood." },
+            { "Bei Seepferdchen bekommen die Männchen die Babys.", "In seahorses, the males carry and give birth to the babies." },
+            { "Grönlandhaie können mehrere Jahrhunderte alt werden.", "Greenland sharks can live for several centuries." },
+            { "Mehr als 80 % des Ozeans sind noch unerforscht.", "More than 80 % of the ocean is still unexplored." },
+            { "Sonnenlicht reicht nur etwa 200 Meter tief – darunter beginnt die Dämmerzone.", "Sunlight only reaches about 200 meters deep – below that begins the twilight zone." },
+            { "Viele Tiefseetiere erzeugen ihr eigenes Licht. Das nennt man Biolumineszenz.", "Many deep-sea animals make their own light. That's called bioluminescence." },
+            { "Meeresschildkröten kehren oft an den Strand zurück, an dem sie geschlüpft sind.", "Sea turtles often return to the very beach where they hatched." },
+            { "Mondfische können über 2 Tonnen wiegen – die schwersten Knochenfische der Welt.", "Ocean sunfish can weigh over 2 tonnes – the heaviest bony fish in the world." },
+            { "Rotes Licht verschwindet unter Wasser zuerst – deshalb wirkt in der Tiefe alles so blau.", "Red light disappears first underwater – that's why everything looks so blue at depth." },
+            { "Walhaie sind die größten Fische der Welt und fressen vor allem Plankton.", "Whale sharks are the largest fish in the world and mostly eat plankton." },
+            { "Clownfische schlüpfen alle als Männchen – der größte wird zum Weibchen.", "All clownfish hatch as males – the largest one becomes the female." },
+            { "Das Great Barrier Reef ist so groß, dass man es aus dem All sehen kann.", "The Great Barrier Reef is so big it can be seen from space." },
+        };
+
         static readonly string[,] Tips =
         {
             { "Größere Tiere bringen mehr Aufrufe: Ein legendäres Exemplar zählt ×4.", "Bigger animals bring more views: a legendary specimen counts ×4." },
             { "Clips sind erst sicher, wenn du wieder an Land oder auf dem Boot bist.", "Clips are only safe once you're back on land or on the boat." },
-            { "Im Sealog (J) siehst du, welche Tiere dir noch fehlen – und dein größtes Exemplar jeder Art.", "The Sealog (J) shows which animals you're missing – and your biggest specimen of each species." },
-            { "Fülle eine Tagebuch-Seite zu 60 %, um den nächsten Tauchplatz freizuschalten.", "Fill a journal page to 60 % to unlock the next dive site." },
-            { "Clickbait-Titel bringen mehr Aufrufe, aber deutlich weniger echte Follower.", "Clickbait titles bring more views, but far fewer real followers." },
-            { "Ab 100 Followern zahlt FinTube dir Geld pro Aufruf.", "From 100 followers on, FinTube pays you per view." },
-            { "Die Taschenlampe (F) bringt in der Tiefe die Farben zurück – und sorgt für bessere Clips.", "The flashlight (F) brings colors back in the deep – and makes better clips." },
-            { "Tauch nicht tiefer, als deine Flasche erlaubt. Die Tiefenanzeige warnt dich.", "Don't dive deeper than your tank allows. The depth gauge warns you." },
-            { "Pilot Gary liefert Bestellungen am nächsten Morgen zum Helipad. Express kostet 50 % extra.", "Pilot Gary delivers orders to the helipad the next morning. Express costs 50 % extra." },
-            { "Schlaf in deiner Hütte: Am nächsten Morgen kommen die Ergebnisse deiner Videos.", "Sleep in your hut: your video results arrive the next morning." },
-            { "Ruhige Kamera, gutes Licht und ein Tier in Action ergeben die wertvollsten Clips.", "A steady camera, good light and an animal in action make the most valuable clips." },
-            { "Raubtiere rempeln dich an und kosten dich Luft. Halte Abstand!", "Predators bump into you and cost you air. Keep your distance!" },
-            { "Ab 1.000 Followern schaltest du KRILL.tv frei.", "At 1,000 followers you unlock KRILL.tv." },
+            { "Gefangene Fische landen in der Kühlbox – verkaufen kannst du sie in der Fischmarkt-App.", "Caught fish go into the cooler box – sell them in the Fish Market app." },
+            { "Rechte Hand {R1}–{R3}, linke Hand {L1}–{L3}. Die Angel braucht beide Hände.", "Right hand {R1}–{R3}, left hand {L1}–{L3}. The fishing rod needs both hands." },
+            { "Luft füllst du nur an Land oder auf dem Boot wieder auf.", "You only refill your air on land or on the boat." },
+            { "Gary liefert noch am selben Tag – 2 bis 3 Stunden nach der Bestellung.", "Gary delivers the same day – 2 to 3 hours after you order." },
+            { "Im Inventar ({INV}) ziehst du Kamera, Lampe und Angel in deine Hände.", "In the inventory ({INV}) you drag the camera, lamp and rod into your hands." },
+            { "Schlaf in deiner Hütte: Am Morgen kommen die Ergebnisse deiner Videos.", "Sleep in your hut: your video results arrive in the morning." },
         };
 
-        readonly VisualElement root;
+        readonly VisualElement root, fish;
         readonly UIBar bar;
-        readonly Label status, percent, tip, tipCaption;
-        readonly VisualElement[] bubbles = new VisualElement[16];
-        readonly float[] bubbleSeed = new float[16];
-        int tipIndex;
-        float tipTimer, time;
+        readonly Label status, fact, factCaption;
+        readonly VisualElement[] bubbles = new VisualElement[18];
+        readonly float[] bubbleSeed = new float[18];
+        readonly VisualElement[] bands = new VisualElement[4];
+        int factIndex, shownCount;
+        bool showingTip;
+        float factTimer, time, fishTimer;
         float fadeOut = -1f;
-        int lastPercent = -1;
         string lastText;
 
         public UILoadingScreen(VisualElement layer)
         {
             root = new VisualElement { name = "sb-loading" };
             UIKit.FillParent(root);
-            UIKit.Image(root, UIKit.VGradient(UIPalette.Rgb(0x040A12), UIPalette.Rgb(0x0E2B40)), false);
-            root.style.backgroundColor = UIPalette.Deep;
-            root.style.alignItems = Align.Center;
-            root.style.justifyContent = Justify.Center;
+            UIKit.Image(root, UIKit.VGradient(UIPalette.Rgb(0x1A5A8C), UIPalette.Rgb(0x5ECAD9)), false);
+            root.style.backgroundColor = UIPalette.Rgb(0x2D90BC);
+            root.style.overflow = Overflow.Hidden;
             layer.Add(root);
+
+            // slanted light bands from the surface
+            var bandTex = UIKit.VGradient(new Color(1f, 1f, 1f, 0f), new Color(0.87f, 0.98f, 1f, 0.16f));
+            for (int i = 0; i < bands.Length; i++)
+            {
+                var b = new VisualElement { pickingMode = PickingMode.Ignore };
+                b.style.position = Position.Absolute;
+                b.style.top = Length.Percent(-20f);
+                b.style.height = Length.Percent(130f);
+                b.style.width = 110f + i * 45f;
+                b.style.left = Length.Percent(12f + i * 22f);
+                b.style.rotate = new Rotate(Angle.Degrees(18f));
+                UIKit.Image(b, bandTex, false);
+                root.Add(b);
+                bands[i] = b;
+            }
+
+            fish = new UIGlyph(UIGlyphs.Fish, new Color(0.06f, 0.24f, 0.36f, 0.45f), 120f);
+            fish.style.position = Position.Absolute;
+            fish.style.top = Length.Percent(60f);
+            root.Add(fish);
 
             var bubbleLayer = new VisualElement { pickingMode = PickingMode.Ignore };
             UIKit.FillParent(bubbleLayer);
-            bubbleLayer.style.overflow = Overflow.Hidden;
             root.Add(bubbleLayer);
             for (int i = 0; i < bubbles.Length; i++)
             {
-                float size = 6f + (i * 37 % 19);
+                float size = 8f + (i * 37 % 22);
                 var b = new VisualElement { pickingMode = PickingMode.Ignore };
                 b.style.position = Position.Absolute;
                 UIKit.Size(b, size, size);
                 UIKit.Radius(b, size * 0.5f);
-                UIKit.Border(b, 1.5f, new Color(0.7f, 0.9f, 1f, 0.22f));
-                b.style.backgroundColor = new Color(0.7f, 0.9f, 1f, 0.04f);
-                b.style.left = Length.Percent((i * 61 % 100));
+                UIKit.Border(b, 2f, new Color(1f, 1f, 1f, 0.55f));
+                b.style.backgroundColor = new Color(1f, 1f, 1f, 0.08f);
+                b.style.left = Length.Percent(i * 61 % 100);
                 bubbleSeed[i] = i * 0.618f % 1f;
                 bubbleLayer.Add(b);
                 bubbles[i] = b;
             }
 
             var center = UIKit.Col();
+            UIKit.FillParent(center);
             center.style.alignItems = Align.Center;
+            center.style.justifyContent = Justify.Center;
+            center.pickingMode = PickingMode.Ignore;
             root.Add(center);
-
-            var title = UIKit.Text("SEALEBRITIES", 120f, UIPalette.Text, true);
-            title.style.letterSpacing = 10f;
-            UIKit.Shadow(title, 18f, 0.6f);
-            center.Add(title);
-
-            var pill = UIKit.Row();
-            pill.style.backgroundColor = UIPalette.Live;
-            UIKit.Radius(pill, 999f);
-            UIKit.Pad(pill, 7f, 18f, 7f, 16f);
-            pill.style.marginTop = 4f;
-            var dot = UIKit.Dot(Color.white, 10f);
-            dot.style.marginRight = 10f;
-            pill.Add(dot);
-            var pillText = UIKit.Text("LIVE FROM THE DEEP", 20f, Color.white, true);
-            pillText.style.letterSpacing = 4f;
-            pill.Add(pillText);
-            center.Add(pill);
-
-            center.Add(UIKit.Spacer(80f));
+            center.Add(UILogo.Build(118f, 1000f, 150f, TextAnchor.MiddleCenter));
 
             var barBox = UIKit.Col();
-            barBox.style.width = 760f;
+            barBox.style.width = 480f;
+            barBox.style.marginTop = 60f;
+            barBox.style.alignItems = Align.Center;
             center.Add(barBox);
-            bar = new UIBar(10f, UIPalette.Lagoon, new Color(1f, 1f, 1f, 0.08f));
+            bar = new UIBar(10f, Color.white, new Color(1f, 1f, 1f, 0.25f));
+            bar.style.width = 480f;
             barBox.Add(bar);
-            var row = UIKit.Row();
-            row.style.marginTop = 12f;
-            status = UIKit.Text("", 16f, UIPalette.TextDim);
-            row.Add(status);
-            row.Add(UIKit.Flex());
-            percent = UIKit.Text("0 %", 16f, UIPalette.Text, true);
-            row.Add(percent);
-            barBox.Add(row);
+            status = UIKit.HudText("", 18f, new Color(1f, 1f, 1f, 0.85f), false);
+            status.style.marginTop = 12f;
+            barBox.Add(status);
 
-            var tipBox = UIKit.Col();
-            tipBox.style.position = Position.Absolute;
-            tipBox.style.bottom = 70f;
-            tipBox.style.left = 0; tipBox.style.right = 0;
-            tipBox.style.alignItems = Align.Center;
-            root.Add(tipBox);
-            tipCaption = UIKit.Caption("Tipp", UIPalette.Sun, 13f);
-            tipCaption.style.marginBottom = 8f;
-            tipBox.Add(tipCaption);
-            tip = UIKit.Text("", 19f, UIPalette.Text);
-            tip.style.maxWidth = 1100f;
-            tip.style.whiteSpace = WhiteSpace.Normal;
-            tip.style.unityTextAlign = TextAnchor.MiddleCenter;
-            tipBox.Add(tip);
+            var factBox = UIKit.Col();
+            factBox.style.position = Position.Absolute;
+            factBox.style.bottom = 70f;
+            factBox.style.left = 0; factBox.style.right = 0;
+            factBox.style.alignItems = Align.Center;
+            root.Add(factBox);
+            factCaption = UIKit.HudText("", 18f, UIPalette.Sand);
+            factCaption.style.marginBottom = 8f;
+            factBox.Add(factCaption);
+            fact = UIKit.HudText("", 26f);
+            fact.style.maxWidth = 1100f;
+            fact.style.whiteSpace = WhiteSpace.Normal;
+            fact.style.unityTextAlign = TextAnchor.MiddleCenter;
+            factBox.Add(fact);
 
             UIKit.IgnorePicking(root);
             root.pickingMode = PickingMode.Position;   // block clicks to the menu underneath
-            tipIndex = Random.Range(0, Tips.GetLength(0));
+            factIndex = Random.Range(0, Facts.GetLength(0));
             RefreshTexts();
             root.style.display = DisplayStyle.None;
         }
@@ -131,8 +187,6 @@ namespace Sealebrities
             root.style.display = DisplayStyle.Flex;
             root.style.opacity = 1f;
             bar.SetValue(progress01);
-            int pc = Mathf.RoundToInt(Mathf.Clamp01(progress01) * 100f);
-            if (pc != lastPercent) { lastPercent = pc; percent.text = pc + " %"; }
             if (!ReferenceEquals(text, lastText)) { lastText = text; status.text = text ?? ""; }
         }
 
@@ -142,10 +196,31 @@ namespace Sealebrities
             fadeOut = 0f;
         }
 
+        /// Key placeholders in tips → the player's current bindings (only when a tip is shown).
+        static string WithKeys(string s)
+        {
+            if (s == null || s.IndexOf('{') < 0) return s;
+            return s.Replace("{R1}", GameInput.BindingLabel(GameAction.RightSlot1))
+                    .Replace("{R3}", GameInput.BindingLabel(GameAction.RightSlot3))
+                    .Replace("{L1}", GameInput.BindingLabel(GameAction.LeftSlot1))
+                    .Replace("{L3}", GameInput.BindingLabel(GameAction.LeftSlot3))
+                    .Replace("{INV}", GameInput.BindingLabel(GameAction.Inventory));
+        }
+
         public void RefreshTexts()
         {
-            tipCaption.text = Loc.Tr("TIPP", "TIP");
-            tip.text = Loc.Tr(Tips[tipIndex, 0], Tips[tipIndex, 1]);
+            if (showingTip)
+            {
+                int i = factIndex % Tips.GetLength(0);
+                factCaption.text = Loc.Tr("TIPP", "TIP");
+                fact.text = WithKeys(Loc.Tr(Tips[i, 0], Tips[i, 1]));
+            }
+            else
+            {
+                int i = factIndex % Facts.GetLength(0);
+                factCaption.text = Loc.Tr("WUSSTEST DU?", "DID YOU KNOW?");
+                fact.text = Loc.Tr(Facts[i, 0], Facts[i, 1]);
+            }
         }
 
         public void Tick(float dt)
@@ -160,23 +235,38 @@ namespace Sealebrities
                 if (a <= 0f) { root.style.display = DisplayStyle.None; fadeOut = -1f; }
             }
 
-            tipTimer += dt;
-            if (tipTimer > 5.5f)
+            factTimer += dt;
+            if (factTimer > 6f)
             {
-                tipTimer = 0f;
-                tipIndex = (tipIndex + 1) % Tips.GetLength(0);
+                factTimer = 0f;
+                shownCount++;
+                showingTip = shownCount % 3 == 2;   // every third card is a game tip
+                factIndex++;
                 RefreshTexts();
             }
-            float tipAlpha = Mathf.Clamp01(Mathf.Min(tipTimer / 0.4f, (5.5f - tipTimer) / 0.4f));
-            tip.style.opacity = tipAlpha;
+            fact.style.opacity = Mathf.Clamp01(Mathf.Min(factTimer / 0.4f, (6f - factTimer) / 0.4f));
+            factCaption.style.opacity = fact.style.opacity;
 
             for (int i = 0; i < bubbles.Length; i++)
             {
-                float speed = 0.05f + bubbleSeed[i] * 0.07f;
+                float speed = 0.06f + bubbleSeed[i] * 0.08f;
                 float y = Mathf.Repeat(bubbleSeed[i] + time * speed, 1f);
                 bubbles[i].style.top = Length.Percent(105f - y * 115f);
                 bubbles[i].style.translate = new Translate(Mathf.Sin(time * (0.8f + bubbleSeed[i]) + i) * 14f, 0f);
             }
+            for (int i = 0; i < bands.Length; i++)
+                bands[i].style.translate = new Translate(Mathf.Sin(time * 0.6f + i * 1.7f) * 40f, 0f);
+
+            // a fish crossing every ~4 s, alternating direction
+            fishTimer += dt;
+            const float cross = 4f;
+            float f = Mathf.Repeat(fishTimer, cross) / cross;
+            bool leftToRight = Mathf.FloorToInt(fishTimer / cross) % 2 == 0;
+            float x = leftToRight ? Mathf.Lerp(-10f, 105f, f) : Mathf.Lerp(105f, -10f, f);
+            fish.style.left = Length.Percent(x);
+            fish.style.top = Length.Percent(56f + Mathf.Sin(fishTimer * 1.7f) * 3f + (leftToRight ? 0f : 12f));
+            // the glyph faces right (head on the left, tail right) – mirror it when swimming right
+            fish.style.scale = new Scale(new Vector2(leftToRight ? -1f : 1f, 1f));
         }
     }
 }

@@ -2,6 +2,8 @@ namespace Sealebrities
 {
     public enum Language { German, English }
 
+    /// Only Snorkeler ("Entspannt"), OpenWater ("Normal") and Advanced ("Schwer") are selectable
+    /// (DifficultySettings.Selectable). Technical/Abyss stay for old saves and are treated as Advanced.
     public enum Difficulty { Snorkeler, OpenWater, Advanced, Technical, Abyss }
 
     public enum SizeTier { Tiny, Normal, Large, Huge, Legendary }
@@ -20,5 +22,5 @@ namespace Sealebrities
 
     public enum TitleStyle { Honest, Spicy, Clickbait }
 
-    public enum GearSlot { Tank, Fins, Lamp, Camera, Boat, Submarine }
+    public enum GearSlot { Tank, Fins, Lamp, Camera, Boat, Submarine, Rod }
 }

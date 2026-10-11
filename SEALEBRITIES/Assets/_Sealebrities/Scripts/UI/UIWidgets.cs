@@ -4,7 +4,7 @@ using UnityEngine.UIElements;
 
 namespace Sealebrities
 {
-    /// Widgets shared by the main menu, the pause menu and the phone settings app.
+    /// Widgets shared by the menus, the phone apps and the inventory (light card theme).
     public static class UIWidgets
     {
         public struct ControlEntry
@@ -16,60 +16,80 @@ namespace Sealebrities
         public static UISegmented LanguageSelector(float fontSize = 15f)
         {
             int sel = Loc.Current == Language.German ? 0 : 1;
-            return new UISegmented(new[] { "Deutsch", "English" }, sel,
-                i => Loc.SetLanguage(i == 0 ? Language.German : Language.English), UIPalette.Lagoon, fontSize);
+            return new UISegmented(new[] { "Deutsch", "English" }, sel, i =>
+            {
+                Settings.Data.language = i == 0 ? Language.German : Language.English;
+                Settings.Apply();
+                Settings.Save();
+            }, UIPalette.Turquoise, fontSize);
         }
 
-        /// Mouse sensitivity slider writing GameManager.I.State.mouseSensitivity, with a live value label.
-        public static VisualElement SensitivityRow()
+        /// Mouse sensitivity slider writing Settings.Data.mouseSensitivity, with a live value label.
+        public static VisualElement SensitivityRow(float fontSize = 16f)
         {
             var col = UIKit.Col();
             var head = UIKit.Row();
-            head.Add(UIKit.Text(Loc.Tr("Mausempfindlichkeit", "Mouse sensitivity"), 16f, UIPalette.TextDim, true));
+            head.Add(UIKit.Text(Loc.Tr("Mausempfindlichkeit", "Mouse sensitivity"), fontSize, UIPalette.InkSoft, true));
             head.Add(UIKit.Flex());
-            float current = GameManager.I != null ? GameManager.I.State.mouseSensitivity : 1f;
-            var value = UIKit.Text(UIKit.Mult(current), 16f, UIPalette.Text, true);
+            float current = Settings.Data.mouseSensitivity;
+            var value = UIKit.Text(UIKit.Mult(current), fontSize, UIPalette.Ink, true);
             head.Add(value);
             col.Add(head);
             var slider = new UISlider(0.2f, 3f, current, v =>
             {
                 v = Mathf.Round(v * 20f) / 20f;
-                if (GameManager.I != null) GameManager.I.State.mouseSensitivity = v;
+                Settings.Data.mouseSensitivity = v;
+                Settings.MarkDirty();
                 value.text = UIKit.Mult(v);
-            }, UIPalette.Lagoon);
+            }, UIPalette.Turquoise, _ => Settings.Save(), fontSize * 2f);
             slider.style.marginTop = 6f;
             col.Add(slider);
             return col;
         }
 
+        /// Short controls overview built from the current key bindings.
         public static List<ControlEntry> ControlsList()
         {
+            string L(GameAction a) => GameInput.BindingLabel(a);
             return new List<ControlEntry>
             {
-                new ControlEntry { keys = new[] { "W", "A", "S", "D" }, action = Loc.Tr("Laufen / Schwimmen", "Walk / swim") },
-                new ControlEntry { keys = new[] { Loc.Tr("Maus", "Mouse") }, action = Loc.Tr("Umsehen", "Look around") },
-                new ControlEntry { keys = new[] { Loc.Tr("Leertaste", "Space") }, action = Loc.Tr("Springen / Auftauchen", "Jump / swim up") },
-                new ControlEntry { keys = new[] { Loc.Tr("Strg", "Ctrl"), "C" }, action = Loc.Tr("Abtauchen", "Dive down") },
-                new ControlEntry { keys = new[] { "Shift" }, action = Loc.Tr("Sprinten / schneller schwimmen", "Sprint / swim faster") },
-                new ControlEntry { keys = new[] { "E" }, action = Loc.Tr("Interagieren (Boot, Bett, Kisten, Angeln)", "Interact (boat, bed, crates, fishing)") },
-                new ControlEntry { keys = new[] { "F" }, action = Loc.Tr("Taschenlampe", "Flashlight") },
-                new ControlEntry { keys = new[] { "Tab", "P" }, action = Loc.Tr("Handy (ClamOS)", "Phone (ClamOS)") },
-                new ControlEntry { keys = new[] { "J" }, action = Loc.Tr("Sealog-Tagebuch", "Sealog journal") },
-                new ControlEntry { keys = new[] { "Esc" }, action = Loc.Tr("Pause / Zurück", "Pause / back") },
-                new ControlEntry { keys = new[] { Loc.Tr("Rechte Maustaste", "Right mouse") }, action = Loc.Tr("Kamera zielen", "Aim camera") },
-                new ControlEntry { keys = new[] { Loc.Tr("Linke Maustaste", "Left mouse") }, action = Loc.Tr("Aufnahme starten / stoppen", "Start / stop recording") },
-                new ControlEntry { keys = new[] { Loc.Tr("Mausrad", "Mouse wheel") }, action = Loc.Tr("Zoom", "Zoom") },
-                new ControlEntry { keys = new[] { "Q" }, action = Loc.Tr("Anker werfen (Boot)", "Drop anchor (boat)") },
+                new ControlEntry { keys = new[] { L(GameAction.Forward), L(GameAction.Left), L(GameAction.Back), L(GameAction.Right) }, action = Loc.Tr("Laufen / Schwimmen", "Walk / swim") },
+                new ControlEntry { keys = new[] { L(GameAction.Jump) }, action = Loc.Tr("Springen / Auftauchen", "Jump / swim up") },
+                new ControlEntry { keys = new[] { L(GameAction.Down) }, action = Loc.Tr("Abtauchen", "Dive down") },
+                new ControlEntry { keys = new[] { L(GameAction.Sprint) }, action = Loc.Tr("Sprinten", "Sprint") },
+                new ControlEntry { keys = new[] { L(GameAction.Interact) }, action = Loc.Tr("Benutzen", "Interact") },
+                new ControlEntry { keys = new[] { L(GameAction.RightSlot1), L(GameAction.RightSlot2), L(GameAction.RightSlot3) }, action = Loc.Tr("Rechte Hand", "Right hand") },
+                new ControlEntry { keys = new[] { L(GameAction.LeftSlot1), L(GameAction.LeftSlot2), L(GameAction.LeftSlot3) }, action = Loc.Tr("Linke Hand", "Left hand") },
+                new ControlEntry { keys = new[] { L(GameAction.Use) }, action = Loc.Tr("Aufnehmen / Auswerfen", "Record / cast") },
+                new ControlEntry { keys = new[] { L(GameAction.Aim) }, action = Loc.Tr("Zielen", "Aim") },
+                new ControlEntry { keys = new[] { L(GameAction.Photo) }, action = Loc.Tr("Foto", "Photo") },
+                new ControlEntry { keys = new[] { L(GameAction.LightToggle) }, action = Loc.Tr("Lampe an/aus", "Lamp on/off") },
+                new ControlEntry { keys = new[] { L(GameAction.Phone) }, action = Loc.Tr("Handy", "Phone") },
+                new ControlEntry { keys = new[] { L(GameAction.Inventory) }, action = Loc.Tr("Inventar", "Inventory") },
+                new ControlEntry { keys = new[] { L(GameAction.Journal) }, action = "Sealog" },
+                new ControlEntry { keys = new[] { L(GameAction.Anchor) }, action = Loc.Tr("Anker", "Anchor") },
+                new ControlEntry { keys = new[] { L(GameAction.PushToTalk) }, action = Loc.Tr("Sprechen", "Talk") },
             };
         }
 
-        /// Species icon element (discovered: colored icon, undiscovered: black silhouette).
+        /// Species icon element (discovered: colored icon, undiscovered: flat grey silhouette #8C96A3).
         public static VisualElement SpeciesIcon(SpeciesDef s, bool discovered, float w, float h)
         {
             var e = new VisualElement { pickingMode = PickingMode.Ignore };
             UIKit.Size(e, w, h);
-            UIKit.Image(e, UICreatureIcons.Get(s));
-            e.style.unityBackgroundImageTintColor = discovered ? Color.white : new Color(0.02f, 0.04f, 0.07f, 0.92f);
+            if (discovered)
+            {
+                UIKit.Image(e, UICreatureIcons.Get(s));
+                return e;
+            }
+            var sil = UICreatureIcons.Silhouette(s);
+            if (sil != null) UIKit.Image(e, sil);
+            else
+            {
+                // texture not readable: darken the colored icon instead
+                UIKit.Image(e, UICreatureIcons.Get(s));
+                e.style.unityBackgroundImageTintColor = new Color(0.30f, 0.33f, 0.38f, 0.6f);
+            }
             return e;
         }
 
@@ -77,71 +97,155 @@ namespace Sealebrities
         public static Label TierBadge(SizeTier t, float size = 11f)
         {
             var c = Progression.TierColor(t);
-            return UIKit.Pill(Loc.TierName(t), c, UIPalette.Deep, size);
+            if (t == SizeTier.Normal) c = UIPalette.CardAlt;
+            return UIKit.Pill(Loc.TierName(t), c, UIPalette.Ink, size);
         }
 
-        /// Value/label tile used in stats rows.
-        public static VisualElement StatTile(string value, string label, Color valueColor)
+        /// Value/label tile used in stats rows (white tile on a light card).
+        public static VisualElement StatTile(string value, string label, Color valueColor, float size = 19f)
         {
             var tile = UIKit.Col();
             tile.style.flexGrow = 1;
             tile.style.flexBasis = 0;
-            tile.style.backgroundColor = new Color(1f, 1f, 1f, 0.05f);
-            UIKit.Radius(tile, 12f);
-            UIKit.Pad(tile, 10f, 12f, 10f, 12f);
-            var v = UIKit.Text(value, 19f, valueColor, true);
+            tile.style.backgroundColor = Color.white;
+            UIKit.Radius(tile, 14f);
+            UIKit.Pad(tile, size * 0.5f, size * 0.6f, size * 0.5f, size * 0.6f);
+            var v = UIKit.Text(value, size, valueColor, true);
             tile.Add(v);
-            var l = UIKit.Text(label, 11.5f, UIPalette.TextFaint);
+            var l = UIKit.Text(label, size * 0.62f, UIPalette.InkSoft);
             l.style.marginTop = 2f;
+            l.style.whiteSpace = WhiteSpace.Normal;
             tile.Add(l);
             return tile;
         }
 
-        public static VisualElement SectionTitle(string text, Color? color = null)
+        /// Icon + big value (no label) – "less text, more icons".
+        public static VisualElement IconStat(UIGlyph.DrawFn icon, Color iconColor, string value, Color valueColor, float size = 24f)
         {
-            var l = UIKit.Caption(text, color ?? UIPalette.TextFaint, 12f);
-            l.style.marginTop = 16f;
-            l.style.marginBottom = 8f;
+            var row = UIKit.Row();
+            row.style.flexGrow = 1;
+            row.style.flexBasis = 0;
+            row.style.backgroundColor = Color.white;
+            UIKit.Radius(row, 16f);
+            UIKit.Pad(row, size * 0.45f, size * 0.55f, size * 0.45f, size * 0.45f);
+            var g = new UIGlyph(icon, iconColor, size * 1.15f);
+            g.style.marginRight = size * 0.35f;
+            row.Add(g);
+            var v = UIKit.Text(value, size, valueColor, true);
+            v.style.flexShrink = 1;
+            row.Add(v);
+            return row;
+        }
+
+        public static VisualElement SectionTitle(string text, Color? color = null, float size = 12f)
+        {
+            var l = UIKit.Caption(text, color ?? UIPalette.InkSoft, size);
+            l.style.marginTop = size * 1.4f;
+            l.style.marginBottom = size * 0.7f;
             return l;
         }
 
-        public static VisualElement Notice(string text, Color accent, UIGlyph.DrawFn icon = null)
+        public static VisualElement Notice(string text, Color accent, UIGlyph.DrawFn icon = null, float size = 13.5f)
         {
             var row = UIKit.Row();
             row.style.alignItems = Align.FlexStart;
-            row.style.backgroundColor = UIPalette.A(accent, 0.13f);
-            UIKit.Radius(row, 12f);
-            UIKit.Pad(row, 10f, 12f, 10f, 12f);
+            row.style.backgroundColor = UIPalette.A(accent, 0.16f);
+            UIKit.Radius(row, 14f);
+            UIKit.Pad(row, size * 0.75f, size * 0.9f, size * 0.75f, size * 0.9f);
             row.style.marginBottom = 8f;
+            Color ink = Ink(accent);
             if (icon != null)
             {
-                var g = new UIGlyph(icon, accent, 18f);
-                g.style.marginRight = 8f;
-                g.style.marginTop = 1f;
+                var g = new UIGlyph(icon, ink, size * 1.35f);
+                g.style.marginRight = size * 0.6f;
                 row.Add(g);
             }
-            var t = UIKit.Para(text, 13.5f, accent);
+            var t = UIKit.Para(text, size, ink);
             t.style.flexShrink = 1;
             t.style.flexGrow = 1;
             row.Add(t);
             return row;
         }
 
+        /// Readable text version of an accent color on light cards.
+        public static Color Ink(Color accent)
+        {
+            float lum = accent.r * 0.299f + accent.g * 0.587f + accent.b * 0.114f;
+            return lum > 0.5f ? UIPalette.Darken(accent, 0.45f) : accent;
+        }
+
         /// Key/value line ("Tiefe   1–12 m").
-        public static VisualElement InfoLine(string key, string value, Color? valueColor = null)
+        public static VisualElement InfoLine(string key, string value, Color? valueColor = null, float size = 14f)
         {
             var row = UIKit.Row();
-            row.style.paddingTop = 6f; row.style.paddingBottom = 6f;
+            row.style.paddingTop = size * 0.45f; row.style.paddingBottom = size * 0.45f;
             row.style.borderBottomWidth = 1f;
             row.style.borderBottomColor = UIPalette.Line;
-            var k = UIKit.Text(key, 13.5f, UIPalette.TextFaint);
-            k.style.width = 130f;
+            var k = UIKit.Text(key, size * 0.95f, UIPalette.InkSoft);
+            k.style.width = size * 9.5f;
             row.Add(k);
-            var v = UIKit.Text(value, 14f, valueColor ?? UIPalette.Text, true);
+            var v = UIKit.Text(value, size, valueColor ?? UIPalette.Ink, true);
             v.style.flexShrink = 1;
             v.style.whiteSpace = WhiteSpace.Normal;
             row.Add(v);
             return row;
+        }
+
+        /// Colored rounded-square app/category icon with a white glyph.
+        public static VisualElement IconTile(UIGlyph.DrawFn icon, Color color, float size)
+        {
+            var tile = UIKit.Box();
+            UIKit.Size(tile, size, size);
+            UIKit.Radius(tile, size * 0.24f);
+            tile.style.backgroundColor = color;
+            UIKit.Center(tile);
+            tile.style.borderBottomWidth = Mathf.Max(2f, size * 0.05f);
+            tile.style.borderBottomColor = UIPalette.Darken(color, 0.18f);
+            tile.Add(new UIGlyph(icon, UIPalette.OnColor(color) == UIPalette.Ink ? UIPalette.Ink : Color.white, size * 0.58f));
+            tile.pickingMode = PickingMode.Ignore;
+            return tile;
+        }
+
+        /// Light modal card used by menu overlays (settings, difficulty, inventory).
+        public static VisualElement ModalCard(float width)
+        {
+            var card = UIKit.Card(UIPalette.A(UIPalette.Card, 0.97f), 28f, 30f);
+            card.style.width = width;
+            card.style.maxWidth = Length.Percent(94f);
+            card.style.maxHeight = Length.Percent(92f);
+            UIKit.Lift(card, 1.4f);
+            return card;
+        }
+
+        /// Big header row: icon tile + title (+ optional close button on the right).
+        public static VisualElement Header(UIGlyph.DrawFn icon, Color color, string title, System.Action onClose, float size = 34f)
+        {
+            var row = UIKit.Row();
+            row.style.marginBottom = size * 0.5f;
+            if (icon != null)
+            {
+                var t = IconTile(icon, color, size * 1.4f);
+                t.style.marginRight = size * 0.45f;
+                row.Add(t);
+            }
+            var l = UIKit.Text(title, size, UIPalette.Ink, true);
+            l.style.flexShrink = 1;
+            row.Add(l);
+            row.Add(UIKit.Flex());
+            if (onClose != null) row.Add(RoundIconButton(UIGlyphs.Cross, onClose, size * 1.2f));
+            return row;
+        }
+
+        /// Round light button with a glyph (close, back, delete …).
+        public static VisualElement RoundIconButton(UIGlyph.DrawFn icon, System.Action onClick, float size, Color? iconColor = null)
+        {
+            var b = UIKit.Box();
+            UIKit.Size(b, size, size);
+            UIKit.Radius(b, size * 0.5f);
+            UIKit.Center(b);
+            b.Add(new UIGlyph(icon, iconColor ?? UIPalette.Ink, size * 0.5f));
+            UIKit.Clickable(b, onClick, UIPalette.A(UIPalette.Ink, 0.07f), UIPalette.A(UIPalette.Ink, 0.15f));
+            return b;
         }
     }
 }

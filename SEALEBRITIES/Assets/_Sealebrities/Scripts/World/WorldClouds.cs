@@ -4,12 +4,14 @@ using UnityEngine.Rendering;
 
 namespace Sealebrities
 {
-    /// A handful of chunky, faceted low-poly cloud puffs drifting slowly with the wind. They live in a toroidal field
+    /// A few big, chunky, faceted cumulus clouds (How to Fish: 60-120 m long, 14-24 m tall, flat bottoms, 2-3 stacked
+    /// puffy layers, 220-320 m up, ≤ 8 % of the sky) drifting slowly with the wind. They live in a toroidal field
     /// around the camera (world-anchored, so they show parallax) and shrink to nothing before wrapping to the far side.
-    /// Lit by sun/moon like everything else (pink-gold at sunset), with a soft emission floor so shaded sides stay bright.
+    /// Lit by sun/moon like everything else (peach at golden hour), with a bright emission floor so undersides stay
+    /// light (never darker than #DCE5F1 by day). Deterministic (fixed seed).
     public sealed class WorldClouds
     {
-        const int Count = 15;
+        const int Count = 9;
         const int Variants = 5;
         const float Half = 1500f;                       // field half-size around the camera
         static readonly Vector2 Wind = new Vector2(-1.5f, 0.6f);   // m/s, trade wind from the east
@@ -59,13 +61,15 @@ namespace Sealebrities
                 objs[i] = go.transform;
                 rends[i] = r;
 
-                // spread on a jittered grid so the sky never clumps
-                int gx = i % 4, gz = i / 4;
-                anchor[i] = new Vector2((gx + 0.5f + Range(rng, -0.35f, 0.35f)) / 4f * 2f * Half - Half,
-                                        (gz + 0.5f + Range(rng, -0.35f, 0.35f)) / 4f * 2f * Half - Half);
-                altitude[i] = Range(rng, 150f, 250f);
-                float len = Range(rng, 34f, 62f);
-                shape[i] = new Vector3(len, len * Range(rng, 0.55f, 0.75f), len * Range(rng, 0.7f, 1f));
+                // spread on a jittered 3 x 3 grid so the sky never clumps
+                int gx = i % 3, gz = i / 3;
+                anchor[i] = new Vector2((gx + 0.5f + Range(rng, -0.3f, 0.3f)) / 3f * 2f * Half - Half,
+                                        (gz + 0.5f + Range(rng, -0.3f, 0.3f)) / 3f * 2f * Half - Half);
+                altitude[i] = Range(rng, 220f, 320f);
+                // the unit mesh is ~2 long, ~1 tall (puff stack) and ~1 deep
+                // (art polish: ×1.35 – from the beach the 60-120 m clouds read as tiny "UFO" puffs near the horizon)
+                float len = Range(rng, 60f, 120f) * 1.35f;
+                shape[i] = new Vector3(len * 0.5f, Range(rng, 14f, 24f) * 1.35f, len * Range(rng, 0.28f, 0.4f));
                 go.transform.rotation = Quaternion.Euler(0f, Range(rng, -25f, 25f) + (Mathf.Atan2(Wind.x, Wind.y) * Mathf.Rad2Deg + 90f), 0f);
             }
         }
@@ -114,27 +118,42 @@ namespace Sealebrities
         }
 
         // ------------------------------------------------------------------ meshes
-        /// 3-6 overlapping jittered icosphere puffs along x with a flat bottom, flat shaded. Unit size ~2 x 0.8 x 1.
+        /// 4-6 overlapping jittered icosphere puffs along x, a second (and sometimes third) stacked layer of smaller
+        /// puffs on top, all on a flat bottom, flat shaded. Unit size ~2 x 1 x 1.
         static Mesh BuildCloudMesh(System.Random rng, int variant)
         {
-            var verts = new List<Vector3>(512);
-            var tris = new List<int>(1536);
-            int puffs = 3 + variant % 4;
-            float span = 1.7f;
+            var verts = new List<Vector3>(1024);
+            var tris = new List<int>(3072);
+            int puffs = 4 + variant % 3;
+            float span = 1.6f;
             for (int p = 0; p < puffs; p++)
             {
                 float f = puffs == 1 ? 0.5f : p / (float)(puffs - 1);
-                float x = (f - 0.5f) * span + Range(rng, -0.12f, 0.12f);
+                float x = (f - 0.5f) * span + Range(rng, -0.1f, 0.1f);
                 float mid = 1f - Mathf.Abs(f - 0.5f) * 2f;                   // bigger puffs in the middle
-                float r = Mathf.Lerp(0.32f, 0.55f, mid) * Range(rng, 0.85f, 1.15f);
-                var c = new Vector3(x, r * Range(rng, 0.2f, 0.45f), Range(rng, -0.18f, 0.18f));
+                float r = Mathf.Lerp(0.3f, 0.48f, mid) * Range(rng, 0.88f, 1.12f);
+                var c = new Vector3(x, r * Range(rng, 0.15f, 0.3f), Range(rng, -0.12f, 0.12f));
                 AddPuff(verts, tris, c, r, rng);
+            }
+            // stacked upper layers: the cauliflower top of a fair-weather cumulus
+            int upper = 2 + variant % 2;
+            for (int p = 0; p < upper; p++)
+            {
+                float f = upper == 1 ? 0.5f : p / (float)(upper - 1);
+                float r = Range(rng, 0.27f, 0.36f);
+                var c = new Vector3((f - 0.5f) * 0.8f + Range(rng, -0.12f, 0.12f), 0.42f + Range(rng, 0f, 0.1f), Range(rng, -0.1f, 0.1f));
+                AddPuff(verts, tris, c, r, rng);
+            }
+            if (variant % 2 == 0)
+            {
+                float r = Range(rng, 0.2f, 0.26f);
+                AddPuff(verts, tris, new Vector3(Range(rng, -0.2f, 0.2f), 0.72f, 0f), r, rng);
             }
             // a couple of small side puffs for a lumpier silhouette
             for (int p = 0; p < 2; p++)
             {
-                float r = Range(rng, 0.2f, 0.3f);
-                var c = new Vector3(Range(rng, -0.5f, 0.5f), r * 0.6f + 0.15f, (p == 0 ? 1f : -1f) * Range(rng, 0.25f, 0.4f));
+                float r = Range(rng, 0.18f, 0.26f);
+                var c = new Vector3(Range(rng, -0.5f, 0.5f), r * 0.6f + 0.12f, (p == 0 ? 1f : -1f) * Range(rng, 0.25f, 0.35f));
                 AddPuff(verts, tris, c, r, rng);
             }
             // flat base

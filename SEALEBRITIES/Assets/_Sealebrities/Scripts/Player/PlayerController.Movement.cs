@@ -2,7 +2,8 @@ using UnityEngine;
 
 namespace Sealebrities
 {
-    /// Movement: walking, jumping, moving platforms, surface swimming, diving, climbing out, seats, teleports and water state.
+    /// Movement: walking, jumping (with head-room checks), moving platforms (boat deck, also when another machine
+    /// drives the boat), surface swimming, diving, climbing out, the dock ladder, seats, teleports and water state.
     public partial class PlayerController
     {
         const float WalkSpeed = 4f;
@@ -13,18 +14,22 @@ namespace Sealebrities
         const float DiveSpeed = 2.6f;
         /// Eye height above the wave surface while swimming at the surface.
         const float SurfaceEyeOffset = 0.15f;
+        const float LadderReach = 2.3f;
 
         Vector3 vel;    // own velocity; on land while grounded it is relative to the platform below
         bool grounded, wasGrounded, jumpedThisFrame, groundHit;
         float groundGap = 10f;
-        Rigidbody groundRb;
+        Transform groundPlatform;
+        Rigidbody groundPlatformRb;
 
-        // moving platform (boat deck)
+        // moving platform (boat deck): carried by the exact transform delta of the platform root every frame
         Transform platform;
         Rigidbody platformRb;
-        Vector3 platformLocalPos, platformVel;
+        Vector3 platformLocalPos, platformVel, platformPrevRoot;
         float platformYaw;
         bool platformFresh;
+        /// Placed onto a moving deck (rescue point, helm exit, ladder, co-op): keep riding it until the feet touch down.
+        float platformGraceUntil;
         /// After teleports / climbing out we already move with the deck: don't convert world to deck velocity on landing.
         bool suppressLandingConvert;
 
@@ -42,8 +47,14 @@ namespace Sealebrities
         float vaultT;
         Vector3 vaultFrom, vaultTargetWorld, vaultTargetLocal;
         Transform vaultRef;
-        bool canVaultHint;
+        bool canVaultHint, canLadderHint;
         float vaultHintTimer;
+
+        // dock ladder
+        bool ladderClimbing;
+        float ladderT;
+        Vector3 ladderP0, ladderP1, ladderP2, ladderP3;
+        float ladderYaw;
 
         Vector3 YawForward()
         {
@@ -90,7 +101,7 @@ namespace Sealebrities
             if (grounded)
             {
                 if (vel.y < 0f) vel.y = -2f;
-                if (input && GameInput.JumpPressed)
+                if (input && GameInput.JumpPressed && HeadRoom(0.35f) > 0.3f)
                 {
                     vel.y = Mathf.Sqrt(2f * Gravity * JumpHeight);
                     jumpedThisFrame = true;
@@ -101,8 +112,24 @@ namespace Sealebrities
             vel.z = planar.z;
 
             float preVy = vel.y;
-            CollisionFlags flags = cc.Move(vel * dt + carry);
+            Vector3 move = vel * dt + carry;
+            if (move.y > 0f)
+            {
+                // never move the head into a roof (thin / one-sided colliders are not always caught by the sweep)
+                float room = HeadRoom(move.y + 0.05f);
+                if (room < move.y)
+                {
+                    move.y = Mathf.Max(0f, room);
+                    if (vel.y > 0f) vel.y = 0f;
+                }
+            }
+            CollisionFlags flags = cc.Move(move);
             if ((flags & CollisionFlags.Above) != 0 && vel.y > 0f) vel.y = 0f;
+            if (move.y > 0.0001f && HeadOverlaps())
+            {
+                cc.Move(Vector3.down * move.y);
+                if (vel.y > 0f) vel.y = 0f;
+            }
 
             ProbeGround();
             // stick to the ground when walking down slopes and steps
@@ -125,6 +152,22 @@ namespace Sealebrities
             bobPhase = Mathf.Repeat(bobPhase + dt * hs * (Mathf.PI / 0.75f), Mathf.PI * 2f);
         }
 
+        /// Free distance above the head (up to max).
+        float HeadRoom(float max)
+        {
+            Vector3 top = transform.position + Vector3.up * (Height - Radius);
+            float skin = cc != null ? cc.skinWidth : 0.05f;
+            if (Physics.SphereCast(top, Radius * 0.9f, Vector3.up, out RaycastHit hit, max + skin, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+                return Mathf.Max(0f, hit.distance - skin);
+            return max;
+        }
+
+        bool HeadOverlaps()
+        {
+            Vector3 top = transform.position + Vector3.up * (Height - Radius);
+            return Physics.CheckSphere(top, Radius * 0.82f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+        }
+
         void ProbeGround()
         {
             wasGrounded = grounded;
@@ -133,7 +176,8 @@ namespace Sealebrities
             float r = Radius * 0.9f;
             groundHit = false;
             groundGap = 10f;
-            groundRb = null;
+            groundPlatform = null;
+            groundPlatformRb = null;
             if (Physics.SphereCast(p + Vector3.up * (Radius + lift), r, Vector3.down, out RaycastHit hit, 0.4f,
                                    Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
             {
@@ -141,44 +185,73 @@ namespace Sealebrities
                 {
                     groundHit = true;
                     groundGap = hit.distance - (lift + Radius - r);
-                    groundRb = hit.collider.attachedRigidbody;
+                    groundPlatform = PlatformOf(hit.collider, out groundPlatformRb);
                 }
             }
             grounded = cc.isGrounded || (groundHit && groundGap < 0.08f && vel.y <= 0.5f);
-            // deck edges: the sphere probe can miss while the controller still stands on the rigidbody
-            if (grounded && groundRb == null && ccGroundFrame == Time.frameCount && ccGroundRb != null) groundRb = ccGroundRb;
+            // deck edges: the sphere probe can miss while the controller still stands on the deck
+            if (grounded && groundPlatform == null && ccGroundFrame == Time.frameCount && ccGroundPlatform != null)
+            {
+                groundPlatform = ccGroundPlatform;
+                groundPlatformRb = ccGroundRb;
+            }
         }
 
+        /// The moving object a collider belongs to: its rigidbody, or the boat root (also when the boat is driven
+        /// by transform from another machine). Null for static ground.
+        static Transform PlatformOf(Collider c, out Rigidbody rb)
+        {
+            rb = null;
+            if (c == null) return null;
+            rb = c.attachedRigidbody;
+            if (rb != null) return rb.transform;
+            var boat = Refs.Boat;
+            if (Alive(boat))
+            {
+                Transform br = boat.Root;
+                if (br != null && c.transform.IsChildOf(br)) return br;
+            }
+            return null;
+        }
+
+        Transform ccGroundPlatform;
         Rigidbody ccGroundRb;
         int ccGroundFrame = -1;
 
         void OnControllerColliderHit(ControllerColliderHit hit)
         {
             if (hit.normal.y < 0.45f || hit.point.y > transform.position.y + Radius) return;
-            ccGroundRb = hit.collider != null ? hit.collider.attachedRigidbody : null;
+            ccGroundPlatform = PlatformOf(hit.collider, out ccGroundRb);
             ccGroundFrame = Time.frameCount;
         }
 
-        /// Tracks the rigidbody we stand on so its motion (incl. yaw) can be carried over next frame.
+        /// Tracks the platform we stand on so its motion (incl. yaw) can be carried over next frame.
         void UpdatePlatform()
         {
             Vector3 p = transform.position;
-            if (grounded && groundRb != null)
+            if (grounded && groundPlatform != null)
             {
-                Transform pt = groundRb.transform;
-                if (pt != platform)
+                if (groundPlatform != platform)
                 {
-                    if (!wasGrounded && !suppressLandingConvert)
+                    if (!wasGrounded && !suppressLandingConvert && groundPlatformRb != null && !groundPlatformRb.isKinematic)
                     {
                         // landing from a jump: our velocity was in world space, make it relative to the deck
-                        Vector3 pv = groundRb.GetPointVelocity(p);
+                        Vector3 pv = groundPlatformRb.GetPointVelocity(p);
                         vel.x -= pv.x;
                         vel.z -= pv.z;
                     }
-                    platform = pt;
-                    platformRb = groundRb;
+                    platform = groundPlatform;
+                    platformRb = groundPlatformRb;
                     platformFresh = true;
+                    platformPrevRoot = platform.position;
                 }
+                platformLocalPos = platform.InverseTransformPoint(p);
+                platformYaw = platform.eulerAngles.y;
+                platformGraceUntil = 0f;
+            }
+            else if (platform != null && !grounded && Time.time < platformGraceUntil)
+            {
+                // just placed above a moving deck: drop onto it while it carries us (otherwise it slides away below us)
                 platformLocalPos = platform.InverseTransformPoint(p);
                 platformYaw = platform.eulerAngles.y;
             }
@@ -197,7 +270,8 @@ namespace Sealebrities
             if (grounded) suppressLandingConvert = false;
         }
 
-        /// Motion of the platform under our feet since last frame (exact transform delta, rigidbody velocity on first contact).
+        /// Motion of the platform under our feet since last frame (exact transform delta; a dynamic rigidbody's point
+        /// velocity on first contact). Works for decks moved by physics and decks moved by transform (co-op).
         Vector3 ComputePlatformCarry(float dt)
         {
             if (platform == null)
@@ -208,10 +282,11 @@ namespace Sealebrities
             }
             Vector3 p = transform.position;
             Vector3 carry;
+            Vector3 root = platform.position;
             if (platformFresh)
             {
                 platformFresh = false;
-                if (platformRb != null)
+                if (platformRb != null && !platformRb.isKinematic)
                 {
                     carry = platformRb.GetPointVelocity(p) * dt;
                     yaw += platformRb.angularVelocity.y * Mathf.Rad2Deg * dt;
@@ -232,8 +307,26 @@ namespace Sealebrities
                 }
             }
             yaw = Mathf.Repeat(yaw, 360f);
-            platformVel = carry / dt;
+            Vector3 rv = (root - platformPrevRoot) / dt;
+            platformVel = rv.sqrMagnitude < 900f ? rv : Vector3.zero;
+            platformPrevRoot = root;
             return carry;
+        }
+
+        /// Late correction: a platform that moved after our Update (e.g. the co-op boat sync) still carries us this frame.
+        void LatePlatformCarry()
+        {
+            if (platform == null || !grounded || mode != PlayerMoveMode.Land || vaulting || ladderClimbing || cc == null || !cc.enabled) return;
+            Vector3 target = platform.TransformPoint(platformLocalPos);
+            Vector3 d = target - transform.position;
+            float yawD = Mathf.DeltaAngle(platformYaw, platform.eulerAngles.y);
+            if (d.sqrMagnitude < 1e-8f && Mathf.Abs(yawD) < 0.0005f) return;
+            if (d.sqrMagnitude > 4f) return;    // teleports are handled in Update
+            cc.Move(d);
+            yaw = Mathf.Repeat(yaw + yawD, 360f);
+            transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+            platformLocalPos = platform.InverseTransformPoint(transform.position);
+            platformYaw = platform.eulerAngles.y;
         }
 
         // ------------------------------------------------------------------ surface swimming
@@ -274,7 +367,10 @@ namespace Sealebrities
                 StartDive();
                 return;
             }
-            if (GameInput.JumpPressed || (GameInput.Ascend && mv.y > 0.3f)) TryVault();
+            if (GameInput.JumpPressed || (GameInput.Ascend && mv.y > 0.3f))
+            {
+                if (!TryLadder()) TryVault();
+            }
         }
 
         void StartDive()
@@ -283,6 +379,7 @@ namespace Sealebrities
             vel.y = Mathf.Min(vel.y, -1.6f);
             diveGrace = 0.55f;
             canVaultHint = false;
+            canLadderHint = false;
         }
 
         // ------------------------------------------------------------------ diving
@@ -352,7 +449,7 @@ namespace Sealebrities
             depth = Mathf.Max(0f, hEye - eye.y);
 
             bool inWater = isInWater;
-            if (seated) inWater = false;
+            if (seated || ladderClimbing) inWater = ladderClimbing ? isInWater && ladderT < 0.35f : false;
             else if (!isInWater)
             {
                 if (p.y < h - 1f) inWater = true;
@@ -385,22 +482,20 @@ namespace Sealebrities
                     platformRb = null;
                     lastWaveValid = false;
                     outOfWaterTimer = 0f;
+                    // the two-handed rod does not go swimming
+                    if (Hands.TryGetHeld(HoldItem.FishingRod, out Hand rodHand)) Hands.Stow(rodHand);
                     if (GameInput.Descend && !UIState.BlocksGameplay && !grounded) StartDive();
                     else mode = PlayerMoveMode.Surface;
                 }
                 else
                 {
-                    mode = PlayerMoveMode.Land;
+                    if (!ladderClimbing) mode = PlayerMoveMode.Land;
                     OnLeftWater();
                 }
             }
 
             bool under = !seated && (isUnderwater ? eye.y < hEye + 0.02f : eye.y < hEye - 0.02f);
-            if (under != isUnderwater)
-            {
-                isUnderwater = under;
-                GameEvents.RaiseUnderwaterChanged(under);
-            }
+            SetUnderwater(under);
         }
 
         void OnLeftWater()
@@ -408,6 +503,7 @@ namespace Sealebrities
             outOfWaterTimer = 0f;
             sprintingUnderwater = false;
             canVaultHint = false;
+            canLadderHint = false;
             if (vel.y > 0f) vel.y = 0f;
             var gm = GameManager.I;
             if (gm != null && gm.InGame && !menuMode) Footage.BankDive();
@@ -484,9 +580,12 @@ namespace Sealebrities
             return true;
         }
 
-        void TryVault()
+        /// Climbs out onto a ledge in front (also used by the interactor for E). Returns false when nothing is there.
+        public bool TryVault()
         {
-            if (!CheckVault(out Vector3 target, out Collider col)) return;
+            if (vaulting || ladderClimbing || mode != PlayerMoveMode.Surface || cc == null || !cc.enabled) return false;
+            if (!CheckVault(out Vector3 target, out Collider col)) return false;
+            Hands.StowAll();
             vaulting = true;
             vaultT = 0f;
             vaultFrom = transform.position;
@@ -498,7 +597,9 @@ namespace Sealebrities
             vel = Vector3.zero;
             landDip = 0.06f;
             canVaultHint = false;
+            canLadderHint = false;
             sprintingUnderwater = false;
+            return true;
         }
 
         void UpdateVault(float dt)
@@ -516,7 +617,13 @@ namespace Sealebrities
 
             vaulting = false;
             vaultRef = null;
+            FinishClimb();
+        }
+
+        void FinishClimb()
+        {
             cc.enabled = true;
+            Physics.SyncTransforms();
             vel = Vector3.zero;
             suppressLandingConvert = true;
             cc.Move(Vector3.down * 0.12f);
@@ -526,18 +633,89 @@ namespace Sealebrities
             landDip = 0.05f;
         }
 
+        // ------------------------------------------------------------------ dock ladder
+        /// The dock ladder published by the props module (PropInfo.DockLadderTop / Bottom), when swimming next to it.
+        bool LadderInReach(out Vector3 bottom, out Vector3 top)
+        {
+            bottom = PropInfo.DockLadderBottom;
+            top = PropInfo.DockLadderTop;
+            if (top == Vector3.zero || bottom == Vector3.zero) return false;
+            Vector3 p = transform.position;
+            float dx = p.x - bottom.x, dz = p.z - bottom.z;
+            return dx * dx + dz * dz < LadderReach * LadderReach && p.y < top.y;
+        }
+
+        /// Starts climbing the dock ladder (Space / E while swimming next to it). Returns false when out of reach.
+        public bool TryLadder()
+        {
+            if (vaulting || ladderClimbing || seated || IsFainting || rescueActive || cc == null || !cc.enabled) return false;
+            if (!isInWater || (mode == PlayerMoveMode.Dive && depth > 3f)) return false;
+            if (!LadderInReach(out Vector3 bottom, out Vector3 top)) return false;
+            if (mode == PlayerMoveMode.Dive)
+            {
+                mode = PlayerMoveMode.Surface;
+                sprintingUnderwater = false;
+            }
+            Hands.StowAll();
+            Vector3 p = transform.position;
+            float h = Waves.HeightAt(bottom.x, bottom.z);
+            ladderP0 = p;
+            ladderP1 = new Vector3(bottom.x, Mathf.Min(p.y, h - 1.35f), bottom.z);
+            ladderP2 = new Vector3(bottom.x, top.y + 0.06f, bottom.z);
+            ladderP3 = top + Vector3.up * 0.06f;
+            Vector3 face = new Vector3(top.x - bottom.x, 0f, top.z - bottom.z);
+            ladderYaw = face.sqrMagnitude > 1e-4f ? Mathf.Atan2(face.x, face.z) * Mathf.Rad2Deg : yaw;
+            ladderClimbing = true;
+            ladderT = 0f;
+            cc.enabled = false;
+            vel = Vector3.zero;
+            canVaultHint = false;
+            canLadderHint = false;
+            sprintingUnderwater = false;
+            return true;
+        }
+
+        void UpdateLadder(float dt)
+        {
+            const float tReach = 0.35f, tClimb = 1.15f, tOver = 0.45f;
+            ladderT += dt;
+            Vector3 pos;
+            if (ladderT < tReach) pos = Vector3.Lerp(ladderP0, ladderP1, Smooth01(ladderT / tReach));
+            else if (ladderT < tReach + tClimb)
+            {
+                float u = (ladderT - tReach) / tClimb;
+                pos = Vector3.Lerp(ladderP1, ladderP2, u);
+                // one little push per rung
+                float rung = Mathf.Sin(u * Mathf.PI * 7f);
+                landDip = Mathf.Max(0f, rung) * 0.03f;
+            }
+            else pos = Vector3.Lerp(ladderP2, ladderP3, Smooth01((ladderT - tReach - tClimb) / tOver));
+            yaw = Mathf.MoveTowardsAngle(yaw, ladderYaw, 240f * dt);
+            pitch = Mathf.MoveTowards(pitch, 0f, 60f * dt);
+            transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, yaw, 0f));
+            if (ladderT < tReach + tClimb + tOver) return;
+
+            ladderClimbing = false;
+            transform.position = ladderP3;
+            FinishClimb();
+            RecheckWaterAfterTeleport();
+        }
+
         void UpdateVaultHint(float dt)
         {
-            if (mode != PlayerMoveMode.Surface || vaulting || seated || !isInWater || IsFainting || rescueActive)
+            bool shallowDive = mode == PlayerMoveMode.Dive && depth <= 3f;
+            if ((mode != PlayerMoveMode.Surface && !shallowDive) || vaulting || ladderClimbing || seated || !isInWater || IsFainting || rescueActive)
             {
                 canVaultHint = false;
+                canLadderHint = false;
                 vaultHintTimer = 0f;
                 return;
             }
             vaultHintTimer -= dt;
             if (vaultHintTimer > 0f) return;
             vaultHintTimer = 0.2f;
-            canVaultHint = CheckVault(out _, out _);
+            canLadderHint = LadderInReach(out _, out _);
+            canVaultHint = !canLadderHint && mode == PlayerMoveMode.Surface && CheckVault(out _, out _);
         }
 
         // ------------------------------------------------------------------ seats (boat helm)
@@ -545,6 +723,8 @@ namespace Sealebrities
         {
             if (seatTransform == null || !initialized) return;
             if (vaulting) { vaulting = false; vaultRef = null; }
+            ladderClimbing = false;
+            Hands.StowAll();
             seat = seatTransform;
             seated = true;
             seatYaw = 0f;
@@ -554,13 +734,15 @@ namespace Sealebrities
             platformRb = null;
             grounded = false;
             canVaultHint = false;
+            canLadderHint = false;
             if (isInWater)
             {
                 isInWater = false;
                 OnLeftWater();
             }
             mode = PlayerMoveMode.Land;
-            pitch = Mathf.Clamp(pitch, -45f, 45f);
+            // look out over the bow, not down at the wheel you just clicked on (playtest)
+            pitch = 4f;     // a few degrees below the horizon: the bow and the water ahead through the windscreen
             FollowSeat();
             lastPosValid = false;
             camRotValid = false;
@@ -595,6 +777,7 @@ namespace Sealebrities
             if (!initialized) return;
             if (seated) { seated = false; seat = null; seatYaw = 0f; }
             if (vaulting) { vaulting = false; vaultRef = null; }
+            ladderClimbing = false;
             PlaceAt(position + Vector3.up * 0.02f, yawDegrees);
         }
 
@@ -610,11 +793,31 @@ namespace Sealebrities
             platform = null;
             platformRb = null;
             platformVel = Vector3.zero;
+            platformGraceUntil = 0f;
             suppressLandingConvert = true;
             lastPosValid = false;
             camRotValid = false;
             canVaultHint = false;
+            canLadderHint = false;
             RecheckWaterAfterTeleport();
+            if (!seated && !isInWater) AttachPlatformBelow(position);
+        }
+
+        /// Placed above a moving platform (the boat deck – also while another co-op player drives it): ride along from
+        /// the first frame instead of waiting until the feet touch the deck.
+        void AttachPlatformBelow(Vector3 p)
+        {
+            if (!Physics.Raycast(p + Vector3.up * 0.3f, Vector3.down, out RaycastHit hit, 2.8f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+                return;
+            var pl = PlatformOf(hit.collider, out Rigidbody rb);
+            if (pl == null) return;
+            platform = pl;
+            platformRb = rb;
+            platformFresh = false;
+            platformLocalPos = pl.InverseTransformPoint(p);
+            platformYaw = pl.eulerAngles.y;
+            platformPrevRoot = pl.position;
+            platformGraceUntil = Time.time + 1.5f;
         }
     }
 }

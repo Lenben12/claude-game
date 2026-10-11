@@ -10,42 +10,71 @@ namespace Sealebrities
         public const float Smoothness = 0.08f;
 
         // ------------------------------------------------------------------ palette
-        public static readonly Color Sand = Hex("#F2D9A6");
-        public static readonly Color WetSand = Hex("#DCC08A");
-        public static readonly Color Seabed = Hex("#E6D2A2");
-        public static readonly Color Grass = Hex("#7CC04B");
-        public static readonly Color GrassDark = Hex("#55A23C");
-        public static readonly Color Soil = Hex("#A06C46");
-        public static readonly Color Rock = Hex("#8E9098");
-        public static readonly Color RockDark = Hex("#61636E");
-        public static readonly Color DeepRock = Hex("#3E4256");
-        public static readonly Color Water = Hex("#4DB3D6");
-        public static readonly Color WaterDeep = Hex("#2C72AA");
-        public static readonly Color WaterShallow = Hex("#7FD8E0");
-        public static readonly Color Foam = Hex("#F4FBFF");
-        public static readonly Color PalmTrunk = Hex("#7A3B32");
-        public static readonly Color PalmLeaf = Hex("#6CC24A");
-        public static readonly Color PalmLeafDark = Hex("#4FA03D");
-        public static readonly Color PalmLeafDry = Hex("#C9B45A");
-        public static readonly Color Wood = Hex("#C99A6B");
-        public static readonly Color WoodDark = Hex("#8B5A3C");
-        public static readonly Color WoodLight = Hex("#E2C79F");
-        public static readonly Color Roof = Hex("#B24A3A");
-        public static readonly Color Metal = Hex("#9AA3AB");
-        public static readonly Color Rust = Hex("#B5603A");
-        public static readonly Color White = Hex("#F4F1EA");
-        public static readonly Color Ink = Hex("#22252E");
-        public static readonly Color CoralPink = Hex("#FF7A8A");
-        public static readonly Color CoralOrange = Hex("#FF9F5A");
-        public static readonly Color CoralPurple = Hex("#9B6BD6");
-        public static readonly Color CoralYellow = Hex("#FFD25E");
-        public static readonly Color Kelp = Hex("#8FA83A");
-        public static readonly Color KelpDark = Hex("#5F7A2A");
-        public static readonly Color SkyTop = Hex("#79B4E8");
-        public static readonly Color SkyHorizon = Hex("#CFE6F2");
-        public static readonly Color Skin = Hex("#E8B98F");
-        public static readonly Color Neoprene = Hex("#262A33");
-        public static readonly Color SuitOrange = Hex("#FF7A2E");
+        // "How to Fish" master palette (docs/ArtBible_HowToFish.md §1.7): albedo values measured/derived from the
+        // How to Fish references – olive greens, violet-grey darks, steel-blue water, weathered wood, warm off-white.
+        public static readonly Color Sand = Hex("#E6CFA0");
+        public static readonly Color WetSand = Hex("#C9AF86");
+        public static readonly Color Seabed = Hex("#EAC27A");   // warmer than the bible's #E2C890: the teal light still reads sandy
+        // (art polish: lit lawns measured lime #74A037..#90AB58 vs How to Fish #596646/#668443 → darker, less saturated;
+        // lit rock read light lavender-grey "concrete" → a step darker)
+        public static readonly Color Grass = Hex("#5D7C45");
+        public static readonly Color GrassDark = Hex("#486036");
+        public static readonly Color Soil = Hex("#8E6A4C");
+        public static readonly Color Rock = Hex("#787A86");
+        public static readonly Color RockDark = Hex("#56545F");
+        public static readonly Color DeepRock = Hex("#3B3A4E");
+        /// Above-water sea blue (props that used Water for shutters/cushions should use Turquoise instead).
+        public static readonly Color Water = Hex("#3778AB");
+        public static readonly Color WaterDeep = Hex("#284F80");
+        /// Above-water shallow (≈ 1.5 m deep) sea; under water the FX colour stops apply.
+        public static readonly Color WaterShallow = Hex("#3D93B6");
+        public static readonly Color Foam = Hex("#EEF4F6");
+        public static readonly Color PalmTrunk = Hex("#7A4A50");   // HtF trunk: brown-mauve (measured lit #855F66), not magenta
+        public static readonly Color PalmLeaf = Hex("#7FA243");
+        public static readonly Color PalmLeafDark = Hex("#4E6F2E");
+        public static readonly Color PalmLeafDry = Hex("#B5A050");
+        public static readonly Color Wood = Hex("#8E6C50");
+        public static readonly Color WoodDark = Hex("#5E4436");
+        public static readonly Color WoodLight = Hex("#C9B08E");
+        public static readonly Color Roof = Hex("#A8484A");
+        public static readonly Color Metal = Hex("#8E949C");
+        public static readonly Color Rust = Hex("#A0583A");
+        /// Warm off-white: never use pure #FFFFFF on geometry.
+        public static readonly Color White = Hex("#EDE6DA");
+        /// Violet black.
+        public static readonly Color Ink = Hex("#1E1B2B");
+        public static readonly Color CoralPink = Hex("#F2708A");
+        public static readonly Color CoralOrange = Hex("#F28C4A");
+        public static readonly Color CoralPurple = Hex("#8E5CC2");
+        public static readonly Color CoralYellow = Hex("#F2C94C");
+        public static readonly Color Kelp = Hex("#7E9A3A");
+        public static readonly Color KelpDark = Hex("#55702A");
+        /// On-screen sky targets (zenith / horizon at noon).
+        public static readonly Color SkyTop = Hex("#4A88BF");
+        public static readonly Color SkyHorizon = Hex("#8DBDEA");
+        public static readonly Color Skin = Hex("#E2B985");
+        public static readonly Color Neoprene = Hex("#343849");
+        public static readonly Color SuitOrange = Hex("#EE7F2D");
+
+        // new How to Fish entries (art bible §1.7)
+        public static readonly Color GrassBase = Hex("#34502A");
+        public static readonly Color GrassTip = Hex("#8AA352");
+        public static readonly Color GrassDry = Hex("#8C9654");
+        public static readonly Color PathDirt = Hex("#A88763");
+        public static readonly Color Foliage = Hex("#5E8A3A");
+        public static readonly Color FoliageDark = Hex("#46682C");
+        public static readonly Color FoliageLight = Hex("#7A9C45");
+        public static readonly Color Conifer = Hex("#3F5F35");
+        public static readonly Color ConiferLight = Hex("#567A3E");
+        public static readonly Color TreeBark = Hex("#5E4A44");
+        public static readonly Color Whitewash = Hex("#DCCFBE");
+        public static readonly Color PlankGap = Hex("#3A2C2A");
+        public static readonly Color AccentBoard = Hex("#7A4448");
+        public static readonly Color Turquoise = Hex("#3FA9B5");
+        public static readonly Color FlowerMagenta = Hex("#A8478F");
+        public static readonly Color FlowerPink = Hex("#E86FA0");
+        public static readonly Color FlowerWhite = Hex("#F4EFE6");
+        public static readonly Color FlowerPurple = Hex("#8E5CC2");
 
         public static Color Hex(string hex) { ColorUtility.TryParseHtmlString(hex, out var c); return c; }
 

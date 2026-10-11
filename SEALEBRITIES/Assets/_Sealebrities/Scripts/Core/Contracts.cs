@@ -123,10 +123,12 @@ namespace Sealebrities
         public static bool PauseOpen;
         public static bool MainMenuOpen;
         public static bool LoadingOpen;
-        public static bool BlocksGameplay => PhoneOpen || PauseOpen || MainMenuOpen || LoadingOpen;
+        /// Inventory / equip screen (I key) – the world keeps running, but movement, look and the hotbar are blocked.
+        public static bool InventoryOpen;
+        public static bool BlocksGameplay => PhoneOpen || PauseOpen || MainMenuOpen || LoadingOpen || InventoryOpen;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { PhoneOpen = false; PauseOpen = false; MainMenuOpen = true; LoadingOpen = true; }
+        static void ResetStatics() { PhoneOpen = false; PauseOpen = false; MainMenuOpen = true; LoadingOpen = true; InventoryOpen = false; }
     }
 
     /// Current interaction hint written by the Player module's interactor, shown by the UI (null = none).
@@ -214,6 +216,39 @@ namespace Sealebrities
         public static readonly Vector3 HiddenBay = new Vector3(-185f, 0f, -30f);
         public static readonly Vector3 PlayerSpawn = new Vector3(114f, 0f, 22f);
         public const float PlayerSpawnYaw = 90f;
+
+        // Points of interest on the main island (World shapes the terrain for them, Props fills them with content).
+        public static readonly Vector3 WaterfallTop = new Vector3(-70f, 0f, 70f);     // cliff edge ~8 m above the pool
+        public static readonly Vector3 WaterfallPool = new Vector3(-55f, 0f, 45f);    // small basin with a beach
+        public static readonly Vector3 CaveEntrance = new Vector3(-110f, 0f, 110f);   // opening in the lighthouse hill
+        public static readonly Vector3 Ravine = new Vector3(-20f, 0f, -40f);          // east-west ravine crossed by a rope bridge
+        public static readonly Vector3 TidePools = new Vector3(150f, 0f, -95f);       // rocky south-east shore
+        public static readonly Vector3 SecondBeach = new Vector3(40f, 0f, -178f);     // southern beach
+        public static readonly Vector3 RadioTowerRuins = new Vector3(-120f, 0f, -110f);
+
+        /// Small landmark islands next to the outer dive sites (center, radius in meters).
+        public static readonly Vector3 KelpIsland = new Vector3(-470f, 0f, 420f);
+        public static readonly Vector3 WreckIsland = new Vector3(600f, 0f, -470f);
+        public static readonly Vector3 BlueDropIsland = new Vector3(-800f, 0f, -650f);
+        public static readonly Vector3 TrenchIsland = new Vector3(915f, 0f, 840f);
+        public const float MiniIslandRadius = 42f;
+    }
+
+    /// Bridge between the UI (renders the phone screen into Texture) and the Player (shows a 3D phone in the hand
+    /// with Texture on its screen and maps mouse positions onto it via ScreenToUV).
+    public static class PhoneDisplay
+    {
+        public const int Width = 540;
+        public const int Height = 1080;
+        /// Created and rendered by the UI module.
+        public static RenderTexture Texture;
+        /// Set by the Player module: screen pixel position → phone screen UV (0..1, origin bottom-left), null when outside.
+        public static Func<Vector2, Vector2?> ScreenToUV;
+        /// Set by the Player module while the phone model is raised and visible.
+        public static bool Raised;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { Texture = null; ScreenToUV = null; Raised = false; }
     }
 
     /// Runtime world facts filled in by the World module once the world is built.

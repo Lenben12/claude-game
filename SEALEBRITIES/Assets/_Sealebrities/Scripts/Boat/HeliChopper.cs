@@ -325,6 +325,7 @@ namespace Sealebrities
             UpdateDownwash(pos);
             UpdateBeacon();
             rotorSrc.pitch = 1f + new Vector2(vel.x, vel.z).magnitude / CruiseSpeed * 0.07f + (phase == Phase.Climb ? 0.05f : 0f);
+            rotorSrc.volume = 0.9f * Settings.SfxVolume;
         }
 
         void Orient(float dt)
@@ -389,10 +390,10 @@ namespace Sealebrities
         void DropNext()
         {
             var crate = cargo[dropIndex++];
-            if (crate == null) return;
+            if (crate == null) return;   // opened elsewhere meanwhile (co-op) – nothing to drop
             int slot = service.FreeSlot();
             Vector3 target = service.SlotPosition(slot);
-            bool drift = Random.value < 0.05f;
+            bool drift = HeliService.DriftsAway(crate.Delivery);   // same result on every co-op machine
             if (drift)
             {
                 if (service.FindDriftTarget(out Vector3 water)) target = water;

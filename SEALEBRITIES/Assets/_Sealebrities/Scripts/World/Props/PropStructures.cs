@@ -10,187 +10,8 @@ namespace Sealebrities
         static float G(float x, float z) => PropGround.H(x, z);
 
         // ================================================================== dock
-        public static IEnumerator BuildDock(Transform island, PropExclusion excl)
-        {
-            var root = PropUtil.WorldRoot("Dock", island);
-            var cols = new GameObject("Colliders").transform;
-            cols.SetParent(root, false);
-            var postCols = new GameObject("PostColliders");
-            postCols.transform.SetParent(cols, false);
-            postCols.transform.position = Vector3.zero;
-            var batch = new PropBatch(0f);
-            var rng = new System.Random(77);
-
-            float deck = PropInfo.DockDeckY;
-            float z0 = WorldLayout.DockStart.z;
-            float x1 = WorldLayout.DockEnd.x;
-            float x0 = WorldLayout.DockStart.x;
-            const float halfW = 1.2f;
-
-            // extend the deck inland until it meets the beach (max 14 m), otherwise add a ramp
-            if (G(x0, z0) < deck - 0.2f)
-            {
-                for (float x = x0; x > x0 - 14f; x -= 0.5f)
-                {
-                    if (G(x, z0) >= deck - 0.1f) { x0 = x; break; }
-                }
-            }
-
-            // chunky deck planks across the dock with a little color variation
-            Material[] boards = { PropMats.Wood, PropMats.Wood, PropMats.WoodLight, PropMats.Var(LowPoly.Wood, 1), PropMats.Var(LowPoly.Wood, 2) };
-            float bw = 0.3f, gap = 0.045f;
-            for (float x = x0 + bw * 0.5f; x < x1; x += bw + gap)
-            {
-                var mat = boards[rng.Next(boards.Length)];
-                batch.B(mat).Box(new Vector3(x, deck - 0.045f + PropUtil.Range(rng, -0.008f, 0.008f), z0 + PropUtil.Range(rng, -0.03f, 0.03f)),
-                    new Vector3(bw, 0.09f, 2f * halfW + PropUtil.Range(rng, -0.05f, 0.08f)), Quaternion.Euler(0f, PropUtil.Range(rng, -1f, 1f), 0f));
-            }
-            var dark = batch.B(PropMats.WoodDark);
-            for (int i = -1; i <= 1; i++)
-                dark.Box(new Vector3((x0 + x1) * 0.5f, deck - 0.15f, z0 + i * 0.95f), new Vector3(x1 - x0, 0.14f, 0.14f));
-            PropCol.Box(cols, new Vector3((x0 + x1) * 0.5f, deck - 0.15f, z0), new Vector3(x1 - x0, 0.3f, 2f * halfW), Quaternion.identity, "DockDeck");
-
-            // round 6-sided posts (darker where they are wet), cross beams, braces
-            int pi = 0;
-            for (float x = x1 - 0.2f; x >= x0 + 0.2f; x -= 3f, pi++)
-            {
-                bool any = false;
-                for (int s = -1; s <= 1; s += 2)
-                {
-                    float z = z0 + s * (halfW + 0.06f);
-                    float g = G(x, z);
-                    if (g > deck - 0.35f) continue;
-                    any = true;
-                    float bottom = g - 0.6f, top = deck - 0.2f;
-                    float wetTop = Mathf.Min(0.25f, top);
-                    if (bottom < wetTop)
-                        batch.B(PropMats.WoodWet).Cylinder(new Vector3(x, bottom, z), Quaternion.identity, 0.17f, 0.16f, wetTop - bottom, 6);
-                    float dryBottom = Mathf.Max(bottom, wetTop);
-                    dark.Cylinder(new Vector3(x, dryBottom, z), Quaternion.identity, 0.16f, 0.15f, top + 0.45f - dryBottom, 6, false, true);
-                    PropCol.UprightCapsule(postCols, new Vector3(x, bottom, z), 0.17f, top + 0.45f - bottom);
-                    if (pi % 2 == 1 && g < -1.2f)
-                    {
-                        float zb = z0 - s * (halfW - 0.1f);
-                        dark.Beam(new Vector3(x, Mathf.Max(g + 0.3f, -2.5f), z), new Vector3(x - 1.4f, deck - 0.3f, zb), 0.1f, 0.14f);
-                    }
-                }
-                if (any) dark.Box(new Vector3(x, deck - 0.24f, z0), new Vector3(0.18f, 0.16f, 2f * halfW + 0.4f));
-            }
-
-            // ramp down to the beach if the deck could not reach it
-            float gStart = G(x0, z0);
-            float rampStart = x0;
-            if (gStart < deck - 0.25f)
-            {
-                float rise = deck - gStart + 0.05f;
-                float len = rise / Mathf.Tan(14f * Mathf.Deg2Rad);
-                float ang = Mathf.Atan2(rise, len) * Mathf.Rad2Deg;
-                Quaternion r = Quaternion.Euler(0f, 0f, ang);
-                Vector3 a = new Vector3(x0 - len, gStart - 0.05f, z0), b = new Vector3(x0, deck, z0);
-                float L = (b - a).magnitude;
-                Vector3 dir = (b - a) / L;
-                int k = 0;
-                for (float t = 0.17f; t < L; t += 0.34f, k++)
-                {
-                    Vector3 p = a + dir * t + r * new Vector3(0f, -0.04f, 0f);
-                    batch.B(boards[k % boards.Length]).Box(p, new Vector3(0.3f, 0.08f, 1.8f), r);
-                }
-                dark.Beam(a + new Vector3(0f, -0.12f, -0.8f), b + new Vector3(0f, -0.12f, -0.8f), 0.1f, 0.16f);
-                dark.Beam(a + new Vector3(0f, -0.12f, 0.8f), b + new Vector3(0f, -0.12f, 0.8f), 0.1f, 0.16f);
-                PropCol.Box(cols, (a + b) * 0.5f - r * new Vector3(0f, 0.08f, 0f), new Vector3(L, 0.16f, 1.8f), r, "DockRamp");
-                rampStart = x0 - len;
-            }
-            excl.AddLine(new Vector3(rampStart - 2f, 0f, z0), new Vector3(x1 + 2f, 0f, z0), 3.5f);
-
-            if (PropRun.Due()) yield return null;
-
-            // ladder into the water at the end
-            var metal = batch.B(PropMats.Metal);
-            float lx = x1 + 0.1f;
-            for (int s = -1; s <= 1; s += 2)
-            {
-                float zr = z0 + s * 0.38f;
-                metal.Rod(new Vector3(lx, -2.4f, zr), new Vector3(lx, deck + 0.85f, zr), 0.035f, 0.035f, 4);
-                metal.Rod(new Vector3(lx, deck + 0.85f, zr), new Vector3(lx - 0.38f, deck + 0.85f, zr), 0.035f, 0.035f, 4);
-                metal.Rod(new Vector3(lx - 0.38f, deck + 0.85f, zr), new Vector3(lx - 0.38f, deck, zr), 0.035f, 0.035f, 4);
-            }
-            for (float y = -2.2f; y < deck - 0.05f; y += 0.3f)
-                metal.Rod(new Vector3(lx, y, z0 - 0.38f), new Vector3(lx, y, z0 + 0.38f), 0.028f, 0.028f, 4);
-            var ladderGo = new GameObject("DockLadder");
-            ladderGo.transform.SetParent(root, false);
-            ladderGo.transform.position = new Vector3(lx, deck * 0.5f - 1.2f, z0);
-            PropInfo.DockLadderTop = new Vector3(x1 - 0.4f, deck, z0);
-            PropInfo.DockLadderBottom = new Vector3(lx + 0.45f, -1.5f, z0);
-
-            // bollards
-            float[] bxs = { x1 - 0.45f, x1 - 15f, x0 + 6f };
-            foreach (float bx in bxs)
-            {
-                for (int s = -1; s <= 1; s += 2)
-                {
-                    Vector3 bp = new Vector3(bx, deck, z0 + s * (halfW - 0.18f));
-                    batch.B(PropMats.DarkMetal).Cylinder(bp, Quaternion.identity, 0.12f, 0.1f, 0.32f, 8);
-                    batch.B(PropMats.DarkMetal).Cylinder(bp + Vector3.up * 0.32f, Quaternion.identity, 0.17f, 0.17f, 0.07f, 8, true, true);
-                }
-            }
-
-            // rope coils
-            Vector3[] coils = { new Vector3(x1 - 7.5f, deck, z0 + 0.75f), new Vector3(x0 + 12.5f, deck, z0 - 0.8f), new Vector3(x1 - 1.2f, deck, z0 + 0.8f) };
-            foreach (var cp in coils)
-            {
-                for (int k = 0; k < 3; k++)
-                    batch.B(PropMats.Rope).Torus(cp + Vector3.up * (0.045f + k * 0.075f), Quaternion.Euler(0f, k * 25f, 0f), 0.3f - k * 0.05f, 0.045f, 8, 3);
-            }
-
-            // crates on the north side
-            Vector3[] crates = { new Vector3(x1 - 4.4f, deck, z0 + 0.65f), new Vector3(x1 - 4.9f, deck, z0 + 0.62f), new Vector3(x1 - 4.6f, deck + 0.55f, z0 + 0.66f) };
-            for (int i = 0; i < crates.Length; i++)
-            {
-                float sz = i == 2 ? 0.45f : 0.55f;
-                Quaternion r = Quaternion.Euler(0f, PropUtil.Range(rng, -12f, 12f), 0f);
-                Vector3 c = crates[i] + new Vector3(0f, sz * 0.5f, 0f);
-                batch.B(PropMats.Wood).Box(c, Vector3.one * sz * 0.94f, r);
-                for (int sx = -1; sx <= 1; sx += 2)
-                    for (int szz = -1; szz <= 1; szz += 2)
-                        dark.Box(c + r * new Vector3(sx * (sz * 0.5f - 0.035f), 0f, szz * (sz * 0.5f - 0.035f)), new Vector3(0.08f, sz, 0.08f), r);
-            }
-            PropCol.Box(cols, new Vector3(x1 - 4.65f, deck + 0.5f, z0 + 0.65f), new Vector3(1.2f, 1f, 0.6f), Quaternion.identity);
-
-            // bucket and tackle box next to the fishing spot
-            Vector3 fs = WorldLayout.FishingSpot;
-            Vector3 bucket = new Vector3(Mathf.Clamp(fs.x - 1.2f, x0 + 1f, x1 - 1f), deck, z0 - halfW + 0.35f);
-            batch.B(PropMats.DrumBlue).Cylinder(bucket, Quaternion.identity, 0.15f, 0.19f, 0.32f, 6, true, false);
-            batch.B(PropMats.DarkMetal).Cylinder(bucket + Vector3.up * 0.005f, Quaternion.identity, 0.145f, 0.185f, 0.31f, 6, false, false, 1f, 1f, 0f, true);
-            Quaternion tbr = Quaternion.Euler(0f, 15f, 0f);
-            Vector3 tbp = bucket + new Vector3(-0.55f, 0.11f, 0.1f);
-            batch.B(PropMats.DrumYellow).Box(tbp, new Vector3(0.42f, 0.22f, 0.24f), tbr);
-            batch.B(PropMats.Orange).Box(tbp + Vector3.up * 0.125f, new Vector3(0.44f, 0.05f, 0.26f), tbr);
-
-            // fenders hanging at the end
-            for (int s = -1; s <= 1; s += 2)
-            {
-                Vector3 fp = new Vector3(x1 - 1.5f, deck - 0.75f, z0 + s * (halfW + 0.2f));
-                batch.B(PropMats.Orange).Cylinder(fp, Quaternion.identity, 0.14f, 0.14f, 0.5f, 6, true, true);
-                batch.B(PropMats.White).Cylinder(fp + Vector3.up * 0.2f, Quaternion.identity, 0.145f, 0.145f, 0.1f, 6);
-                batch.B(PropMats.Rope).Rod(fp + Vector3.up * 0.5f, new Vector3(fp.x, deck + 0.02f, z0 + s * halfW), 0.018f, 0.018f, 3);
-            }
-
-            // lantern on a post at the end (north corner)
-            Vector3 lp = new Vector3(x1 - 0.25f, deck, z0 + halfW - 0.12f);
-            dark.Box(lp + new Vector3(0f, 0.8f, 0f), new Vector3(0.12f, 1.6f, 0.12f));
-            dark.Box(lp + new Vector3(-0.15f, 1.55f, 0f), new Vector3(0.36f, 0.08f, 0.08f));
-            Vector3 lan = lp + new Vector3(-0.3f, 1.28f, 0f);
-            batch.B(PropMats.DarkMetal).Cylinder(lan + new Vector3(0f, 0.22f, 0f), Quaternion.identity, 0.13f, 0f, 0.1f, 6, true, false);
-            batch.B(PropMats.DarkMetal).Cylinder(lan - new Vector3(0f, 0.03f, 0f), Quaternion.identity, 0.11f, 0.11f, 0.04f, 6, true, true);
-            batch.B(PropMats.Glass).Cylinder(lan, Quaternion.identity, 0.09f, 0.09f, 0.22f, 6);
-            batch.B(PropMats.DockBulb).Ico(lan + new Vector3(0f, 0.1f, 0f), new Vector3(0.05f, 0.07f, 0.05f), Quaternion.identity, 0);
-            batch.B(PropMats.Rope).Rod(lan + new Vector3(0f, 0.3f, 0f), lp + new Vector3(-0.3f, 1.55f, 0f), 0.015f, 0.015f, 3);
-            var light = PropUtil.AddPointLight(root, lan + new Vector3(0f, 0.1f, 0f), new Color(1f, 0.74f, 0.42f), 12f, 2.2f, "DockLantern");
-            var nl = PropNightLight.Attach(light.gameObject, light, PropMats.DockBulb, new Color(3.5f, 2.4f, 1.2f), 0.15f, 0.5f, true);
-            nl.flickerAmount = 0.12f;
-
-            batch.Flush(root, "DockMesh", ShadowCastingMode.On, 0f);
-        }
+        /// The dock (built by PropDock: weathered planks with gaps, posts with wet bands, working ladder, lanterns, ...).
+        public static IEnumerator BuildDock(Transform island, PropExclusion excl) => PropDock.Build(island, excl);
 
         // ================================================================== helipad
         public static IEnumerator BuildHelipad(Transform island, PropExclusion excl)
@@ -360,7 +181,8 @@ namespace Sealebrities
                 batch.B(m).Cylinder(tb + Vector3.up * (H * t0), Quaternion.identity, Mathf.Lerp(r0, r1, t0), Mathf.Lerp(r0, r1, t1), H / bands + 0.01f, 8, false, false, 1f, 1f, 0f, false, 22.5f);
             }
             var tcb = new PropMeshBuilder();
-            tcb.Cylinder(Vector3.zero, Quaternion.identity, r0, r1, H + 3.6f, 16, true, true);
+            // up to the gallery floor only (the lantern room has its own collider, so the gallery ring stays walkable)
+            tcb.Cylinder(Vector3.zero, Quaternion.identity, r0, r1, H, 16, true, true);
             PropCol.Mesh(cols, tcb.ToMesh("LighthouseTower", false), tb, Quaternion.identity, Vector3.one);
 
             // door facing the hut path
@@ -380,8 +202,8 @@ namespace Sealebrities
                 Vector3 d = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a));
                 float rr = Mathf.Lerp(r0, r1, y / H) * Mathf.Cos(Mathf.PI / 8f);
                 Quaternion wr = Quaternion.LookRotation(d);
-                batch.B(PropMats.Wood).Box(tb + d * (rr - 0.02f) + Vector3.up * y, new Vector3(0.7f, 0.95f, 0.16f), wr);
-                batch.B(PropMats.Ink).Box(tb + d * (rr + 0.04f) + Vector3.up * y, new Vector3(0.48f, 0.72f, 0.06f), wr);
+                batch.B(PropMats.Trim).Box(tb + d * (rr - 0.02f) + Vector3.up * y, new Vector3(0.7f, 0.95f, 0.16f), wr);
+                batch.B(PropMats.LanternRoom).Box(tb + d * (rr + 0.04f) + Vector3.up * y, new Vector3(0.48f, 0.72f, 0.06f), wr);
             }
             if (PropRun.Due()) yield return null;
 
@@ -399,11 +221,24 @@ namespace Sealebrities
                 dm.Rod(p0, p0 + Vector3.up * 1.0f, 0.045f, 0.045f, 4);
                 dm.Beam(p0 + Vector3.up * 1.0f, p1 + Vector3.up * 1.0f, 0.08f, 0.08f);
                 dm.Beam(p0 + Vector3.up * 0.5f, p1 + Vector3.up * 0.5f, 0.05f, 0.05f);
+                // solid railing segment
+                Vector3 seg = p1 - p0;
+                PropCol.Box(cols, (p0 + p1) * 0.5f + Vector3.up * 0.55f, new Vector3(0.12f, 1.1f, seg.magnitude), Quaternion.LookRotation(seg.normalized), "GalleryRail");
             }
+            // walkable gallery floor
+            var gcb = new PropMeshBuilder();
+            gcb.Cylinder(Vector3.zero, Quaternion.identity, 2.8f, 2.8f, 0.16f, 8, true, true, 1f, 1f, 0f, false, 22.5f);
+            var gmc = PropCol.Mesh(cols, gcb.ToMesh("LighthouseGallery", false), new Vector3(c.x, gy, c.z), Quaternion.identity, Vector3.one, "GalleryFloor");
+            gmc.convex = true;
+            PropInfo.LighthouseGallery = new Vector3(c.x, gy + 0.16f, c.z);
 
-            // lamp room: red base, glass, mullions, red cone roof with a ball
+            // lamp room: dark lantern room, glass, mullions, red cone roof with a ball
             float ly = gy + 0.16f;
-            batch.B(PropMats.RedMetal).Cylinder(new Vector3(c.x, ly, c.z), Quaternion.identity, 1.4f, 1.4f, 0.55f, 8, false, false, 1f, 1f, 0f, false, 22.5f);
+            batch.B(PropMats.LanternRoom).Cylinder(new Vector3(c.x, ly, c.z), Quaternion.identity, 1.4f, 1.4f, 0.55f, 8, false, false, 1f, 1f, 0f, false, 22.5f);
+            var lrb = new PropMeshBuilder();
+            lrb.Cylinder(Vector3.zero, Quaternion.identity, 1.42f, 1.42f, 2.4f, 8, true, true, 1f, 1f, 0f, false, 22.5f);
+            var lrc = PropCol.Mesh(cols, lrb.ToMesh("LanternRoomCol", false), new Vector3(c.x, ly, c.z), Quaternion.identity, Vector3.one, "LanternRoom");
+            lrc.convex = true;
             batch.B(PropMats.Glass).Cylinder(new Vector3(c.x, ly + 0.55f, c.z), Quaternion.identity, 1.32f, 1.32f, 1.8f, 8, false, false, 1f, 1f, 0f, false, 22.5f);
             for (int i = 0; i < 8; i++)
             {
@@ -471,9 +306,129 @@ namespace Sealebrities
             glow.enabled = false;
             lamp.glow = glow;
 
+            LighthouseArea(root, batch, cols, c, baseTop, toHut, gy, H, r0, r1);
+
             batch.Flush(root, "LighthouseMesh", ShadowCastingMode.On, 0f);
             excl.Add(c.x, c.z, 8f);
             excl.AddLine(c, c + toHut * 6f, 2f);
+        }
+
+        static void FenceCol(Transform cols, Vector3 a, Vector3 b)
+        {
+            Vector3 seg = b - a;
+            seg.y = 0f;
+            if (seg.sqrMagnitude < 0.01f) return;
+            PropCol.Box(cols, (a + b) * 0.5f + Vector3.up * 0.5f, new Vector3(0.1f, 1.1f, seg.magnitude + 0.1f), Quaternion.LookRotation(seg.normalized), "Fence");
+        }
+
+        /// Lighthouse surroundings: an exterior ladder up to the gallery (PropLadder), a white picket fence around the
+        /// plateau with a gate toward the path, a bench facing the sea and a coin telescope.
+        static void LighthouseArea(Transform root, PropBatch batch, Transform cols, Vector3 c, float baseTop, Vector3 toHut, float gy, float H, float r0, float r1)
+        {
+            var rng = new System.Random(808);
+            // ---- ladder on the sea side (opposite the door)
+            Vector3 outDir = -toHut;
+            Vector3 side = Vector3.Cross(Vector3.up, outDir).normalized;
+            float lr = 2.95f;
+            Vector3 foot = new Vector3(c.x, baseTop, c.z) + outDir * lr;
+            float topY = gy + 1.25f;
+            var dm = batch.B(PropMats.DarkMetal);
+            for (int s = -1; s <= 1; s += 2)
+            {
+                Vector3 rb = foot + side * (s * 0.3f);
+                dm.Beam(rb - Vector3.up * 0.1f, new Vector3(rb.x, topY, rb.z), 0.06f, 0.06f);
+                dm.Beam(new Vector3(rb.x, topY, rb.z), new Vector3(rb.x, topY, rb.z) - outDir * 0.35f, 0.05f, 0.05f);
+            }
+            for (float y = baseTop + 0.3f; y < topY - 0.1f; y += 0.32f)
+                dm.Rod(foot - side * 0.3f + Vector3.up * (y - baseTop), foot + side * 0.3f + Vector3.up * (y - baseTop), 0.025f, 0.025f, 4);
+            // brackets to the tower wall
+            for (float y = 1.5f; y < H; y += 3.5f)
+            {
+                float wr = Mathf.Lerp(r0, r1, y / H) * Mathf.Cos(Mathf.PI / 8f);
+                Vector3 a = new Vector3(c.x, baseTop + y, c.z) + outDir * wr;
+                Vector3 b = new Vector3(c.x, baseTop + y, c.z) + outDir * lr;
+                dm.Beam(a + side * 0.3f, b + side * 0.3f, 0.05f, 0.05f);
+                dm.Beam(a - side * 0.3f, b - side * 0.3f, 0.05f, 0.05f);
+            }
+            var lgo = new GameObject("LighthouseLadder");
+            lgo.transform.SetParent(root, false);
+            lgo.transform.SetPositionAndRotation(new Vector3(foot.x, (baseTop + topY) * 0.5f, foot.z) + outDir * 0.15f, Quaternion.LookRotation(outDir));
+            var bc = lgo.AddComponent<BoxCollider>();
+            bc.isTrigger = true;
+            bc.size = new Vector3(0.9f, topY - baseTop, 0.7f);
+            var ladder = lgo.AddComponent<PropLadder>();
+            float yawOut = Mathf.Atan2(outDir.x, outDir.z) * Mathf.Rad2Deg;
+            ladder.bottomStand = new Vector3(foot.x, baseTop + 0.05f, foot.z) + outDir * 0.9f;
+            ladder.bottomYaw = yawOut + 180f;
+            ladder.topStand = new Vector3(c.x, gy + 0.2f, c.z) + outDir * 2.15f;
+            ladder.topYaw = yawOut;
+            ladder.foot = foot;
+            ladder.proximityTop = true;      // the gallery railing may block the ray to the ladder top
+            ladder.proximityBottom = true;
+            PropInfo.LighthouseLadderFoot = foot;
+
+            // ---- picket fence around the plateau, gate toward the path
+            float fr = 8.6f;
+            int n = 72;
+            var picket = batch.B(PropMats.Trim);
+            Vector3 prev = Vector3.zero, colStart = Vector3.zero;
+            bool havePrev = false, haveCol = false;
+            int colCount = 0;
+            float gateA = Mathf.Atan2(toHut.z, toHut.x);
+            for (int i = 0; i <= n; i++)
+            {
+                float a = i * Mathf.PI * 2f / n;
+                float da = Mathf.DeltaAngle(a * Mathf.Rad2Deg, gateA * Mathf.Rad2Deg);
+                bool gate = Mathf.Abs(da) < 11f;
+                Vector3 p = new Vector3(c.x + Mathf.Cos(a) * fr, 0f, c.z + Mathf.Sin(a) * fr);
+                p.y = PropGround.H(p.x, p.z);
+                if (gate)
+                {
+                    if (haveCol && colCount > 0) FenceCol(cols, colStart, prev);
+                    havePrev = false;
+                    haveCol = false;
+                    continue;
+                }
+                Quaternion pr = Quaternion.Euler(0f, -a * Mathf.Rad2Deg, 0f);
+                picket.Box(p + Vector3.up * 0.42f, new Vector3(0.08f, 0.95f, 0.035f), pr);
+                picket.Face3(p + Vector3.up * 0.9f + pr * new Vector3(-0.04f, 0f, 0.018f), p + Vector3.up * 0.9f + pr * new Vector3(0.04f, 0f, 0.018f), p + Vector3.up * 1.0f + pr * new Vector3(0f, 0f, 0.018f), pr * Vector3.forward);
+                if (havePrev)
+                {
+                    picket.Beam(prev + Vector3.up * 0.3f, p + Vector3.up * 0.3f, 0.05f, 0.07f);
+                    picket.Beam(prev + Vector3.up * 0.72f, p + Vector3.up * 0.72f, 0.05f, 0.07f);
+                }
+                if (!haveCol) { colStart = p; haveCol = true; colCount = 0; }
+                else if (++colCount >= 3) { FenceCol(cols, colStart, p); colStart = p; colCount = 0; }
+                prev = p;
+                havePrev = true;
+            }
+            if (haveCol && colCount > 0) FenceCol(cols, colStart, prev);
+
+            // ---- bench facing the sea and a coin telescope
+            Vector3 benchDir = Quaternion.Euler(0f, 35f, 0f) * outDir;
+            Vector3 bp = new Vector3(c.x, 0f, c.z) + benchDir * 6.4f;
+            bp.y = PropGround.H(bp.x, bp.z);
+            Quaternion br = Quaternion.LookRotation(-benchDir);
+            var w = batch.B(PropMats.Wood3);
+            for (int i = 0; i < 3; i++) w.Box(bp + br * new Vector3(0f, 0.45f, 0.12f - i * 0.13f), new Vector3(1.5f, 0.05f, 0.11f), br);
+            for (int i = 0; i < 2; i++) w.Box(bp + br * new Vector3(0f, 0.7f + i * 0.17f, 0.24f), new Vector3(1.5f, 0.12f, 0.04f), br * Quaternion.Euler(10f, 0f, 0f));
+            var d = batch.B(PropMats.WoodDark);
+            for (int s = -1; s <= 1; s += 2) d.Box(bp + br * new Vector3(s * 0.62f, 0.22f, 0f), new Vector3(0.07f, 0.44f, 0.36f), br);
+            PropCol.Box(cols, bp + br * new Vector3(0f, 0.3f, 0.05f), new Vector3(1.55f, 0.6f, 0.5f), br, "Bench");
+            PropInfo.LighthouseBench = bp + Vector3.up * 0.5f;
+
+            Vector3 telDir = Quaternion.Euler(0f, -40f, 0f) * outDir;
+            Vector3 tp = new Vector3(c.x, 0f, c.z) + telDir * 7.2f;
+            tp.y = PropGround.H(tp.x, tp.z);
+            var met = batch.B(PropMats.Flat(PropPal.HullBlue));
+            met.Cylinder(tp - Vector3.up * 0.1f, Quaternion.identity, 0.16f, 0.1f, 1.15f, 6, false, true);
+            met.Cylinder(tp + Vector3.up * 1.05f, Quaternion.identity, 0.08f, 0.08f, 0.12f, 6, false, true);
+            Quaternion tr = Quaternion.LookRotation(telDir) * Quaternion.Euler(-12f, 0f, 0f);
+            Vector3 tc = tp + Vector3.up * 1.28f;
+            batch.B(PropMats.Flat(PropPal.Sun)).Cylinder(tc - tr * Vector3.forward * 0.35f, tr * Quaternion.Euler(90f, 0f, 0f), 0.11f, 0.13f, 0.7f, 8, true, true);
+            batch.B(PropMats.Ink).Cylinder(tc + tr * Vector3.forward * 0.35f, tr * Quaternion.Euler(90f, 0f, 0f), 0.135f, 0.135f, 0.04f, 8, true, true);
+            met.Box(tc - Vector3.up * 0.14f, new Vector3(0.18f, 0.16f, 0.22f), Quaternion.LookRotation(telDir));
+            PropCol.Capsule(cols, tp + Vector3.up * 0.7f, 0.2f, 1.4f, Quaternion.identity, "Telescope");
         }
     }
 }

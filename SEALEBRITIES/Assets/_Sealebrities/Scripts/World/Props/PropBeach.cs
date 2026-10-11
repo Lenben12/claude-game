@@ -91,6 +91,7 @@ namespace Sealebrities
             {
                 Campfire(root, batch, cols, fp, rng);
                 excl.Add(fp.x, fp.z, 4f);
+                PropInfo.Campfire = fp;
             }
 
             // fuel cans near the dock start and the porch
@@ -153,7 +154,7 @@ namespace Sealebrities
         }
 
         /// Beach parasol: 8 flat canopy segments in alternating colors (two-sided) on a white pole.
-        static void Parasol(PropBatch batch, Transform cols, Vector3 p)
+        public static void Parasol(PropBatch batch, Transform cols, Vector3 p)
         {
             batch.B(PropMats.White).Rod(p - Vector3.up * 0.3f, p + Vector3.up * 2.35f, 0.04f, 0.035f, 6);
             Quaternion tilt = Quaternion.Euler(4f, 0f, 3f);
@@ -177,7 +178,7 @@ namespace Sealebrities
             PropCol.Capsule(cols, p + Vector3.up * 1f, 0.06f, 2f, Quaternion.identity);
         }
 
-        static void Towel(PropBatch batch, Vector3 p, float yaw)
+        public static void Towel(PropBatch batch, Vector3 p, float yaw)
         {
             Quaternion r = Quaternion.Euler(0f, yaw, 0f);
             for (int i = 0; i < 4; i++)
@@ -287,6 +288,24 @@ namespace Sealebrities
             tb.Torus(new Vector3(0f, -2.0f, 0f), Quaternion.FromToRotation(Vector3.up, Vector3.forward), 0.33f, 0.13f, 8, 4);
             PropUtil.MeshObject(swing, "Tire", tb.ToMesh("SwingTire"), PropMats.Rubber, Vector3.zero, Quaternion.identity);
             swing.gameObject.AddComponent<PropSwing>();
+
+            // solid tire (feedback #10): a box that swings with it on a kinematic body, plus the top beam
+            var rb = swing.gameObject.AddComponent<Rigidbody>();
+            rb.isKinematic = true;
+            rb.useGravity = false;
+            var tireCol = new GameObject("TireCol");
+            tireCol.transform.SetParent(swing, false);
+            tireCol.transform.localPosition = new Vector3(0f, -2.0f, 0f);
+            var bc = tireCol.AddComponent<BoxCollider>();
+            bc.size = new Vector3(0.94f, 0.94f, 0.3f);
+            var ropeCol = new GameObject("RopeCol");
+            ropeCol.transform.SetParent(swing, false);
+            ropeCol.transform.localPosition = new Vector3(0f, -0.85f, 0f);
+            var rc = ropeCol.AddComponent<CapsuleCollider>();
+            rc.direction = 1;
+            rc.radius = 0.06f;
+            rc.height = 1.7f;
+            PropCol.Capsule(cols, (a + b) * 0.5f, 0.11f, (b - a).magnitude + 0.5f, Quaternion.FromToRotation(Vector3.up, (b - a).normalized), "SwingBeam");
         }
 
         static void Campfire(Transform root, PropBatch batch, Transform cols, Vector3 p, System.Random rng)
@@ -340,131 +359,9 @@ namespace Sealebrities
             nl.particles = fire;
         }
 
-        // ================================================================== paths
-        public static IEnumerator BuildPaths(Transform island, PropExclusion excl)
-        {
-            var root = PropUtil.WorldRoot("Paths", island);
-            var batch = new PropBatch(64f);
-            var rng = new System.Random(3131);
-
-            float stepsX = WorldLayout.Hut.x + 7.2f + 2.5f;
-            var main = new List<Vector2>
-            {
-                new Vector2(stepsX + 1.5f, WorldLayout.Hut.z + 1f), new Vector2(stepsX - 1f, WorldLayout.Hut.z + 9f),
-                new Vector2(110f, 36f), new Vector2(94f, 50f), new Vector2(72f, 70f), new Vector2(48f, 92f),
-                new Vector2(22f, 114f), new Vector2(2f, 131f), new Vector2(-14f, 142f),
-            };
-            Vector3 lh = WorldLayout.Lighthouse;
-            Vector3 toHut = (WorldLayout.Hut - lh);
-            toHut.y = 0f;
-            toHut.Normalize();
-            Vector3 door = lh + toHut * 3.4f;
-            main.Add(new Vector2(door.x, door.z));
-
-            Material[] planks = { PropMats.WoodLight, PropMats.Wood, PropMats.WoodLight };
-            var pts = SampleSpline(main, 1.0f, 41);
-            var torchSpots = new List<Vector3>();
-            float acc = 0f;
-            for (int i = 0; i < pts.Count; i++)
-            {
-                Vector2 p2 = pts[i];
-                Vector2 d2 = (i + 1 < pts.Count ? pts[i + 1] - p2 : p2 - pts[i - 1]);
-                d2 = d2.sqrMagnitude > 1e-8f ? d2.normalized : Vector2.right;
-                float g = G(p2.x, p2.y);
-                if (g < 0.6f) continue;
-                Vector3 p = new Vector3(p2.x, g, p2.y);
-                PropInfo.PathPoints.Add(p);
-                excl.Add(p.x, p.z, 2.3f);
-                if (i > 0) acc += (pts[i] - pts[i - 1]).magnitude;
-                Vector3 dir = new Vector3(d2.x, 0f, d2.y);
-                Vector3 n = PropGround.Normal(p.x, p.z, 0.6f);
-                float slope = Mathf.Abs(G(p.x + dir.x * 0.6f, p.z + dir.z * 0.6f) - G(p.x - dir.x * 0.6f, p.z - dir.z * 0.6f)) / 1.2f;
-                Vector3 along = Vector3.ProjectOnPlane(dir, n);
-                if (along.sqrMagnitude < 1e-6f) along = dir;
-                Quaternion r = Quaternion.LookRotation(along.normalized, n) * Quaternion.Euler(0f, PropUtil.Range(rng, -6f, 6f), 0f);
-                if (slope > 0.28f || i % 9 == 4)
-                {
-                    float s = PropUtil.Range(rng, 0.3f, 0.42f);
-                    PropRocks.Build(batch.B(PropMats.Stone, p), p + n * 0.01f, new Vector3(s, 0.09f, s * 0.85f), r, rng.Next(), 0, 0.12f);
-                }
-                else
-                {
-                    batch.B(planks[i % planks.Length], p).Box(p + n * 0.02f, new Vector3(1.15f, 0.08f, 0.32f), r);
-                }
-                if (acc > 34f)
-                {
-                    acc = 0f;
-                    Vector3 side = Vector3.Cross(Vector3.up, dir).normalized * ((torchSpots.Count % 2 == 0) ? 1.1f : -1.1f);
-                    Vector3 tp = p + side;
-                    tp.y = G(tp.x, tp.z);
-                    torchSpots.Add(tp);
-                }
-                if (PropRun.Due()) yield return null;
-            }
-
-            // short stepping-stone path from the hut to the helipad
-            var heli = new List<Vector2>
-            {
-                new Vector2(WorldLayout.Hut.x + 6f, WorldLayout.Hut.z - 7f), new Vector2(112f, -8f), new Vector2(98f, -32f),
-                new Vector2(WorldLayout.Helipad.x + 9f, WorldLayout.Helipad.z + 9f),
-            };
-            var hp = SampleSpline(heli, 1.25f, 77);
-            for (int i = 0; i < hp.Count; i++)
-            {
-                float g = G(hp[i].x, hp[i].y);
-                if (g < 0.5f) continue;
-                Vector3 p = new Vector3(hp[i].x, g, hp[i].y);
-                Vector3 n = PropGround.Normal(p.x, p.z, 0.6f);
-                excl.Add(p.x, p.z, 1.8f);
-                float s = PropUtil.Range(rng, 0.32f, 0.45f);
-                PropRocks.Build(batch.B(PropMats.Stone, p), p + n * 0.01f, new Vector3(s, 0.08f, s * 0.9f),
-                    PropUtil.OnGround(n, 1f, PropUtil.Range(rng, 0f, 360f)), rng.Next(), 0, 0.12f);
-            }
-
-            // tiki torches along the main path
-            for (int i = 0; i < torchSpots.Count && i < 5; i++) Torch(root, batch, torchSpots[i], i);
-
-            batch.Flush(root, "PathMesh", ShadowCastingMode.Off, 160f);
-        }
-
-        /// Catmull-Rom spline through control points with gentle noise wobble, sampled at a fixed spacing.
-        static List<Vector2> SampleSpline(List<Vector2> cps, float spacing, int seed)
-        {
-            var dense = new List<Vector2>();
-            for (int i = 0; i < cps.Count - 1; i++)
-            {
-                Vector2 p0 = cps[Mathf.Max(0, i - 1)], p1 = cps[i], p2 = cps[i + 1], p3 = cps[Mathf.Min(cps.Count - 1, i + 2)];
-                int steps = Mathf.Max(4, Mathf.CeilToInt((p2 - p1).magnitude / 0.25f));
-                for (int s = 0; s < steps; s++)
-                {
-                    float t = s / (float)steps;
-                    float t2 = t * t, t3 = t2 * t;
-                    Vector2 q = 0.5f * ((2f * p1) + (-p0 + p2) * t + (2f * p0 - 5f * p1 + 4f * p2 - p3) * t2 + (-p0 + 3f * p1 - 3f * p2 + p3) * t3);
-                    dense.Add(q);
-                }
-            }
-            dense.Add(cps[cps.Count - 1]);
-            var outp = new List<Vector2>();
-            float acc = 0f, total = 0f;
-            outp.Add(dense[0]);
-            for (int i = 1; i < dense.Count; i++)
-            {
-                float d = (dense[i] - dense[i - 1]).magnitude;
-                acc += d;
-                total += d;
-                if (acc >= spacing && d > 1e-6f)
-                {
-                    acc = 0f;
-                    Vector2 dir = (dense[i] - dense[i - 1]) / d;
-                    Vector2 perp = new Vector2(-dir.y, dir.x);
-                    float wob = (PropNoise.Value(total * 0.08f, 0.5f, seed) - 0.5f) * 1.6f;
-                    outp.Add(dense[i] + perp * wob);
-                }
-            }
-            return outp;
-        }
-
-        static void Torch(Transform root, PropBatch batch, Vector3 p, int index)
+        // ================================================================== torches
+        /// Tiki torch (lit at night) – placed along the trails by PropPaths.
+        public static void Torch(Transform root, PropBatch batch, Vector3 p, int index)
         {
             batch.B(PropMats.Wood, p).Cylinder(p - Vector3.up * 0.3f, Quaternion.Euler(PropUtil.Range(new System.Random(index), -3f, 3f), 0f, 0f), 0.06f, 0.05f, 1.9f, 6, false, true);
             Vector3 cup = p + Vector3.up * 1.6f;
@@ -534,6 +431,7 @@ namespace Sealebrities
             batch.Add(archMesh, PropMats.Rock, Matrix4x4.Translate(ac));
             PropCol.Mesh(cols, archMesh, ac, Quaternion.identity, Vector3.one, "ArchCol");
             excl.Add(ac.x, ac.z, 7f);
+            PropInfo.BayArch = ac + dirIn * 2.5f;
 
             // treasure chest, partly buried
             Vector3 cp = beach + dirIn * 5.5f + along * 6.5f;

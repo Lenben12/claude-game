@@ -8,14 +8,15 @@ namespace Sealebrities
     public static class BoatMats
     {
         // ------------------------------------------------------------------ boat colors
-        public static readonly Color HullTealColor = LowPoly.Hex("#3AA3A0");
-        public static readonly Color HullBottomColor = LowPoly.Hex("#8E3D35");
-        public static readonly Color RubberColor = LowPoly.Hex("#34373F");
-        public static readonly Color EngineColor = LowPoly.Hex("#3B3F4A");
-        public static readonly Color DrumBlueColor = LowPoly.Hex("#3F7FD0");
-        public static readonly Color DrumOrangeColor = LowPoly.Hex("#F28A3A");
-        public static readonly Color HeliYellowColor = LowPoly.Hex("#FFC63D");
-        public static readonly Color HeliRedColor = LowPoly.Hex("#E2493B");
+        // Art bible (How to Fish): medium-key, slightly desaturated paint, violet-leaning darks, no neon, no pure white.
+        public static readonly Color HullTealColor = LowPoly.Hex("#3A9A98");
+        public static readonly Color HullBottomColor = LowPoly.Hex("#87403A");
+        public static readonly Color RubberColor = LowPoly.Hex("#2E2C38");
+        public static readonly Color EngineColor = LowPoly.Hex("#363646");
+        public static readonly Color DrumBlueColor = LowPoly.Hex("#3D7BC4");
+        public static readonly Color DrumOrangeColor = LowPoly.Hex("#EE7F2D");
+        public static readonly Color HeliYellowColor = LowPoly.Hex("#F2C94C");
+        public static readonly Color HeliRedColor = LowPoly.Hex("#D0503F");
 
         static Material hullTeal, hullBottom, hullRust, hullWhite, deck, deckB, deckC, deckDark, cabin, roof, frame, metal, steel,
             rubber, rope, glass, cushion, engine, engineGrey, drumBlue, drumOrange, lifeOrange, white, navRed, navGreen, navWhite,
@@ -53,20 +54,20 @@ namespace Sealebrities
         public static Material HullRust => Flat(ref hullRust, LowPoly.Rust);
         public static Material HullWhite => Flat(ref hullWhite, LowPoly.White);
         public static Material Deck => Flat(ref deck, LowPoly.Wood);
-        public static Material DeckB => Flat(ref deckB, LowPoly.Hex("#D5AA7A"));
-        public static Material DeckC => Flat(ref deckC, LowPoly.Hex("#BC8C5F"));
+        public static Material DeckB => Flat(ref deckB, LowPoly.Hex("#A88466"));
+        public static Material DeckC => Flat(ref deckC, LowPoly.Hex("#8A6A50"));
         public static Material DeckDark => Flat(ref deckDark, LowPoly.WoodDark);
         public static Material Cabin => Flat(ref cabin, LowPoly.White);
         public static Material Roof => Flat(ref roof, LowPoly.Roof);
         public static Material Frame => Flat(ref frame, HullTealColor);
         public static Material Metal => Flat(ref metal, LowPoly.Metal);
-        public static Material Steel => Flat(ref steel, LowPoly.Hex("#B8C0C8"));
+        public static Material Steel => Flat(ref steel, LowPoly.Hex("#A3A9B2"));
         /// Kept for older call sites: no shiny chrome in the low-poly look, just light steel.
         public static Material Chrome => Steel;
         public static Material Rubber => Flat(ref rubber, RubberColor);
-        public static Material Rope => Flat(ref rope, LowPoly.Hex("#E3C98F"));
-        public static Material Glass => Get(ref glass, () => MaterialLibrary.Transparent(new Color(0.68f, 0.88f, 0.98f, 0.32f), 0.55f, true));
-        public static Material Cushion => Flat(ref cushion, LowPoly.Hex("#D9503F"));
+        public static Material Rope => Flat(ref rope, LowPoly.Hex("#C9B48A"));
+        public static Material Glass => Get(ref glass, () => MaterialLibrary.Transparent(new Color(0.5f, 0.61f, 0.72f, 0.35f), 0.55f, true));
+        public static Material Cushion => Flat(ref cushion, LowPoly.Hex("#C8584A"));
         public static Material Engine => Flat(ref engine, EngineColor);
         public static Material EngineGrey => Flat(ref engineGrey, LowPoly.Hex("#8A929B"));
         public static Material DrumBlue => Flat(ref drumBlue, DrumBlueColor);
@@ -82,27 +83,27 @@ namespace Sealebrities
         public static Material Cooler => Flat(ref cooler, LowPoly.White);
         public static Material CoolerLid => Flat(ref coolerLid, DrumBlueColor);
         public static Material Tank => Flat(ref tank, LowPoly.CoralYellow);
-        public static Material Tackle => Flat(ref tackle, LowPoly.Hex("#4FAE5A"));
+        public static Material Tackle => Flat(ref tackle, LowPoly.Hex("#4E8A55"));
 
         // ------------------------------------------------------------------ crate + parachute
         public static Material Crate => Flat(ref crate, LowPoly.Wood);
         public static Material CrateDark => Flat(ref crateDark, LowPoly.WoodDark);
         public static Material CrateBand => Flat(ref crateBand, LowPoly.SuitOrange);
         public static Material Strap => Flat(ref strap, LowPoly.Ink);
-        public static Material ChuteRed => Flat(ref chuteRed, LowPoly.Hex("#E5483A"));
+        public static Material ChuteRed => Flat(ref chuteRed, LowPoly.Hex("#D9504A"));
         public static Material ChuteWhite => Flat(ref chuteWhite, LowPoly.White);
 
         // ------------------------------------------------------------------ helicopter
         public static Material HeliYellow => Flat(ref heliYellow, HeliYellowColor);
         public static Material HeliRed => Flat(ref heliRed, HeliRedColor);
-        public static Material HeliGlass => Get(ref heliGlass, () => MaterialLibrary.Transparent(new Color(0.55f, 0.82f, 0.95f, 0.5f), 0.6f, false));
+        public static Material HeliGlass => Get(ref heliGlass, () => MaterialLibrary.Transparent(new Color(0.46f, 0.6f, 0.74f, 0.55f), 0.6f, false));
         public static Material HeliDark => Flat(ref heliDark, EngineColor);
         public static Material RotorBlur => Get(ref rotorBlur, () => MaterialLibrary.Unlit(new Color(0.2f, 0.21f, 0.24f, 0.14f), true));
-        public static Material Pilot => Flat(ref pilot, LowPoly.Hex("#5D8F4E"));
+        public static Material Pilot => Flat(ref pilot, LowPoly.Hex("#5E8A3A"));
         public static Material Helmet => Flat(ref helmet, LowPoly.White);
 
         // ------------------------------------------------------------------ fishing
-        public static Material BobberRed => Flat(ref bobberRed, LowPoly.Hex("#E8473A"));
+        public static Material BobberRed => Flat(ref bobberRed, LowPoly.Hex("#E0503F"));
         public static Material BobberWhite => Flat(ref bobberWhite, LowPoly.White);
         public static Material Bucket => Flat(ref bucket, DrumBlueColor);
         public static Material BucketWater => Get(ref bucketWater, () => MaterialLibrary.Transparent(new Color(LowPoly.Water.r, LowPoly.Water.g, LowPoly.Water.b, 0.8f), 0.4f));

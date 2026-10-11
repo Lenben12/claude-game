@@ -3,19 +3,24 @@ using UnityEngine.UIElements;
 
 namespace Sealebrities
 {
-    /// Main menu over the 3D island (transparent right side): continue, new game (difficulty cards), co-op teaser,
-    /// language, controls and quit.
+    /// Main menu over the 3D scene (the bean crew sitting on the dock at golden hour, Player module).
+    /// Clean and simple (art bible §1.14): water/bubble logo top-left, plain outlined text list, no panels, no pills.
+    /// Overlays: difficulty (3 icon cards) and settings (light cards).
     public class UIMainMenu
     {
-        enum Page { Main, Difficulty, Controls }
+        enum Page { Main, Difficulty, Settings }
 
         readonly UIController ui;
-        readonly VisualElement root;
-        readonly VisualElement mainPage, overlayPage;
+        readonly VisualElement root, mainPage, overlayPage, bubbleLayer, logo;
+        readonly VisualElement[] bubbles = new VisualElement[7];
+        readonly float[] bubbleSeed = new float[7];
         Page page = Page.Main;
         Difficulty selected = Difficulty.OpenWater;
         bool starting, dirty;
-        float anim = 1f;
+        float anim = 1f, time;
+        UISettingsView settings;
+
+        const float LogoW = 980f, LogoH = 150f;
 
         public UIMainMenu(UIController ui, VisualElement layer)
         {
@@ -25,17 +30,34 @@ namespace Sealebrities
             root.pickingMode = PickingMode.Ignore;
             layer.Add(root);
 
+            // very soft violet shade on the left so the white text reads on the golden-hour scene (no panel)
             var shade = new VisualElement { pickingMode = PickingMode.Ignore };
             UIKit.Abs(shade, 0f, 0f, null, 0f);
-            shade.style.width = Length.Percent(64f);
-            UIKit.Image(shade, UIKit.HGradient(UIPalette.A(UIPalette.Navy, 0.94f), UIPalette.A(UIPalette.Navy, 0f)), false);
+            shade.style.width = Length.Percent(48f);
+            UIKit.Image(shade, UIKit.HGradient(new Color(0.08f, 0.05f, 0.15f, 0.34f), new Color(0.08f, 0.05f, 0.15f, 0f)), false);
             root.Add(shade);
 
-            var bottomShade = new VisualElement { pickingMode = PickingMode.Ignore };
-            UIKit.Abs(bottomShade, 0f, null, 0f, 0f);
-            bottomShade.style.height = 180f;
-            UIKit.Image(bottomShade, UIKit.VGradient(UIPalette.A(UIPalette.Deep, 0.7f), UIPalette.A(UIPalette.Deep, 0f)), false);
-            root.Add(bottomShade);
+            logo = BuildLogo();
+            root.Add(logo);
+
+            bubbleLayer = new VisualElement { pickingMode = PickingMode.Ignore };
+            UIKit.Abs(bubbleLayer, 120f, 40f, null, null);
+            UIKit.Size(bubbleLayer, LogoW, 240f);
+            root.Add(bubbleLayer);
+            for (int i = 0; i < bubbles.Length; i++)
+            {
+                float size = 10f + (i * 37 % 17);
+                var b = new VisualElement { pickingMode = PickingMode.Ignore };
+                b.style.position = Position.Absolute;
+                UIKit.Size(b, size, size);
+                UIKit.Radius(b, size * 0.5f);
+                UIKit.Border(b, 2.5f, new Color(1f, 1f, 1f, 0.85f));
+                b.style.backgroundColor = new Color(0.62f, 0.9f, 0.93f, 0.25f);
+                bubbleSeed[i] = (i * 0.618f) % 1f;
+                b.style.left = 40f + bubbleSeed[i] * (LogoW - 260f);
+                bubbleLayer.Add(b);
+                bubbles[i] = b;
+            }
 
             mainPage = new VisualElement { pickingMode = PickingMode.Ignore };
             UIKit.FillParent(mainPage);
@@ -43,13 +65,21 @@ namespace Sealebrities
 
             overlayPage = new VisualElement();
             UIKit.FillParent(overlayPage);
-            overlayPage.style.backgroundColor = UIPalette.A(UIPalette.Deep, 0.84f);
+            overlayPage.style.backgroundColor = new Color(0.08f, 0.06f, 0.16f, 0.45f);
             overlayPage.style.alignItems = Align.Center;
             overlayPage.style.justifyContent = Justify.Center;
             overlayPage.style.display = DisplayStyle.None;
             root.Add(overlayPage);
 
             root.style.display = DisplayStyle.None;
+        }
+
+        VisualElement BuildLogo()
+        {
+            // lower part of the letters filled with turquoise water (UILogo), top-left at (120, 96)
+            var host = UILogo.Build(120f, LogoW, LogoH, TextAnchor.MiddleLeft);
+            UIKit.Abs(host, 120f, 96f, null, null);
+            return host;
         }
 
         public bool Visible => root.style.display.value == DisplayStyle.Flex;
@@ -69,13 +99,14 @@ namespace Sealebrities
         {
             root.style.display = DisplayStyle.None;
             starting = false;
+            settings?.CancelCapture();
         }
 
         /// Esc inside the menu: back to the main page.
         public void Back()
         {
             if (!Visible || starting) return;
-            if (page != Page.Main) { page = Page.Main; Refresh(); }
+            if (page != Page.Main) { settings?.CancelCapture(); page = Page.Main; Refresh(); }
         }
 
         /// Rebuild on the next frame (safe inside click callbacks).
@@ -84,12 +115,28 @@ namespace Sealebrities
         public void Tick(float dt)
         {
             if (!Visible) return;
+            time += dt;
             if (dirty) Rebuild();
+            if (page == Page.Settings) settings?.Tick(dt);
+            TickBubbles();
             if (anim >= 1f) return;
-            anim = Mathf.Min(1f, anim + dt / 0.5f);
+            anim = Mathf.Min(1f, anim + dt / 0.6f);
             float e = 1f - (1f - anim) * (1f - anim);
             mainPage.style.opacity = e;
             mainPage.style.translate = new Translate(-30f * (1f - e), 0f);
+            logo.style.opacity = e;
+        }
+
+        void TickBubbles()
+        {
+            for (int i = 0; i < bubbles.Length; i++)
+            {
+                float speed = 0.09f + bubbleSeed[i] * 0.08f;
+                float y = Mathf.Repeat(bubbleSeed[i] + time * speed, 1f);
+                bubbles[i].style.top = 210f - y * 210f;
+                bubbles[i].style.opacity = y < 0.15f ? y / 0.15f : y > 0.8f ? (1f - y) / 0.2f : 1f;
+                bubbles[i].style.translate = new Translate(Mathf.Sin(time * (1.2f + bubbleSeed[i]) + i) * 8f, 0f);
+            }
         }
 
         public void Rebuild()
@@ -99,9 +146,10 @@ namespace Sealebrities
             BuildMain();
             overlayPage.Clear();
             if (page == Page.Difficulty) BuildDifficulty();
-            else if (page == Page.Controls) BuildControls();
+            else if (page == Page.Settings) BuildSettings();
             UIKit.Show(overlayPage, page != Page.Main);
-            if (page != Page.Main) { anim = 1f; mainPage.style.opacity = 0.25f; mainPage.style.translate = new Translate(0f, 0f); }
+            UIKit.Show(mainPage, page == Page.Main);
+            if (page != Page.Main) { anim = 1f; mainPage.style.opacity = 1f; mainPage.style.translate = new Translate(0f, 0f); }
         }
 
         // ------------------------------------------------------------------ main page
@@ -111,106 +159,86 @@ namespace Sealebrities
             mainPage.style.opacity = 1f;
 
             var col = UIKit.Col();
-            UIKit.Abs(col, 120f, 0f, null, 0f);
-            col.style.width = 560f;
-            col.style.justifyContent = Justify.Center;
+            UIKit.Abs(col, 120f, 330f, null, null);
             mainPage.Add(col);
 
-            var kicker = UIKit.Caption(Loc.Tr("Ein Tauch-Vlog-Abenteuer", "A diving vlog adventure"), UIPalette.Lagoon, 15f);
-            kicker.style.letterSpacing = 4f;
-            col.Add(kicker);
+            if (GameManager.HasSave) col.Add(MenuItem(Loc.Tr("Fortsetzen", "Continue"), OnContinue, true));
+            col.Add(MenuItem(Loc.Tr("Neues Spiel", "New Game"), () => { page = Page.Difficulty; Refresh(); }, !GameManager.HasSave));
+            col.Add(MenuItem(Loc.Tr("Mit Freunden", "With Friends"), OnFriends, false));
+            col.Add(MenuItem(Loc.Tr("Einstellungen", "Settings"), () => { page = Page.Settings; Refresh(); }, false));
+            col.Add(MenuItem(Loc.Tr("Beenden", "Quit"), OnQuit, false));
 
-            var title = UIKit.Text("SEALEBRITIES", 92f, UIPalette.Text, true);
-            title.style.letterSpacing = 6f;
-            title.style.marginLeft = -4f;
-            UIKit.Shadow(title, 16f, 0.5f);
-            col.Add(title);
-
-            var pill = UIKit.Row();
-            pill.style.alignSelf = Align.FlexStart;
-            pill.style.backgroundColor = UIPalette.Live;
-            UIKit.Radius(pill, 999f);
-            UIKit.Pad(pill, 6f, 16f, 6f, 14f);
-            var dot = UIKit.Dot(Color.white, 9f);
-            dot.style.marginRight = 9f;
-            pill.Add(dot);
-            var pt = UIKit.Text("LIVE FROM THE DEEP", 17f, Color.white, true);
-            pt.style.letterSpacing = 3f;
-            pill.Add(pt);
-            col.Add(pill);
-
-            var tagline = UIKit.Para(Loc.Tr("Tauche, filme Meerestiere und werde berühmt. Ziel: 1.000.000 Follower.",
-                                            "Dive, film sea creatures and get famous. Goal: 1,000,000 followers."), 19f, UIPalette.TextDim);
-            tagline.style.marginTop = 22f;
-            tagline.style.marginBottom = 34f;
-            col.Add(tagline);
-
-            bool hasSave = GameManager.HasSave;
-            if (hasSave)
-                col.Add(MenuButton(Loc.Tr("Fortsetzen", "Continue"), Loc.Tr("Weiter mit deinem Spielstand", "Resume your save"), UIBtnKind.Primary, OnContinue));
-            col.Add(MenuButton(Loc.Tr("Neues Spiel", "New Game"), Loc.Tr("Schwierigkeit wählen und loslegen", "Pick a difficulty and start"),
-                               hasSave ? UIBtnKind.Secondary : UIBtnKind.Primary, () => { page = Page.Difficulty; Refresh(); }));
-
-            // co-op teaser (disabled)
-            var coop = UIKit.Col();
-            coop.style.backgroundColor = new Color(1f, 1f, 1f, 0.04f);
-            UIKit.Border(coop, 1f, new Color(1f, 1f, 1f, 0.07f));
-            UIKit.Radius(coop, 14f);
-            UIKit.Pad(coop, 12f, 20f, 12f, 20f);
-            coop.style.marginBottom = 10f;
-            var coopRow = UIKit.Row();
-            coopRow.Add(UIKit.Text(Loc.Tr("Mit Freunden spielen", "Play with Friends"), 20f, UIPalette.TextFaint, true));
-            coopRow.Add(UIKit.Flex());
-            coopRow.Add(UIKit.Pill(Loc.Tr("BALD", "SOON"), UIPalette.A(UIPalette.Sun, 0.85f)));
-            coop.Add(coopRow);
-            var coopSub = UIKit.Para(Loc.Tr("Co-op über Steam-Lobby kommt in einem späteren Update", "Co-op via Steam lobby is coming in a later update"), 14f, UIPalette.TextFaint);
-            coopSub.style.marginTop = 3f;
-            coop.Add(coopSub);
-            col.Add(coop);
-
-            var langRow = UIKit.Row();
-            langRow.style.marginBottom = 10f;
-            var langLabel = UIKit.Text(Loc.Tr("Sprache", "Language"), 16f, UIPalette.TextDim, true);
-            langLabel.style.width = 120f;
-            langRow.Add(langLabel);
-            var seg = UIWidgets.LanguageSelector();
-            seg.style.flexGrow = 1;
-            langRow.Add(seg);
-            col.Add(langRow);
-
-            var row = UIKit.Row();
-            var controls = UIKit.Btn(Loc.Tr("Steuerung", "Controls"), () => { page = Page.Controls; Refresh(); }, UIBtnKind.Secondary, 17f);
-            controls.style.flexGrow = 1;
-            controls.style.marginRight = 10f;
-            row.Add(controls);
-            var quit = UIKit.Btn(Loc.Tr("Beenden", "Quit"), OnQuit, UIBtnKind.Ghost, 17f);
-            quit.style.flexGrow = 1;
-            row.Add(quit);
-            col.Add(row);
-
-            var footer = UIKit.Text(Loc.Tr("Prototyp · Einzelspieler · Unity 6", "Prototype · Single player · Unity 6"), 13f, UIPalette.TextFaint);
+            // footer: version + language quick switch
+            var footer = UIKit.HudText(Loc.Tr("Testversion 3", "Test build 3") + " · " + Application.version, 14f, new Color(1f, 1f, 1f, 0.5f), false);
             UIKit.Abs(footer, 120f, null, null, 36f);
             mainPage.Add(footer);
+            var lang = UIKit.Row();
+            UIKit.Abs(lang, null, null, 40f, 30f);
+            lang.Add(LangItem("DE", Language.German));
+            lang.Add(UIKit.HudText(" · ", 22f, new Color(1f, 1f, 1f, 0.6f)));
+            lang.Add(LangItem("EN", Language.English));
+            mainPage.Add(lang);
         }
 
-        VisualElement MenuButton(string title, string subtitle, UIBtnKind kind, System.Action onClick)
+        static Label LangItem(string text, Language l)
         {
-            var b = UIKit.Btn("", onClick, kind, 22f);
-            b.style.flexDirection = FlexDirection.Column;
-            b.style.alignItems = Align.FlexStart;
-            UIKit.Pad(b, 14f, 22f, 14f, 22f);
-            UIKit.Radius(b, 14f);
-            b.style.marginBottom = 10f;
-            var skin = b.userData as UIBtnSkin;
-            Color fg = skin != null ? skin.fg : Color.white;
-            var t = UIKit.Text(title, 22f, fg, true);
-            t.pickingMode = PickingMode.Ignore;
-            b.Add(t);
-            var s = UIKit.Text(subtitle, 14f, UIPalette.A(fg, 0.72f));
-            s.pickingMode = PickingMode.Ignore;
-            s.style.marginTop = 2f;
-            b.Add(s);
-            return b;
+            bool sel = Loc.Current == l;
+            var t = UIKit.HudText(text, 22f, sel ? Color.white : new Color(1f, 1f, 1f, 0.55f));
+            t.pickingMode = PickingMode.Position;
+            t.RegisterCallback<ClickEvent>(_ =>
+            {
+                if (Loc.Current == l) return;
+                UIAudio.Click();
+                Settings.Data.language = l;
+                Settings.Apply();
+                Settings.Save();
+            });
+            t.RegisterCallback<PointerEnterEvent>(_ => t.style.color = UIPalette.Coral);
+            t.RegisterCallback<PointerLeaveEvent>(_ => t.style.color = Loc.Current == l ? Color.white : new Color(1f, 1f, 1f, 0.55f));
+            return t;
+        }
+
+        /// Plain text menu entry (40 px, white, outlined); hover = coral + 8 px shift + bubble bullet.
+        VisualElement MenuItem(string text, System.Action onClick, bool primary)
+        {
+            var row = UIKit.Row();
+            row.style.marginBottom = 18f;
+            row.style.height = 52f;
+            var bullet = UIKit.Box();
+            UIKit.Size(bullet, 16f, 16f);
+            UIKit.Radius(bullet, 8f);
+            UIKit.Border(bullet, 3f, UIPalette.Coral);
+            bullet.style.backgroundColor = new Color(1f, 1f, 1f, 0.6f);
+            bullet.style.marginRight = 12f;
+            bullet.style.opacity = 0f;
+            bullet.pickingMode = PickingMode.Ignore;
+            row.Add(bullet);
+            var l = UIKit.HudText(text, 40f, primary ? UIPalette.Sand : Color.white);
+            l.pickingMode = PickingMode.Ignore;
+            row.Add(l);
+            row.style.translate = new Translate(-28f, 0f);
+            UIKit.Transition(row, 0.12f, "translate");
+            row.pickingMode = PickingMode.Position;
+            Color normal = primary ? UIPalette.Sand : Color.white;
+            row.RegisterCallback<PointerEnterEvent>(_ =>
+            {
+                l.style.color = UIPalette.Coral;
+                bullet.style.opacity = 1f;
+                row.style.translate = new Translate(-20f, 0f);
+            });
+            row.RegisterCallback<PointerLeaveEvent>(_ =>
+            {
+                l.style.color = normal;
+                bullet.style.opacity = 0f;
+                row.style.translate = new Translate(-28f, 0f);
+            });
+            row.RegisterCallback<ClickEvent>(_ =>
+            {
+                if (starting) return;
+                UIAudio.Click();
+                onClick?.Invoke();
+            });
+            return row;
         }
 
         // ------------------------------------------------------------------ difficulty page
@@ -221,42 +249,39 @@ namespace Sealebrities
             panel.style.maxWidth = Length.Percent(96f);
             overlayPage.Add(panel);
 
-            panel.Add(UIKit.Caption(Loc.Tr("Neues Spiel", "New game"), UIPalette.Lagoon, 14f));
-            var h = UIKit.Text(Loc.Tr("Wähle deine Schwierigkeit", "Choose your difficulty"), 40f, UIPalette.Text, true);
-            h.style.marginTop = 6f;
-            h.style.marginBottom = 28f;
+            var h = UIKit.HudText(Loc.Tr("Wie entspannt soll's sein?", "How relaxed do you want it?"), 44f);
+            h.style.marginBottom = 26f;
             panel.Add(h);
 
             var cards = UIKit.Row();
             cards.style.alignItems = Align.Stretch;
-            cards.style.flexWrap = Wrap.Wrap;
             cards.style.justifyContent = Justify.Center;
             panel.Add(cards);
-            for (int i = 0; i < 5; i++) cards.Add(DifficultyCard((Difficulty)i));
+            var sel = DifficultySettings.Selectable;
+            for (int i = 0; i < sel.Length; i++) cards.Add(DifficultyCard(sel[i]));
 
             if (GameManager.HasSave)
             {
                 var warn = UIKit.Row();
-                warn.style.marginTop = 22f;
-                warn.style.backgroundColor = UIPalette.A(UIPalette.Sun, 0.12f);
-                UIKit.Radius(warn, 12f);
-                UIKit.Pad(warn, 10f, 16f, 10f, 14f);
-                var icon = new UIGlyph(UIGlyphs.Warning, UIPalette.Sun, 22f);
-                icon.style.marginRight = 10f;
-                warn.Add(icon);
-                warn.Add(UIKit.Text(Loc.Tr("Achtung: Ein neues Spiel überschreibt deinen bisherigen Spielstand.",
-                                           "Warning: a new game overwrites your existing save."), 16f, UIPalette.Sun, true));
+                warn.style.marginTop = 20f;
+                warn.style.backgroundColor = new Color(1f, 1f, 1f, 0.92f);
+                UIKit.Radius(warn, 16f);
+                UIKit.Pad(warn, 10f, 18f, 10f, 14f);
+                warn.Add(new UIGlyph(UIGlyphs.Warning, UIPalette.SunInk, 28f));
+                var wt = UIKit.Text(Loc.Tr("Überschreibt deinen Spielstand", "Overwrites your save"), 19f, UIPalette.Ink, true);
+                wt.style.marginLeft = 10f;
+                warn.Add(wt);
                 panel.Add(warn);
             }
 
             var buttons = UIKit.Row();
-            buttons.style.marginTop = 28f;
-            var back = UIKit.Btn(Loc.Tr("Zurück", "Back"), () => { page = Page.Main; Refresh(); }, UIBtnKind.Ghost, 18f);
-            back.style.width = 200f;
-            back.style.marginRight = 14f;
+            buttons.style.marginTop = 26f;
+            var back = UIKit.Btn(Loc.Tr("Zurück", "Back"), () => { page = Page.Main; Refresh(); }, UIBtnKind.Secondary, 22f);
+            back.style.width = 220f;
+            back.style.marginRight = 16f;
             buttons.Add(back);
-            var start = UIKit.Btn(Loc.Tr("Tauchgang starten", "Start diving") + "  ·  " + Loc.DifficultyName(selected), OnStartNewGame, UIBtnKind.Primary, 18f);
-            start.style.minWidth = 360f;
+            var start = UIKit.Btn(Loc.Tr("Los geht's!", "Let's go!"), OnStartNewGame, UIBtnKind.Primary, 24f);
+            start.style.minWidth = 300f;
             buttons.Add(start);
             panel.Add(buttons);
         }
@@ -268,109 +293,70 @@ namespace Sealebrities
             var ds = DifficultySettings.For(d);
 
             var card = UIKit.Col();
-            card.style.width = 292f;
-            card.style.minHeight = 330f;
-            card.style.marginLeft = 8f; card.style.marginRight = 8f; card.style.marginBottom = 12f;
-            UIKit.Radius(card, 18f);
-            UIKit.Border(card, sel ? 3f : 1f, sel ? accent : new Color(1f, 1f, 1f, 0.08f));
-            UIKit.Pad(card, 0f);
-            card.style.overflow = Overflow.Hidden;
-            card.style.translate = new Translate(0f, sel ? -6f : 0f);
-            UIKit.Clickable(card, () => { selected = d; Refresh(); }, sel ? UIPalette.Raised2 : UIPalette.PanelSolid, UIPalette.Raised2);
+            card.style.width = 330f;
+            card.style.marginLeft = 12f; card.style.marginRight = 12f;
+            card.style.alignItems = Align.Center;
+            UIKit.Radius(card, 28f);
+            UIKit.Pad(card, 26f, 24f, 24f, 24f);
+            UIKit.Border(card, sel ? 5f : 2f, sel ? UIPalette.Coral : UIPalette.A(UIPalette.Ink, 0.08f));
+            card.style.translate = new Translate(0f, sel ? -10f : 0f);
+            UIKit.Clickable(card, () => { selected = d; Refresh(); }, sel ? Color.white : UIPalette.A(UIPalette.Card, 0.95f), Color.white);
 
-            var strip = new VisualElement { pickingMode = PickingMode.Ignore };
-            strip.style.height = 6f;
-            strip.style.backgroundColor = accent;
-            card.Add(strip);
+            card.Add(UIWidgets.IconTile(UIGlyphs.ForDifficulty(d), accent, 110f));
+            var name = UIKit.Text(Loc.DifficultyName(d), 36f, UIPalette.Ink, true);
+            name.style.marginTop = 14f;
+            card.Add(name);
 
-            var body = UIKit.Col();
-            body.pickingMode = PickingMode.Ignore;
-            UIKit.Pad(body, 18f, 20f, 20f, 20f);
-            body.style.flexGrow = 1;
-            card.Add(body);
+            var rows = UIKit.Col();
+            rows.style.marginTop = 16f;
+            rows.style.alignSelf = Align.Stretch;
+            rows.Add(StatLine(UIGlyphs.Bubbles, UIPalette.Turquoise, Loc.Tr("Luft", "Air"), UIKit.Mult(ds.airMultiplier)));
+            rows.Add(StatLine(UIGlyphs.Coin, UIPalette.Sun, Loc.Tr("Einnahmen", "Income"), UIKit.Mult(ds.incomeMultiplier)));
+            rows.Add(StatLine(ds.canFaint ? UIGlyphs.Warning : UIGlyphs.Check, ds.canFaint ? UIPalette.Coral : UIPalette.Leaf,
+                              Loc.Tr("Ohnmacht", "Fainting"), ds.canFaint ? "−" + Loc.Money(ds.rescueFee) : Loc.Tr("nie", "never")));
+            if (ds.narcosis) rows.Add(StatLine(UIGlyphs.Eye, UIPalette.Violet, Loc.Tr("Tiefenrausch", "Narcosis"), "30 m"));
+            card.Add(rows);
 
-            var top = UIKit.Row();
-            top.pickingMode = PickingMode.Ignore;
-            top.Add(UIKit.Text(Loc.DifficultyName(d), 24f, accent, true));
-            top.Add(UIKit.Flex());
-            if (d == Difficulty.OpenWater) top.Add(UIKit.Pill(Loc.Tr("EMPFOHLEN", "RECOMMENDED"), UIPalette.A(UIPalette.Lagoon, 0.9f)));
-            body.Add(top);
-
-            var desc = UIKit.Para(DifficultySettings.Description(d), 14.5f, UIPalette.TextDim);
-            desc.style.marginTop = 10f;
-            desc.style.flexGrow = 1;
-            body.Add(desc);
-
-            var chips = UIKit.Row();
-            chips.style.flexWrap = Wrap.Wrap;
-            chips.style.marginTop = 14f;
-            chips.Add(Chip(Loc.Tr("Luft ", "Air ") + UIKit.Mult(ds.airMultiplier)));
-            chips.Add(Chip(Loc.Tr("Einnahmen ", "Income ") + UIKit.Mult(ds.incomeMultiplier)));
-            chips.Add(Chip(Loc.Tr("Rettung ", "Rescue ") + Loc.Money(ds.rescueFee)));
-            if (ds.narcosis) chips.Add(Chip(Loc.Tr("Narkose", "Narcosis"), UIPalette.Violet));
-            if (!ds.canFaint) chips.Add(Chip(Loc.Tr("Kein Ohnmachtsrisiko", "Can't faint"), UIPalette.Lagoon));
-            if (ds.permadeath) chips.Add(Chip("Permadeath", UIPalette.Live));
-            body.Add(chips);
-            UIKit.IgnorePicking(body);
+            var desc = UIKit.Para(DifficultySettings.Description(d), 15f, UIPalette.InkSoft);
+            desc.style.marginTop = 14f;
+            desc.style.unityTextAlign = TextAnchor.UpperCenter;
+            card.Add(desc);
+            if (d == Difficulty.OpenWater)
+            {
+                var rec = UIKit.Pill(Loc.Tr("Empfohlen", "Recommended"), UIPalette.Turquoise, Color.white, 15f);
+                rec.style.position = Position.Absolute;
+                rec.style.top = -14f;
+                rec.style.alignSelf = Align.Center;
+                card.Add(rec);
+            }
+            UIKit.IgnorePicking(card);
+            card.pickingMode = PickingMode.Position;
             return card;
         }
 
-        static Label Chip(string text, Color? accent = null)
+        static VisualElement StatLine(UIGlyph.DrawFn icon, Color iconColor, string label, string value)
         {
-            var c = UIKit.Text(text, 12.5f, accent ?? UIPalette.Text, true);
-            c.style.backgroundColor = accent.HasValue ? UIPalette.A(accent.Value, 0.16f) : new Color(1f, 1f, 1f, 0.07f);
-            UIKit.Radius(c, 8f);
-            UIKit.Pad(c, 4f, 8f, 4f, 8f);
-            c.style.marginRight = 6f; c.style.marginBottom = 6f;
-            return c;
+            var row = UIKit.Row();
+            row.style.marginBottom = 8f;
+            row.Add(new UIGlyph(icon, UIWidgets.Ink(iconColor), 30f));
+            var l = UIKit.Text(label, 19f, UIPalette.InkSoft, true);
+            l.style.marginLeft = 10f;
+            row.Add(l);
+            row.Add(UIKit.Flex());
+            row.Add(UIKit.Text(value, 22f, UIPalette.Ink, true));
+            return row;
         }
 
-        // ------------------------------------------------------------------ controls page
-        void BuildControls()
+        // ------------------------------------------------------------------ settings page
+        void BuildSettings()
         {
-            var panel = UIKit.Card(UIPalette.PanelSolid, 22f, 34f);
-            panel.style.width = 980f;
-            panel.style.maxWidth = Length.Percent(94f);
-            overlayPage.Add(panel);
-
-            panel.Add(UIKit.Caption(Loc.Tr("Hilfe", "Help"), UIPalette.Lagoon, 14f));
-            var h = UIKit.Text(Loc.Tr("Steuerung", "Controls"), 36f, UIPalette.Text, true);
-            h.style.marginTop = 4f; h.style.marginBottom = 20f;
-            panel.Add(h);
-
-            var grid = UIKit.Row();
-            grid.style.flexWrap = Wrap.Wrap;
-            grid.style.alignItems = Align.FlexStart;
-            panel.Add(grid);
-            foreach (var entry in UIWidgets.ControlsList())
-            {
-                var row = UIKit.Row();
-                row.style.width = Length.Percent(50f);
-                row.style.paddingTop = 7f; row.style.paddingBottom = 7f;
-                row.style.paddingRight = 16f;
-                var keys = UIKit.Row();
-                keys.style.width = 210f;
-                keys.style.flexWrap = Wrap.Wrap;
-                foreach (var k in entry.keys)
-                {
-                    var cap = UIKit.KeyCap(k, 14f);
-                    cap.style.marginRight = 5f;
-                    cap.style.marginBottom = 2f;
-                    keys.Add(cap);
-                }
-                row.Add(keys);
-                var act = UIKit.Text(entry.action, 16f, UIPalette.Text);
-                act.style.flexShrink = 1;
-                act.style.whiteSpace = WhiteSpace.Normal;
-                row.Add(act);
-                grid.Add(row);
-            }
-
-            var back = UIKit.Btn(Loc.Tr("Zurück", "Back"), () => { page = Page.Main; Refresh(); }, UIBtnKind.Secondary, 17f);
-            back.style.alignSelf = Align.FlexEnd;
-            back.style.marginTop = 20f;
-            back.style.width = 200f;
-            panel.Add(back);
+            var card = UIWidgets.ModalCard(860f);
+            card.Add(UIWidgets.Header(UIGlyphs.Gear, UIPalette.Rgb(0x9AA3AE), Loc.Tr("Einstellungen", "Settings"), () => { settings?.CancelCapture(); page = Page.Main; Refresh(); }, 30f));
+            if (settings == null) settings = new UISettingsView(false);
+            settings.Root.RemoveFromHierarchy();
+            card.Add(settings.Root);
+            settings.Refresh();
+            overlayPage.Add(card);
         }
 
         // ------------------------------------------------------------------ actions
@@ -399,6 +385,24 @@ namespace Sealebrities
             {
                 if (GameManager.I != null) GameManager.I.NewGame(d);
             }, 1.6f);
+        }
+
+        void OnFriends()
+        {
+            if (Net.OpenLobby != null)
+            {
+                try { Net.OpenLobby(); }
+                catch (System.Exception e)
+                {
+                    Debug.LogException(e);
+                    ui.Notes.Push(UIGlyphs.Crew, UIPalette.Turquoise, Loc.Tr("Mit Freunden", "With friends"), Loc.Tr("Lobby konnte nicht geöffnet werden.", "Could not open the lobby."));
+                }
+            }
+            else
+            {
+                UIAudio.Nope();
+                ui.Notes.Push(UIGlyphs.Crew, UIPalette.Turquoise, Loc.Tr("Mit Freunden", "With friends"), Loc.Tr("Mehrspieler ist in diesem Build nicht verfügbar.", "Multiplayer is not available in this build."), "nolobby", null, false);
+            }
         }
 
         void OnQuit()

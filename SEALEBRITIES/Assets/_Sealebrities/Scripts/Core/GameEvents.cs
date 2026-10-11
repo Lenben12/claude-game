@@ -39,6 +39,8 @@ namespace Sealebrities
         public static event Action PhoneOpened;
         public static event Action<int> FishCaught;
         public static event Action<string> SponsorUnlocked;
+        /// The host started sleeping (fade to the next morning). The Net module mirrors the fade on clients.
+        public static event Action SleepStarted;
 
         public static void RaiseMoneyChanged(long v) => MoneyChanged?.Invoke(v);
         public static void RaiseFollowersChanged(long v) => FollowersChanged?.Invoke(v);
@@ -66,6 +68,7 @@ namespace Sealebrities
         public static void RaisePhoneOpened() => PhoneOpened?.Invoke();
         public static void RaiseFishCaught(int value) => FishCaught?.Invoke(value);
         public static void RaiseSponsorUnlocked(string siteId) => SponsorUnlocked?.Invoke(siteId);
+        public static void RaiseSleepStarted() => SleepStarted?.Invoke();
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics()
@@ -76,6 +79,7 @@ namespace Sealebrities
             DeliveryReceived = null; UploadCreated = null; UploadResolved = null; PlayerBumped = null;
             UnderwaterChanged = null; RecordingChanged = null; ClipRecorded = null; GameStarted = null;
             ReturnedToMenu = null; QuestChanged = null; PhoneOpened = null; FishCaught = null; SponsorUnlocked = null;
+            SleepStarted = null;
         }
     }
 }

@@ -153,6 +153,21 @@ namespace Sealebrities
         /// Chamfered box centered at the origin with unit size (bevel 0.18 of the size).
         public static Mesh BlockCentered() => ChamferBox("SB_PlayerBlockC", new Vector3(-0.5f, -0.5f, -0.5f), new Vector3(0.5f, 0.5f, 0.5f), 0.18f);
 
+        static Mesh sharedBlockC;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { sharedBlockC = null; }
+
+        /// One shared centered chamfer box for item details (never destroy it).
+        public static Mesh SharedBlockCentered
+        {
+            get
+            {
+                if (sharedBlockC == null) sharedBlockC = BlockCentered();
+                return sharedBlockC;
+            }
+        }
+
         /// Box with one flat chamfer on every edge and a triangle on every corner (26 faces, 44 triangles).
         public static Mesh ChamferBox(string name, Vector3 min, Vector3 max, float bevel)
         {
