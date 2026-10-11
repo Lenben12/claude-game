@@ -342,5 +342,111 @@ Zusätzlicher Auftrag für die Nacht:
 - **Grafik genau wie How to Fish:** verbindlicher Stil-Leitfaden in `docs/ArtBible_HowToFish.md`.
 - **Morgen:** Testbericht (`docs/Testbericht_Nacht_1.md`), Testversion 3 und **100 Fragen**.
 
+## 17. 100 Fragen nach der Nachtschicht (11.10.2026)
+Antworten des Spielers auf `docs/Fragen_100_Nacht1.md`:
+
+| # | Thema | Antwort |
+|---|---|---|
+| 1 | Nächste Grafik-Runde | **Hände und Gegenstände** zuerst (kleiner, heller, wie How to Fish) |
+| 2 | Hände | Überall Neopren-Handschuhe |
+| 3 | Körniges Wandrauschen | **Effekt (SSAO) ganz ausschalten** |
+| 4 | Meerfarbe | **Breite türkise Lagune** um die Insel, erst weiter draußen blau |
+| 5 | Insel | Mehr Leben: Vögel, Krabben, wehende Palmen |
+| 6 | Orientierung | Wegweiser + Seekarte |
+| 7 | Schnellreise | Nein, aber Abkürzungen |
+| 8 | Schlucht | Leitern an beiden Enden, unten etwas Verstecktes |
+| 9 | Eintauchen | Kurzer Platscher + Blasen |
+| 10 | Tiefsee | **Etwas Restlicht überall** (Boden und Umrisse ohne Lampe erkennbar) |
+| 11 | Meeresboden | Felsen, Spalten, Sandrippen, feinere Dreiecke |
+| 12 | Geräusche | Atem, Blasen, Tierlaute (Atem schneller bei wenig Luft) |
+| 13 | Tierfarben in der Tiefe | Leicht leuchtende Farben |
+| 14 | Tiermenge | So lassen |
+| 15 | Neue Tiergruppen | **Alle** (Krebse/Seesterne, Wale/Delfine, Tiefsee-Monster) |
+| 16 | Tier-Unfug | Ab und zu, lustig |
+| 17 | Hotbar wechseln | Zahlen + Mausrad |
+| 18 | Leere Hände | So lassen (an Land unsichtbar) |
+| 19 | Controller | Vor dem Early Access |
+| 20 | Auto-Kamera | Ja, beim Sprung ins Wasser automatisch |
+| 21 | Startgeld / Einstieg | Umsetzen (ca. 10 Minuten bis zur ersten Flasche). **Neu: Ein lustig aussehender Einführungs-NPC** (ein Mann) redet am Anfang kurz mit dir, führt dich schnell ins Spiel ein und gibt die Aufgaben. Danach kommt das Angeln. Er erklärt auch, dass man Geld verdient, wenn man live geht und überträgt, was man macht. Das Ganze soll richtig lustig sein. |
+| 22 | Einholen | Geschicklichkeitsspiel mit Spannungsleiste |
+| 23 | Angelplätze | Vom Boot auf offener See (größere, wertvollere Fische) |
+| 24 | Bessere Ruten | **Alle 3:** weiter werfen + Seltenes, schneller, Angel-Aufträge von Dr. Fin |
+| 25 | Schnorcheln | Erlaubt (20 s, an der Oberfläche schnell wieder voll) |
+| 26 | Zu tief | Luft schneller leer + Warnung (wie jetzt) |
+| 27 | Kompressor | Hütte füllt gratis, das Boot erst nach Kauf eines Boot-Kompressors |
+| 28 | Flaschen | Nur Vorteile |
+| 29 | Scan-Regeln | Passt so |
+| 30 | Sucher-Hinweise | Symbol + 1–2 Wörter |
+| 31 | Fotos | Foto als Vorschaubild fürs FinTube-Video (mehr Aufrufe) |
+| 32 | Kamera-Upgrades | Mehr Zoom + Nachtsicht |
+| 33 | Handy-Größe | Groß wie jetzt |
+| 34 | Handy-Upgrade | Neue Apps + neuer Look |
+| 35 | Handy nass | Nur an Land und auf dem Boot |
+| 36 | Nächste App | Wetter-App |
+| 37 | Meldungen | Max. 1 Karte + 2 Texte gleichzeitig |
+| 38 | Banner-Zeile | Auf hellem Band |
+| 39 | Hotbar-Anzeige | **Immer sichtbar** (wie How to Fish) |
+| 40 | Richtung zum Boot | **Tauchcomputer am Arm** (Richtung + Tiefe) |
+| 41 | Menü-Licht | Wärmer, tiefe Sonne (orange-golden) |
+| 42 | Intro | Nur beim ersten Start, danach im Menü abrufbar |
+| 43 | Intro unter Wasser | Gerald + bunter Fischschwarm |
+| 44 | Menü-Crew | Du + deine zuletzt gespielten Koop-Freunde |
+| 45 | Erstes Geld | Etwas Geld schon ab Video 1 |
+| 46 | Videos pro Tag | Ein Video pro Tag |
+| 47 | Preise | Passt, das Spiel soll lang sein (ca. 35–45 h) |
+| 48 | Koop-Tempo | Koop leicht schneller (4 Spieler ca. 1,3×) |
+| 49 | Freischalten | Passt (Kelp 300, Wrack 2.500, Blauwasser 15.000, Graben 100.000 + 60 % Sealog) |
+| 50 | Ränge | Kanal-Ränge mit Abzeichen |
+| 51 | Ausrüstung an der Figur | Sichtbar |
+| 52 | Sealog 100 % | Goldene Kamera als Trophäe in der Hütte + Steam-Erfolg |
+| 53 | Nächster Platz-Ausbau | Wrack „MS Clickbait“ (Innenräume, Fundstücke, Grusel-Ecken) |
+| 54 | Mini-Inseln | Geheimnis + Rastplatz (Luft auffüllen) |
+| 55 | Abgrund | Nur mit dem U-Boot |
+| 56 | Koop-Stellen | Optionale Stellen für zwei, allein gibt es einen Umweg |
+| 57 | Story-Menge | **Beides kombinieren:** Funk je Meilenstein (kurz, witzig) **und** Story-Missionen von Gus |
+| 58 | Rivalen | Erster Besuch bei 1.000 Followern, dann passiert noch nicht viel. **Später im Spiel kommen sie öfter wieder und bringen eine neue Story-Linie mit.** |
+| 59 | Besuch auf der Insel | Ja, ab und zu legen Figuren am Steg an |
+| 60 | Stimmen | Brabbel-Stimmen mit Untertiteln |
+| 61 | Menge Sammelstücke | Etwa doppelt so viele (auch unter Wasser und auf den Mini-Inseln) |
+| 62 | Sammelstücke finden | Glitzern aus der Nähe + Zähler im Handy |
+| 63 | Belohnung | Story + Kosmetik je Set (alle Muscheln = goldener Hut, alle Logbuch-Seiten = ganze Gus-Geschichte) |
+| 64 | TV-Studio-Rätsel | Mittel, mit Hinweisen in den Logbuch-Seiten |
+| 65 | Koop-Rettung | Bewusstlosen Freund zur Oberfläche schleppen, er behält die Clips |
+| 66 | Host verlässt | Warnung „Alle werden getrennt“ mit Bestätigung |
+| 67 | Gast-Stand | **Gäste behalten alles**, wenn der Spielstand wieder geladen wird (Host-Save speichert die Daten pro Gast) |
+| 68 | Mehr Spieler | **Mehr Gefahren** (mehr Raubtiere, zusammen wird es härter) |
+| 69 | Voice-Start | Offenes Mikrofon als Standard |
+| 70 | Hörweite unter Wasser | Nur nah, ca. 10 m; das Funk-Upgrade hebt das auf |
+| 71 | Funk-Upgrade | Ab dem Wrack, ca. 2.500 $ |
+| 72 | Text-Chat | **Nein** |
+| 73 | Hunger | Sanft: Bonus statt Strafe |
+| 74 | Essen | **Beides:** Fische grillen + Kokosnüsse **und** Snacks per Heli |
+| 75 | Schlafen | Ab 18 Uhr |
+| 76 | Tageslänge | 40 Minuten |
+| 77 | Finale | Geskriptetes Spektakel (Big Eye, Live-Chat, Gags, ca. 10 Min.) |
+| 78 | Enden | 3 Enden zum Early-Access-Start |
+| 79 | Nach dem Finale | **Beides:** Legenden + Rekordjagd **und** härterer Durchgang. **„Schwer“ ist erst freigeschaltet, wenn man „Normal“ durchgespielt hat** – dann das ganze Spiel noch einmal, viel, viel anspruchsvoller. Am Anfang nur „Entspannt“ und „Normal“ wählbar. |
+| 80 | Abspann | Dein Best-of (beste Clips und Fotos) als Abspann |
+| 81 | Livestream | Live tauchen vom Boot, Chat reagiert sofort, Spenden live |
+| 82 | Live-Chat | Klein am Bildrand, kurze Sprechblasen |
+| 83 | Mutproben | **Echt riskant** (tiefer als erlaubt, Hai anstupsen – viel Geld) |
+| 84 | Ohnmacht im Stream | **Stream bricht ab, Follower gehen verloren** |
+| 85 | Gast-Taucher | Nach Livestream + Wetter |
+| 86 | Gast-KI | Folgen dir grob, machen Quatsch |
+| 87 | Gast-Clips | Ja, wackelige Gast-Clips |
+| 88 | Gast-Bewertung | Sterne + lustiger Kommentar |
+| 89 | Sponsor-Geld | Grundgeld pro Seite + Aufträge |
+| 90 | Sponsor-Logos | Fantasie-Logos sichtbar an Boot und Anzug |
+| 91 | Regelbruch | Kein Geld + Meckermail, Deal endet |
+| 92 | Anzahl Sponsoren | Bis zu 3, Angebote per Nachricht |
+| 93 | Steam-Seite | Nach dem Grafik-Feinschliff |
+| 94 | Steam-Erfolge im Koop | **Für alle Anwesenden** |
+| 95 | Preis Early Access | **9,99 €** |
+| 96 | Erste Steam-Funktion | Freunde einladen |
+| 97 | Grafikstufe beim Start | Mittel bei Grafik im Prozessor |
+| 98 | Sichtfeld | Regler 60–100° |
+| 99 | Kopfwippen/Wackeln | Abschaltbar per Schalter |
+| 100 | Test-Abkürzungen | **Sofort entfernen** (Strg+Umschalt+F12 / F5–F10) |
+
 ## 12. Offene Punkte
 Werden in den nächsten Frage-Runden geklärt.
