@@ -353,11 +353,14 @@ namespace Sealebrities
                         Quaternion lq = Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 90f);
                         Vector3 la = lq * Vector3.up;
                         batch.W(PropMats.Driftwood, p).Cylinder(p + Vector3.up * 0.14f - la * 1.4f, lq, 0.18f, 0.12f, 2.8f, 6, true, true);
+                        PropCol.Capsule(cols, p + Vector3.up * 0.14f, 0.16f, 2.8f, lq, "Driftwood");   // round 3: solid log
                         break;
                     default:
                         Quaternion sr = Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f) * Quaternion.Euler(-62f, 0f, 0f);
-                        PropBeach.Surfboard(batch, p + Vector3.up * 0.65f, sr, PropMats.Flat(PropPal.Turquoise));
-                        PropCol.Box(cols, p + Vector3.up * 0.65f, new Vector3(0.6f, 0.1f, 2.1f), sr, "Surfboard");
+                        // round 3: the broken board's tail stands in the sand (ground under the tail, 0.25 m deep)
+                        Vector3 sbc = PropBeach.StuckBoardCenter(p, sr, 0.25f);
+                        PropBeach.Surfboard(batch, sbc, sr, PropMats.Flat(PropPal.Turquoise));
+                        PropCol.Box(cols, sbc, new Vector3(0.6f, 0.1f, 2.1f), sr, "Surfboard");
                         break;
                 }
                 excl.Add(p.x, p.z, 1.5f);
@@ -479,6 +482,20 @@ namespace Sealebrities
                     Vector3 l1 = standM.MultiplyPoint3x4(new Vector3(sx * TowerHalf(broken, full), broken, sz * TowerHalf(broken, full)));
                     PropCol.Capsule(cols, (l0 + l1) * 0.5f, 0.12f, (l1 - l0).magnitude, Quaternion.FromToRotation(Vector3.up, (l1 - l0).normalized), "TowerLeg");
                 }
+            // round 3 (GDD §19): the X-braced faces are solid too (only the legs were) – a thin plate per face and 1.5 m
+            // band, as wide as the tapering tower at that height – up to 9 m only: PropPOI3 puts the climbing platform at
+            // 10 m with an open side toward the ladder (the climber steps over that edge)
+            const float plateTop = 9f;
+            for (float y = 0f; y < plateTop - 0.1f; y += 1.5f)
+            {
+                float yn = Mathf.Min(plateTop, y + 1.5f), ym = (y + yn) * 0.5f, half = TowerHalf(ym, full);
+                for (int f = 0; f < 4; f++)
+                {
+                    Quaternion fq = Quaternion.Euler(0f, f * 90f, 0f);
+                    Vector3 lc = fq * new Vector3(0f, ym, half);
+                    PropSolid.Box(cols, standM.MultiplyPoint3x4(lc), new Vector3(half * 2f, yn - y, 0.12f), tilt * fq, "TowerFace");
+                }
+            }
             // fallen top part (10.5 – 18 m) lying beside the tower
             Vector3 fallDir = yaw * new Vector3(0.8f, 0f, -0.6f);
             fallDir.Normalize();

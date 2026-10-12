@@ -29,6 +29,8 @@ namespace Sealebrities
         public static void Apply(FoodDef f, float bonus = 0f)
         {
             if (f == null) return;
+            // round 3: plain food (water, fruit snacks) has no buff – it only fills the survival meters
+            if (!(f.value + bonus > 0f)) { GameEvents.RaiseFoodEaten(f); return; }
             for (int i = active.Count - 1; i >= 0; i--) if (active[i].kind == f.kind) active.RemoveAt(i);
             active.Add(new ActiveBuff
             {
@@ -50,6 +52,7 @@ namespace Sealebrities
         /// Multiplier for a buff type (1 = no buff):
         /// AirCapacity / SwimSpeed / NightEyes → 1 + value; SteadyHands → 1 − value (camera-shake factor);
         /// BumpResist → 1 − value (factor on the air lost to a predator bump).
+        /// Round 3: AirCapacity and SwimSpeed also carry the survival penalty (hungry / thirsty: up to −20 %, never 0).
         public static float Multiplier(BuffType t)
         {
             float v = Value(t);
@@ -57,9 +60,14 @@ namespace Sealebrities
             {
                 case BuffType.SteadyHands:
                 case BuffType.BumpResist: return Mathf.Clamp01(1f - v);
+                case BuffType.AirCapacity: return (1f + v) * Survival.AirFactor;
+                case BuffType.SwimSpeed: return (1f + v) * Survival.SpeedFactor;
                 default: return 1f + v;
             }
         }
+
+        /// Re-raises Changed (the player re-reads its air capacity / speed) – used by Survival when its penalty step changes.
+        public static void RaiseChanged() => Raise();
 
         public static bool Has(BuffType t) => Value(t) > 0f;
 

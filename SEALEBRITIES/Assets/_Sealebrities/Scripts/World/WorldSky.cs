@@ -8,7 +8,10 @@ namespace Sealebrities
     /// camera-centered faceted stars and moon, and big drifting low-poly cumulus clouds. WorldDayNight animates all of it.
     public static class WorldSky
     {
-        public const int StarQueue = 2900, MoonQueue = 2905;
+        /// Round 3: stars and moon moved from the transparent range (2900/2905) into the opaque pass right before the
+        /// clouds (WorldClouds.RenderQueue 2450) – the world still draws over them (depth test as before) and now the
+        /// clouds cover them too, whatever their distance.
+        public const int StarQueue = 2440, MoonQueue = 2441;
 
         public static WorldDayNight Create(Transform parent)
         {
@@ -126,10 +129,9 @@ namespace Sealebrities
 
         static Material SkyMaterial(Shader shader, int queue, string name)
         {
-            var m = new Material(shader) { name = name };
+            // no depth / depth-normals prepass (they now sit in the opaque queue range), no shadows, no motion vectors
+            var m = WorldSkyDome.SkyLayerMaterial(shader, name, queue);
             m.SetColor("_BaseColor", new Color(1f, 1f, 1f, 0f));
-            MaterialLibrary.MakeTransparent(m, true);
-            m.renderQueue = queue;
             return m;
         }
 

@@ -167,6 +167,7 @@ namespace Sealebrities
 
         public static void Squid(CreatureMeshContext ctx)
         {
+            if (ctx.S.variant == "nautilus") { CreatureMeshFossils.Nautilus(ctx); return; }   // round 3: volcano living fossil
             var s = ctx.S;
             var b = ctx.B;
             ctx.EyeStyle = CreatureMeshEyeStyle.Squid;

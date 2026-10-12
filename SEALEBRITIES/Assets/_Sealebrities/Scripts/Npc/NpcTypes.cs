@@ -14,8 +14,12 @@ namespace Sealebrities
         Cards,
         /// Paddling an outrigger canoe (M3, First Paddle).
         Paddle,
-        /// Waving both arms at the jetty (Lantern Evening) / cheering.
-        Cheer
+        /// Waving both arms (cheering).
+        Cheer,
+        /// Round 3: knocked down after a lost stick fight – sits in the sand, head wobbling (hermits).
+        Dazed,
+        /// Round 3: standing with folded arms (a wary hermit, the guard at the camp gap).
+        ArmsCrossed
     }
 
     /// One-shot gestures layered over the motion (replicated as a byte + sequence counter – APPEND only).
@@ -29,7 +33,22 @@ namespace Sealebrities
         /// Arms flail (running in late, panicking).
         Flail,
         /// Hands something over (quest hand-in).
-        Give
+        Give,
+        // ---- round 3 (hermits + the gesture wheel)
+        /// Shoos somebody away with both hands.
+        Shoo,
+        /// Hand on the heart, a small bow toward the sea.
+        HandOnHeart,
+        /// Stick swing (wind-up + strike) of an angry hermit.
+        Swing,
+        /// Hit by a stick: flinches back.
+        Flinch,
+        /// A deep bow (respect).
+        Bow,
+        /// Raises the spyglass to the eye (the lookout).
+        Spyglass,
+        /// Proud pose for the camera.
+        Pose
     }
 
     /// Small helpers shared by the npc module.

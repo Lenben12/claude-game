@@ -7,7 +7,7 @@ namespace Sealebrities
     /// pose interpolated from the host's 10 Hz snapshots, procedural swim animation (FaunaSwimAnimator), distance
     /// culling and bounds like FaunaCreature. Registered in CreatureRegistry while active, so the hand camera can film
     /// it and the journal gets the host's real species, size and tier.
-    public sealed class NetCreatureProxy : MonoBehaviour, ICreature
+    public sealed class NetCreatureProxy : MonoBehaviour, ICreature, IHittable
     {
         struct Snap
         {
@@ -25,7 +25,7 @@ namespace Sealebrities
         public Bounds WorldBounds => bounds;
         public float Activity01 => activity;
         public bool IsHallucination => false;
-        public bool IsAlive => alive && this != null && gameObject.activeInHierarchy;
+        public bool IsAlive => alive && !caught && this != null && gameObject.activeInHierarchy;
 
         public int NetId => netId;
         /// Time.unscaledTime of the last spawn/snapshot that mentioned this animal.
@@ -45,6 +45,9 @@ namespace Sealebrities
         bool[] rendererDefault;
         ShadowCastingMode[] shadowDefault;
         bool culled;
+        bool transparentModel;
+        /// Round 3: hidden after this player caught it with a spear (the host's despawn follows).
+        bool caught;
         Bounds bounds;
         int boundsCountdown;
 
@@ -73,6 +76,21 @@ namespace Sealebrities
             anim = new FaunaSwimAnimator();
             anim.Setup(rig, s);
             seed = Random.Range(0f, 50f);
+            transparentModel = FaunaCreature.HasTransparentMaterial(renderers);
+        }
+
+        // ------------------------------------------------------------------ IHittable (round 3, fauna step)
+        public bool CanBeHit => alive && !caught && species != null && !species.meme && gameObject.activeInHierarchy;
+
+        /// A guest's weapon hit the host's animal: the fauna module applies the local part (raw fish, refusal toast)
+        /// and forwards the hit to the host (Combat.HitKey).
+        public void OnHit(in HitInfo hit) => FaunaCombat.ProxyHit(this, hit);
+
+        /// The local player caught it: hide it until the host's despawn arrives.
+        public void MarkCaught()
+        {
+            caught = true;
+            SetCulled(true, 0f);
         }
 
         public void Activate(int id, float cm, SizeTier t, float ts, Vector3 p, Quaternion r, float act, float an)
@@ -92,6 +110,7 @@ namespace Sealebrities
             speed = 0f;
             yawRate = 0f;
             culled = false;
+            caught = false;
             boundsCountdown = 0;
             tr.SetPositionAndRotation(p, r);
             tr.localScale = Vector3.one * lengthM;
@@ -193,6 +212,8 @@ namespace Sealebrities
             float lim = above && !creatureInAir ? Mathf.Min(cullDistance, 35f) : cullDistance;
             bool shouldCull = culled ? dCam > lim - 5f : dCam > lim + 5f;
             if (above && p.y < Waves.HeightAt(p.x, p.z) - 5f && dCam > FilmShotEvaluator.MaxScanRange) shouldCull = true;
+            if (above && transparentModel && p.y < Waves.HeightAt(p.x, p.z) - 0.5f) shouldCull = true;   // jellies under the surface
+            if (caught) shouldCull = true;
             if (shouldCull != culled) SetCulled(shouldCull, dCam);
             if (anim != null)
             {

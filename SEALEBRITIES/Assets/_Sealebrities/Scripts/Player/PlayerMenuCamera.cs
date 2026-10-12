@@ -18,7 +18,7 @@ namespace Sealebrities
         GameObject crewRoot;
         readonly DiverPuppet[] crew = new DiverPuppet[CrewCount];
         Color builtSuit;
-        int builtHat = -1, builtFace = -1;
+        int builtHat = -1, builtFace = -1, builtLookHash;
         bool active;
 
         bool lookDirty, subscribed;
@@ -76,7 +76,8 @@ namespace Sealebrities
             {
                 lookCheck = 0.5f;
                 var d = Settings.Data;
-                if (lookDirty || d.hat != builtHat || d.face != builtFace || (d.suitColor - builtSuit).maxColorComponent > 0.01f || (builtSuit - d.suitColor).maxColorComponent > 0.01f)
+                if (lookDirty || d.hat != builtHat || d.face != builtFace || (d.suitColor - builtSuit).maxColorComponent > 0.01f || (builtSuit - d.suitColor).maxColorComponent > 0.01f
+                    || NetLookCodec.Hash(Settings.Look) != builtLookHash)
                 {
                     lookDirty = false;
                     RebuildPlayerDiver();
@@ -152,6 +153,7 @@ namespace Sealebrities
                     builtSuit = Settings.Data.suitColor;
                     builtHat = Settings.Data.hat;
                     builtFace = Settings.Data.face;
+                    builtLookHash = NetLookCodec.Hash(l);
                     l.sitting = true;
                     return l;
                 }

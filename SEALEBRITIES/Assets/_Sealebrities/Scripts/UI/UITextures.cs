@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -342,6 +342,13 @@ namespace Sealebrities
             best = Mathf.Max(best, Mini(x, z, WorldLayout.WreckIsland));
             best = Mathf.Max(best, Mini(x, z, WorldLayout.BlueDropIsland));
             best = Mathf.Max(best, Mini(x, z, WorldLayout.TrenchIsland));
+            // round 3: the volcano island (bigger, a dark cone)
+            {
+                Vector3 v = WorldLayout.VolcanoIsland;
+                float dv = Mathf.Sqrt((x - v.x) * (x - v.x) + (z - v.z) * (z - v.z));
+                float rv = WorldLayout.VolcanoShoreRadius;
+                best = Mathf.Max(best, dv < rv ? Mathf.Lerp(WorldLayout.VolcanoPeak, 1f, dv / rv) : -Mathf.Min(150f, (dv - rv) * 0.25f + 2f));
+            }
             return best;
         }
 

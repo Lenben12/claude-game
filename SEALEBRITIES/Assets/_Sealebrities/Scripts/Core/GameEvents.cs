@@ -98,6 +98,9 @@ namespace Sealebrities
         public static event Action<string, string> CarryChanged;
         /// A delivery mishap happened (delivery item id, mishap) – L.12, raised by the Boat module.
         public static event Action<string, DeliveryMishap> DeliveryMishapHappened;
+        /// Round 3: a fight moment of the LOCAL player (kind "hit" / "hurt" / "block" / "knockout", intensity 0..1) –
+        /// the livestream turns it into a hype spike (viewers love fights). Raised by Combat.
+        public static event Action<string, float> Fight;
 
         public static void RaiseMoneyChanged(long v) => MoneyChanged?.Invoke(v);
         public static void RaiseFollowersChanged(long v) => FollowersChanged?.Invoke(v);
@@ -166,6 +169,7 @@ namespace Sealebrities
         public static void RaiseChallengeCompleted(string id) => ChallengeCompleted?.Invoke(id);
         public static void RaiseCarryChanged(string oldId, string newId) => CarryChanged?.Invoke(oldId, newId);
         public static void RaiseDeliveryMishap(string itemId, DeliveryMishap m) => DeliveryMishapHappened?.Invoke(itemId, m);
+        public static void RaiseFight(string kind, float intensity) => Fight?.Invoke(kind, intensity);
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics()
@@ -183,7 +187,7 @@ namespace Sealebrities
             Notify = null; FaunaEventStarted = null; FaunaEventEnded = null; DealChanged = null; SideQuestChanged = null;
             Sighted = null; SealogPhoto = null;
             StoryFlagSet = null; ResearchChanged = null; FindTaken = null; ChallengeCompleted = null; CarryChanged = null;
-            DeliveryMishapHappened = null;
+            DeliveryMishapHappened = null; Fight = null;
         }
     }
 }

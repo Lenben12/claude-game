@@ -261,8 +261,9 @@ namespace Sealebrities
             float h, d;
             switch (focus)
             {
-                case PreviewFocus.Head: h = 1.55f; d = 2.0f; break;
-                case PreviewFocus.Face: h = 1.58f; d = 1.2f; break;
+                // round 3: the human-proportioned diver's head sits at 1.53–1.87 m (eyes 1.715 m)
+                case PreviewFocus.Head: h = 1.6f; d = 2.0f; break;
+                case PreviewFocus.Face: h = 1.68f; d = 1.15f; break;
                 case PreviewFocus.Feet: h = 0.35f; d = 2.2f; break;
                 default: h = 0.95f; d = 4.4f; break;
             }
@@ -368,17 +369,8 @@ namespace Sealebrities
             RegisterCallback<DetachFromPanelEvent>(_ => Stop());
         }
 
-        static int Hash(DiverLook l)
-        {
-            unchecked
-            {
-                int h = l.suit.GetHashCode();
-                h = h * 31 + l.cuff.GetHashCode();
-                h = h * 31 + l.hat; h = h * 31 + l.skin; h = h * 31 + l.mouth; h = h * 31 + l.eyes; h = h * 31 + l.brows;
-                h = h * 31 + l.pattern; h = h * 31 + l.mask.GetHashCode(); h = h * 31 + l.fins.GetHashCode(); h = h * 31 + (l.snorkel ? 1 : 0);
-                return h;
-            }
-        }
+        /// Everything visible (round 3: body / hair / beard / nose / accessory too) – NetLookCodec's quantized hash.
+        static int Hash(DiverLook l) => NetLookCodec.Hash(l);
 
         void Start()
         {

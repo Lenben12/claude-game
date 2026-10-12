@@ -24,7 +24,8 @@ namespace Sealebrities
     {
         const float BootTimeout = 900f;
         /// Real seconds of testing after which the remaining steps are skipped (the caller waits up to 25 min).
-        const float TimeBudget = 22.5f * 60f;
+        /// The round-3 runs (-r3only = steps 50–89) are much longer than the 22.5-minute slot of the full run.
+        static float TimeBudget => (Round3Only ? 85f : (Round3FaunaOnly || Round3NpcOnly || Round3UIOnly) ? 40f : 24f) * 60f;
 
         // ------------------------------------------------------------------ report data
         [Serializable]
@@ -158,7 +159,8 @@ namespace Sealebrities
             UnsubscribeRound2();
         }
 
-        void OnPhotoAdded(PhotoEntry e) { if (e != null && !string.IsNullOrEmpty(e.file)) testPhotos.Add(e.file); }
+        // full path: the gallery folder belongs to the world being played (save slots), it changes during the run
+        void OnPhotoAdded(PhotoEntry e) { if (e != null && !string.IsNullOrEmpty(e.file)) testPhotos.Add(Gallery.PathOf(e) ?? e.file); }
         void OnMilestone(Milestone m) => milestoneEvents++;
         void OnSiteUnlocked(DiveSite s) => siteEvents++;
         void OnSponsor(string id) => sponsorEvents++;
@@ -216,6 +218,62 @@ namespace Sealebrities
             report.version = Application.version + " (Unity " + Application.unityVersion + ")";
             Note("boot ready after " + BootState.BootSeconds.ToString("0.0", Inv) + " s" + (BootState.HadErrors ? " (boot had errors)" : ""));
 
+            // ---------------- -r3fauna: a fresh late game + only the round-3 fauna / sea content steps (65–71)
+            if (Round3FaunaOnly)
+            {
+                yield return RunStep("01 Main menu (crew on the dock, 3 difficulties)", StepMenu);
+                yield return RunStep("20 Late game: new game, tutorial done", StepLateNewGame);
+                yield return RunRound3FaunaSteps();
+                yield return RunStep("28 Quit to the main menu", StepReturnToMenu);
+                Finish(report.failed == 0 ? 0 : 1);
+                yield break;
+            }
+
+            // ---------------- -r3npc: a fresh late game + only the round-3 NPC / story / side-quest steps (72–79)
+            if (Round3NpcOnly)
+            {
+                yield return RunStep("01 Main menu (crew on the dock, 3 difficulties)", StepMenu);
+                yield return RunStep("20 Late game: new game, tutorial done", StepLateNewGame);
+                yield return RunRound3NpcSteps();
+                yield return RunStep("28 Quit to the main menu", StepReturnToMenu);
+                Finish(report.failed == 0 ? 0 : 1);
+                yield break;
+            }
+
+            // ---------------- -r3ui: a fresh late game + only the round-3 phone / UI / boat steps (80–87)
+            if (Round3UIOnly)
+            {
+                yield return RunStep("01 Main menu (crew on the dock, 3 difficulties)", StepMenu);
+                yield return RunStep("20 Late game: new game, tutorial done", StepLateNewGame);
+                yield return RunRound3UISteps();
+                yield return RunStep("28 Quit to the main menu", StepReturnToMenu);
+                Finish(report.failed == 0 ? 0 : 1);
+                yield break;
+            }
+
+            // ---------------- -r3slots: a fresh late game + only the save-slot / invite steps (88–89, GDD §19b)
+            if (Round3SlotsOnly)
+            {
+                yield return RunStep("01 Main menu (crew on the dock, 3 difficulties)", StepMenu);
+                yield return RunStep("20 Late game: new game, tutorial done", StepLateNewGame);
+                yield return RunStep("18 Save + continue (load)", StepSaveLoad);
+                yield return RunRound3SlotSteps();
+                yield return RunStep("28 Quit to the main menu", StepReturnToMenu);
+                Finish(report.failed == 0 ? 0 : 1);
+                yield break;
+            }
+
+            // ---------------- -r3only: a fresh late game + only the round-3 steps (Testversion 5: backpack, survival …)
+            if (Round3Only)
+            {
+                yield return RunStep("01 Main menu (crew on the dock, 3 difficulties)", StepMenu);
+                yield return RunStep("20 Late game: new game, tutorial done", StepLateNewGame);
+                yield return RunRound3Steps();
+                yield return RunStep("28 Quit to the main menu", StepReturnToMenu);
+                Finish(report.failed == 0 ? 0 : 1);
+                yield break;
+            }
+
             // ---------------- -r2only: a fresh late game + only the round-2 integration steps (fits one test slot)
             if (Round2Only)
             {
@@ -240,7 +298,7 @@ namespace Sealebrities
             yield return RunStep("09 Boat: wheel only from the seat, drive, get up", StepBoat);
             yield return RunStep("10 Dock ladder: out of the water onto the dock", StepLadder);
             yield return RunStep("11 House reef dive: entry brightness, visibility, air", StepDive);
-            yield return RunStep("12 Camera (K.2): auto-record, auto-detection, ≥ 5 clips without aiming, smart tape, sightings, Sealog photos", StepCamera, 240f);
+            yield return RunStep("12 Camera (K.2 + round 3): no auto-record – LMB records, auto-detection, ≥ 5 clips without aiming, smart tape, sightings, Sealog photos", StepCamera, 240f);
             yield return RunStep("13 Back on the boat: footage banked, E.4 refill only with the boat compressor", StepBoatReturn);
             yield return RunStep("14 FinTube upload + sleep: views / followers / money", StepUploadSleep);
             yield return RunStep("15 Collectible pickup (E)", StepCollectible);
@@ -261,6 +319,7 @@ namespace Sealebrities
             yield return RunStep("27 Buy every item (helicopter crates) + equip the best gear", StepBuyAll, 240f);
             yield return RunStep("27b Core round-2 contracts: settings NaN, economy K.1, Sealog photo/sightings, deals, Fog Isle, food, finds, quests", StepCoreContracts);
             yield return RunRound2Steps();
+            yield return RunRound3Steps();
             yield return RunStep("28 Quit to the main menu", StepReturnToMenu);
 
             Finish(report.failed == 0 ? 0 : 1);
@@ -285,6 +344,8 @@ namespace Sealebrities
             float t0 = Time.realtimeSinceStartup;
             Note("STEP " + name);
             GameInput.SimClear();
+            // round 3: hunger / thirst sink over the long run – every step starts fed (the survival step tests the meters)
+            if (GameManager.I != null && GameManager.I.InGame) { Survival.Set(Survival.Max, Survival.Max); Combat.Reset(); }
             yield return Guard(body(), name, timeout);
             GameInput.SimClear();
             // leave the player in a usable state for the next step
@@ -413,8 +474,11 @@ namespace Sealebrities
             Check(dBed < 6f, "woke up next to the bed in the hut (" + F(dBed) + " m from the bed)");
             Check(!pc.IsInWater, "on dry ground");
             Check(Hands.Active(Hand.Right) == HoldItem.None && Hands.Active(Hand.Left) == HoldItem.None, "both hands empty at the start (camera is a hotbar item)");
-            Check(Hands.SlotItem(Hand.Right, 0) == HoldItem.Camera && Hands.SlotItem(Hand.Right, 1) == HoldItem.FishingRod && Hands.SlotItem(Hand.Left, 0) == HoldItem.Flashlight,
-                  "default hotbar: right [camera, rod], left [lamp]");
+            Check(Hands.SlotItem(0) == HoldItem.Camera && Hands.SlotItem(1) == HoldItem.FishingRod && Hands.SlotItem(2) == HoldItem.Stick
+                  && Hands.SlotItem(3) == HoldItem.Flashlight && Hands.SlotHand(3) == Hand.Left && Hands.SlotHand(0) == Hand.Right,
+                  "default 8-slot hotbar: [camera, rod, stick] main hand, [lamp] offhand on key 4");
+            Check(Backpack.Has(ItemIds.Stick) && Backpack.Has(ItemIds.BottleEmpty), "starter backpack: stick + empty bottle (" + Backpack.UsedSlots + " slots used)");
+            Check(Survival.Hunger >= 99f && Survival.Thirst >= 99f, "survival meters full at the start (hunger " + F(Survival.Hunger, "0") + ", thirst " + F(Survival.Thirst, "0") + ")");
             foreach (var id in new[] { "rod_t0", "cam_t0", "lamp_t1", "tank_t0", "fins_t0", "boat_t0" })
                 Check(S.ownedItems.Contains(id), "starter item " + id);
             Check(Mathf.Abs(pc.Gear.airSeconds - Progression.BreathHoldSeconds) < 0.5f, "no tank yet: breath-hold " + F(pc.Gear.airSeconds) + " s");
@@ -762,10 +826,10 @@ namespace Sealebrities
             Check(Gear.Equip("tank_t1"), "Gear.Equip(tank_t1)");
             Check(Mathf.Abs(pc.Gear.airSeconds - 90f) < 0.5f, "tank equipped → " + F(pc.Gear.airSeconds) + " s");
             Check(!Gear.Equip("cam_t3"), "an item that is not owned cannot be equipped");
-            Hands.Assign(Hand.Left, 1, HoldItem.Camera);
-            Check(Hands.SlotItem(Hand.Left, 1) == HoldItem.Camera && Hands.SlotItem(Hand.Right, 0) == HoldItem.None, "camera dragged into left slot 2 (and gone from right slot 1)");
+            Hands.Assign(4, ItemIds.Camera, Hand.Left);
+            Check(Hands.SlotItem(4) == HoldItem.Camera && Hands.SlotHand(4) == Hand.Left, "camera put on hotbar slot 5 for the offhand");
             Hands.ResetToDefaults();
-            Check(Hands.SlotItem(Hand.Right, 0) == HoldItem.Camera && Hands.SlotItem(Hand.Left, 0) == HoldItem.Flashlight, "hotbar reset to defaults");
+            Check(Hands.SlotItem(0) == HoldItem.Camera && Hands.SlotItem(3) == HoldItem.Flashlight && Hands.SlotItem(4) == HoldItem.None, "hotbar reset to defaults");
             GameInput.SimTap(GameAction.Inventory);
             yield return WaitUntil(() => !UIState.InventoryOpen, 1.5f);
             Check(!UIState.InventoryOpen, "I closes the inventory");
@@ -808,7 +872,7 @@ namespace Sealebrities
             anyCan = false;
             foreach (var h in helms) if (h.CanInteract()) anyCan = true;
             Check(anyCan, "the wheel is usable standing next to the seat (" + F(FlatDist(pc.Root.position, seat.position)) + " m)");
-            Hands.Select(Hand.Right, 0);
+            Hands.Select(0);
             yield return AimAt(seat.position + boat.transform.up * 0.5f);
             Info("prompt at the seat: '" + InteractionPrompt.Text + "'");
             GameInput.SimTap(GameAction.Interact);
@@ -952,7 +1016,7 @@ namespace Sealebrities
                 Vector3 floor = FindSeafloor(site.center, site.radius * 0.7f, -11f, -7.5f);
                 yield return DiveTo(KeepInWater(floor + Vector3.up * 3f, 2.5f, 2f), floor + Vector3.up * 3f + Vector3.forward * 10f);
             }
-            if (!Hands.IsHeld(HoldItem.Camera) && Hands.Find(HoldItem.Camera, out Hand ch, out int cs)) Hands.Select(ch, cs);
+            if (!Hands.IsHeld(HoldItem.Camera) && Hands.Find(HoldItem.Camera, out Hand ch, out int cs)) Hands.Select(cs);
             Check(Hands.IsHeld(HoldItem.Camera), "camera in hand");
             pc.RefillAir();
             pc.enabled = false;
@@ -961,9 +1025,12 @@ namespace Sealebrities
             Vector3 right = Vector3.Cross(Vector3.up, fwd).normalized;
             int clips0 = Footage.DiveCount;
 
-            // ---- K.2 (a): under water the camera records by itself – no aiming, no button
+            // ---- round 3 (a): entering the water does NOT start recording – only the player's own click (LMB) does
+            yield return Wait(1.5f);
+            Check(!hc.IsRecording, "no auto-record under water (GDD §19) – " + hc.DebugSummary());
+            GameInput.SimTap(GameAction.Use);
             yield return WaitUntil(() => hc.IsRecording, 3f);
-            Check(hc.IsRecording && hc.AutoRecording, "auto-record under water with the camera in hand (" + hc.DebugSummary() + ")");
+            Check(hc.IsRecording && !hc.AutoRecording, "LMB starts recording (" + hc.DebugSummary() + ")");
 
             // ---- (b) smart tape: nothing in frame → the tape does not run
             var spawner = FaunaModule.Spawner;
@@ -1412,25 +1479,33 @@ namespace Sealebrities
             int photos = Gallery.Count;
             int seed = S.saveSeed;
             bool saved = false, loaded = false;
+            // round 3 step 6b: saves are slots now – the test world is saved into slot 1 of a SANDBOX folder
+            // (SaveSlots.RootOverride) and continued from there; the player's own slots are never touched
+            string realSlots = RealSlotsStamp();
+            EnterSlotSandbox();
             try
             {
-                if (saveExisted) File.WriteAllText(SaveSidecar, saveBackup);
+                SaveSlots.SetActive(1);
                 GameManager.SavingDisabled = false;
                 gm.Save();
-                saved = File.Exists(SavePath) && File.GetLastWriteTime(SavePath) > DateTime.Now.AddSeconds(-10);
+                string slotFile = SaveSlots.FileOf(1);
+                saved = File.Exists(slotFile) && File.GetLastWriteTime(slotFile) > DateTime.Now.AddSeconds(-10);
             }
             finally { GameManager.SavingDisabled = true; }
-            Check(saved, "game saved");
-            loaded = gm.LoadGame();
+            Check(saved, "game saved (sandbox slot 1)");
+            loaded = gm.LoadGame();   // „Fortsetzen“ = the last used slot
+            Check(SaveSlots.Active == 1 && SaveSlots.ContinueSlot == 1, "continue loads the last used slot (" + SaveSlots.Active + ")");
+            LeaveSlotSandbox();       // back to the unsaved test world (its gallery = the photos taken so far)
             RestoreSave();
             Check(loaded, "continue: save loaded");
+            Check(RealSlotsStamp() == realSlots, "the player's own save slots are untouched");
             yield return Wait(1.5f);
             Check(S.money == money && S.followers == followers && S.day == day, "money " + S.money + " $, followers " + S.followers + ", day " + S.day + " restored");
             Check(Journal.DiscoveredCount == discovered && S.ownedItems.Count == owned && S.videos.Count == videos, "journal (" + Journal.DiscoveredCount + "), items (" + S.ownedItems.Count + "), videos (" + S.videos.Count + ") restored");
             Check(S.collected.Count == collected && S.fishSold == fishSold && Gallery.Count == photos && S.saveSeed == seed, "collectibles, fish sold, gallery entries and save seed restored");
             Check(Hands.Active(Hand.Right) == HoldItem.None && Hands.Active(Hand.Left) == HoldItem.None, "hands empty after loading");
             Check(Mathf.Abs(S.timeOfDay - GameManager.MorningTime) < 0.01f && FlatDist(pc.Root.position, PlayerController.ResolveSpawn(out _)) < 4f, "continues in the morning in the hut");
-            Check(File.Exists(SavePath) == saveExisted, "the player's own save file was restored");
+            Check(File.Exists(SavePath) == saveExisted, "the player's own (old single) save file is untouched");
         }
 
         // ================================================================== 19 / 28 menu
@@ -1566,7 +1641,7 @@ namespace Sealebrities
             Info("dive spot " + V(eye) + " above floor " + F(floor.y) + " m");
             Vector3 dir = Flat(site.center - floor);
             if (dir.sqrMagnitude < 0.5f) dir = Vector3.forward;
-            if (!Hands.IsHeld(HoldItem.Camera)) { if (Hands.Find(HoldItem.Camera, out Hand ch, out int cs)) Hands.Select(ch, cs); }
+            if (!Hands.IsHeld(HoldItem.Camera)) { if (Hands.Find(HoldItem.Camera, out Hand ch, out int cs)) Hands.Select(cs); }
             yield return DiveTo(eye, eye + dir * 10f + Vector3.down * 1.5f);
             if (index >= 2 && lamp != null) lamp.SetOn(true);
             Check(Hands.IsHeld(HoldItem.Camera), "camera in hand" + (index >= 2 ? " + lamp " + (pc.FlashlightOn ? "on" : "OFF") : ""));
@@ -1796,7 +1871,8 @@ namespace Sealebrities
             int[] pageCounts = new int[SealogPages.All.Length];
             var pageList = new List<SpeciesDef>();
             for (int i = 0; i < SealogPages.All.Length; i++) { SpeciesDatabase.ByPage(SealogPages.All[i].id, pageList); pageCounts[i] = pageList.Count; }
-            Check(SpeciesDatabase.Count == 55 && pageCounts[0] == 16, "Sealog 55 species, pages " + string.Join("/", pageCounts));
+            // round 3 (fauna step): island animals are decoration (no page), + volcano page (7) + curiosities (10) + 8 new
+            Check(SpeciesDatabase.Count == 70 && pageCounts[0] == 18, "Sealog 70 entries, pages " + string.Join("/", pageCounts));
             var wrasse = SpeciesDatabase.Get("cleaner_wrasse");
             var e0 = Journal.Find(wrasse.id);
             int ph0 = e0 != null ? e0.photos : 0, si0 = e0 != null ? e0.sightings : 0;
@@ -2304,7 +2380,7 @@ namespace Sealebrities
             {
                 try
                 {
-                    string p = Path.Combine(Gallery.Folder, f);
+                    string p = Path.IsPathRooted(f) ? f : Path.Combine(Gallery.Folder, f);
                     if (File.Exists(p)) { File.Delete(p); n++; }
                 }
                 catch (Exception) { }
@@ -2392,6 +2468,7 @@ namespace Sealebrities
         void Finish(int code)
         {
             GameInput.SimClear();
+            LeaveSlotSandbox();   // round 3 step 6b: never leave the slot sandbox switched on
             RestoreSettings();
             RestoreSave();
             DeleteTestPhotos();

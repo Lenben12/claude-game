@@ -10,8 +10,14 @@ namespace Sealebrities
     /// so every vertex always samples the same world position; a flat 12 m far ring and plain outer rings reach the horizon.
     /// Colour and opacity come from ONE small ramp texture: every vertex gets uv.x = WorldWaterMap ramp coordinate of the
     /// seafloor depth at its own position (smooth depth colour, no classes, no squares) and every near triangle a
-    /// world-anchored uv.y row (±8 % facet brightness). UVs are refreshed only when the grid snaps. No colliders: boats and
-    /// players sample Waves directly.
+    /// world-anchored uv.y row (±8 % facet brightness). No colliders: boats and players sample Waves directly.
+    /// Round 3 (GDD §19 "the water must hide what is under it"): the opacity also rises with the viewing angle – a
+    /// Fresnel term, the longer refracted path through the water and a grazing cut-off (ViewOpacity) – so from the
+    /// beach, the dock or the boat only the water near the viewer shows the lagoon floor; further out the sea is opaque
+    /// and reflective and the reef, the seabed and the fish below stay hidden. The ramp texture holds, per facet
+    /// brightness row, two texels along y (straight-down alpha → opaque); alpha is linear in between, so a per-vertex
+    /// uv.y picks the exact opacity. The view part is refreshed when the camera moved 2.5 m or changed height (and on
+    /// every grid snap), only above water – seen from below the ocean uses its own material and stays as it was.
     [DefaultExecutionOrder(100)]
     public class WorldOcean : MonoBehaviour
     {
@@ -32,6 +38,16 @@ namespace Sealebrities
         public const float FarLevel = -0.05f;
         public const int RenderQueue = 2980;                // before regular transparents (particles above water stay on top)
         public const int RampWidth = 64;
+        /// Facet brightness variation levels in the ramp: full, half, none (grid edge, far ring, outer rings).
+        const int KeepLevels = 3;
+        /// Texels per facet block along y: straight-down alpha, fully opaque.
+        const int OpacityTexels = 2;
+        static int FacetCount => WorldWaterMap.FacetRows.Length;
+        static int RampRows => KeepLevels * FacetCount * OpacityTexels;
+        static int AverageBlock => (KeepLevels - 1) * FacetCount;
+        /// Lowest eye height above the sea used for the viewing angle (swimming with the head out of the water).
+        public const float MinEye = 0.35f;
+        const float ViewMove = 2.5f;                        // camera travel that re-evaluates the near view opacity
 
         const float FadeStart = 64f, FadeEnd = 112f;        // wave amplitude fade (meters from grid center)
         const float FacetFadeStart = 78f, FacetFadeEnd = 112f;
@@ -61,24 +77,32 @@ namespace Sealebrities
         int dynTris;            // triangles with at least one displaced corner
         float[] triLX, triLZ;   // local x/z per render vertex
         OceanVertex[] vbuf;     // interleaved position + normal, uploaded in place (dynamic range only)
-        Vector2[] nearUv;       // stream 1, refreshed on snap
-        float[] gridU;          // ramp coordinate per near grid vertex (scratch)
+        Vector2[] nearUv;       // stream 1: x = depth (on snap), y = facet block + view opacity (on view refresh)
+        float[] gridU;          // ramp coordinate per near grid vertex (refreshed on snap)
+        float[] gridOp;         // view opacity boost per near grid vertex (scratch)
         int[] triCellI, triCellJ, triHalf;
         float[] triFacetKeep;   // 1 = full facet brightness variation .. 0 = average (grid edge)
+        byte[] triBlock;        // ramp facet block per triangle (refreshed on snap)
 
         // far ring (welded)
         Vector3[] farLocal;
         Vector2[] farUv;
+        float[] farU;
 
         float snapX = float.NaN, snapZ = float.NaN;
+        // last view-opacity evaluation
+        float viewX, viewZ, viewEye = -1f, viewTime = -100f;
+        bool viewDirty = true;
         int frame;
         bool under;
         int idEmission;
         Camera cam;
 
         public bool CameraUnderwater => under;
-        /// The colour ramp (64 x 4: depth along x, facet brightness rows along y) – also usable by other modules.
+        /// The colour ramp (64 x 24: depth along x; facet brightness blocks of [straight-down alpha, opaque] along y).
         public Texture2D Ramp => ramp;
+        /// Eye height above the sea used by the last view-opacity refresh (-1 before the first; tests).
+        public float ViewEye => viewEye;
 
         public static WorldOcean Create(Transform parent, WorldWaterMap waterMap)
         {
@@ -124,20 +148,29 @@ namespace Sealebrities
             ApplyMaterials(false);
         }
 
-        /// 64 x 4 sRGB ramp: x = sqrt(depth / 35 m) (shore turquoise-blue → steel blue → navy, alpha 0.58 → 0.96),
-        /// y = facet brightness rows (0.915 / 0.97 / 1.03 / 1.085). Built once.
+        /// 64 x 24 sRGB ramp: x = sqrt(depth / 35 m) (shore turquoise-blue → steel blue → navy, alpha 0.55 → 1),
+        /// y = 12 facet blocks (3 variation levels × the brightness rows 0.915 / 0.97 / 1.03 / 1.085) of two texels each:
+        /// the straight-down alpha and fully opaque (same colour). Built once.
         static Texture2D BuildRamp()
         {
-            int rows = WorldWaterMap.FacetRows.Length;
+            int facets = FacetCount, rows = RampRows;
             var px = new Color32[RampWidth * rows];
             for (int i = 0; i < RampWidth; i++)
             {
                 float u = (i + 0.5f) / RampWidth;
                 Color c = WorldWaterMap.RampColor(WorldWaterMap.DepthOfU(u));
-                for (int r = 0; r < rows; r++)
+                for (int kl = 0; kl < KeepLevels; kl++)
                 {
-                    float k = WorldWaterMap.FacetRows[r];
-                    px[r * RampWidth + i] = new Color(Mathf.Clamp01(c.r * k), Mathf.Clamp01(c.g * k), Mathf.Clamp01(c.b * k), c.a);
+                    float keep = 1f - kl / (float)(KeepLevels - 1);
+                    for (int r = 0; r < facets; r++)
+                    {
+                        float k = Mathf.Lerp(1f, WorldWaterMap.FacetRows[r], keep);
+                        var col = new Color(Mathf.Clamp01(c.r * k), Mathf.Clamp01(c.g * k), Mathf.Clamp01(c.b * k), c.a);
+                        int row = (kl * facets + r) * OpacityTexels;
+                        px[row * RampWidth + i] = col;
+                        col.a = 1f;
+                        px[(row + 1) * RampWidth + i] = col;
+                    }
                 }
             }
             var t = new Texture2D(RampWidth, rows, TextureFormat.RGBA32, false, false)
@@ -152,13 +185,61 @@ namespace Sealebrities
             return t;
         }
 
-        static float RowV(int row) => (row + 0.5f) / WorldWaterMap.FacetRows.Length;
+        /// uv.y inside a facet block: 0 = the straight-down alpha of the depth, 1 = opaque (linear in between).
+        static float BlockV(int block, float opaque01) =>
+            (block * OpacityTexels + 0.5f + (opaque01 <= 0f ? 0f : opaque01 >= 1f ? 1f : opaque01)) / RampRows;
+
+        // ------------------------------------------------------------------ view opacity (pure math, allocation-free)
+        static float[] alphaLut;
+
+        /// Straight-down alpha for a ramp coordinate (the water map stores u in bytes, so 256 entries are exact).
+        static float AlphaOfU(float u)
+        {
+            if (alphaLut == null)
+            {
+                var lut = new float[256];
+                for (int i = 0; i < 256; i++) lut[i] = WorldWaterMap.RampAlpha(WorldWaterMap.DepthOfU(i / 255f));
+                alphaLut = lut;
+            }
+            int k = (int)(u * 255f + 0.5f);
+            return alphaLut[k < 0 ? 0 : k > 255 ? 255 : k];
+        }
+
+        /// How far (0..1) the surface moves from its straight-down alpha a toward opaque when seen from an eye this high
+        /// above the sea at this horizontal distance: Schlick Fresnel (F0 0.02), the longer refracted path through the
+        /// water (n = 1.33) and a grazing cut-off below ~2° (scattering / glare – the far sea is never see-through).
+        public static float OpaqueBoost(float a, float horizontalDistSq, float eye)
+        {
+            if (a >= 0.999f) return 1f;
+            if (eye < MinEye) eye = MinEye;
+            float inv = 1f / Mathf.Sqrt(horizontalDistSq + eye * eye);
+            float sinE = eye * inv;                                   // sine of the angle above the surface
+            float cosE = Mathf.Sqrt(horizontalDistSq) * inv;
+            float m = 1f - sinE, m2 = m * m;
+            float fresnel = 0.02f + 0.98f * m2 * m2 * m;
+            float s = cosE * 0.75f;                                   // sin of the refracted angle (1 / 1.33)
+            float path = 1f / Mathf.Sqrt(1f - s * s);                 // 1 straight down .. 1.51 at grazing
+            float g = Mathf.Clamp01((sinE - 0.03f) / 0.11f);
+            float graze = g * g * (3f - 2f * g);
+            float through = Mathf.Pow(1f - a, path - 1f) * (1f - fresnel) * graze;
+            return 1f - through;
+        }
+
+        /// Effective opacity of the sea surface over a seafloor depth, seen from an eye height above the sea at a
+        /// horizontal distance (what the player gets: the shallow lagoon stays readable near the viewer only).
+        public static float ViewOpacity(float seafloorDepth, float horizontalDistance, float eyeHeight)
+        {
+            float a = WorldWaterMap.RampAlpha(seafloorDepth);
+            float b = OpaqueBoost(a, horizontalDistance * horizontalDistance, eyeHeight);
+            return 1f - (1f - a) * (1f - b);
+        }
 
         void BuildNear()
         {
             int n = Cells + 1;
             gridY = new float[n * n];
             gridU = new float[n * n];
+            gridOp = new float[n * n];
             fade = new float[n * n];
             int innerCount = 0, outerCount = 0;
             for (int j = 0; j < n; j++)
@@ -212,6 +293,7 @@ namespace Sealebrities
             triGrid = new int[triCount * 3];
             triCellI = new int[triCount]; triCellJ = new int[triCount]; triHalf = new int[triCount];
             triFacetKeep = new float[triCount];
+            triBlock = new byte[triCount];
             int w = 0;
             for (int pass = 0; pass < 2; pass++)
                 for (int s = 0; s < triCount; s++)
@@ -236,7 +318,7 @@ namespace Sealebrities
                 float lx = (g % n) * Spacing - HalfSize, lz = (g / n) * Spacing - HalfSize;
                 triLX[v] = lx; triLZ[v] = lz;
                 vbuf[v] = new OceanVertex { pos = new Vector3(lx, FarLevel, lz), nrm = Vector3.up };
-                nearUv[v] = new Vector2(1f, 0.5f);
+                nearUv[v] = new Vector2(1f, BlockV(AverageBlock, 1f));
             }
 
             var idx = new ushort[vc];
@@ -270,13 +352,16 @@ namespace Sealebrities
             int n = FarCells + 1;
             farLocal = new Vector3[n * n];
             farUv = new Vector2[n * n];
+            farU = new float[n * n];
             var nrm = new Vector3[n * n];
+            float vOpaque = BlockV(AverageBlock, 1f);
             for (int j = 0; j < n; j++)
                 for (int i = 0; i < n; i++)
                 {
                     farLocal[j * n + i] = new Vector3(i * FarCell - FarHalf, FarLevel, j * FarCell - FarHalf);
                     nrm[j * n + i] = Vector3.up;
-                    farUv[j * n + i] = new Vector2(1f, 0.5f);
+                    farUv[j * n + i] = new Vector2(1f, vOpaque);
+                    farU[j * n + i] = 1f;
                 }
             int hole0 = Mathf.RoundToInt((FarHalf - HalfSize) / FarCell), hole1 = FarCells - hole0;
             int cells = FarCells * FarCells - (hole1 - hole0) * (hole1 - hole0);
@@ -322,7 +407,8 @@ namespace Sealebrities
                 v[r * 4 + 2] = new Vector3(s, FarLevel, s);
                 v[r * 4 + 3] = new Vector3(-s, FarLevel, s);
             }
-            for (int i = 0; i < v.Length; i++) { nrm[i] = Vector3.up; uv[i] = new Vector2(1f, 0.5f); }
+            float vOpaque = BlockV(AverageBlock, 1f);
+            for (int i = 0; i < v.Length; i++) { nrm[i] = Vector3.up; uv[i] = new Vector2(1f, vOpaque); }
             var tris = new int[(rings.Length - 1) * 4 * 6];
             int t = 0;
             for (int r = 0; r < rings.Length - 1; r++)
@@ -390,8 +476,8 @@ namespace Sealebrities
                 nearT.position = p;
                 farT.position = p;
                 outerT.position = p;
-                RefreshNearUv();
-                RefreshFarUv();
+                RefreshNearDepth();
+                RefreshFarDepth();
             }
 
             // ---- deep below the surface (wreck, drop-off, trench) it lies far beyond the underwater fog: freeze the
@@ -404,6 +490,27 @@ namespace Sealebrities
             // ---- above / below the surface
             bool u = cp.y < surfaceY;
             if (u != under) { under = u; ApplyMaterials(u); }
+
+            // ---- view-dependent opacity (above water only: the underside material ignores the ramp). The same frame as
+            // a snap (the depth coordinates moved with the grid), else when the eye moved 2.5 m or changed height.
+            if (!under)
+            {
+                float eye = Mathf.Clamp(cp.y - Waves.SeaLevel, MinEye, 5000f);
+                bool forced = snapped || viewDirty;
+                bool eyeChanged = Mathf.Abs(eye - viewEye) > Mathf.Max(0.3f, viewEye * 0.12f);
+                float mx = cp.x - viewX, mz = cp.z - viewZ;
+                bool moved = mx * mx + mz * mz > ViewMove * ViewMove;
+                float now = Time.unscaledTime;
+                // (a bobbing boat changes the eye height all the time: those refreshes are throttled to 4 per second)
+                if (forced || (eyeChanged && now - viewTime > 0.25f) || (moved && now - viewTime > 0.08f))
+                {
+                    RefreshNearView(cp, eye);
+                    if (forced || eyeChanged) RefreshFarView(cp, eye);
+                    viewX = cp.x; viewZ = cp.z; viewEye = eye; viewTime = now; viewDirty = false;
+                }
+            }
+            else viewDirty = true;
+
             if (under)
             {
                 // the surface seen from below glows with the daylight above
@@ -465,37 +572,78 @@ namespace Sealebrities
             }
         }
 
-        // ------------------------------------------------------------------ depth UVs (on snap only)
-        void RefreshNearUv()
+        // ------------------------------------------------------------------ depth (on snap) + view opacity UVs
+        /// Depth ramp coordinate per near grid vertex and the world-anchored facet block per triangle (on snap only).
+        void RefreshNearDepth()
         {
             int n = Cells + 1;
             int baseI = Mathf.RoundToInt((snapX - HalfSize) / Spacing), baseJ = Mathf.RoundToInt((snapZ - HalfSize) / Spacing);
             for (int k = 0; k < gridU.Length; k++)
                 gridU[k] = water != null ? water.UAt(baseI + k % n, baseJ + k / n) : 1f;
 
-            int rows = WorldWaterMap.FacetRows.Length;
+            int rows = FacetCount;
             int triCount = triCellI.Length;
             for (int t = 0; t < triCount; t++)
             {
                 int wi = baseI + triCellI[t], wj = baseJ + triCellJ[t];
                 int row = (int)(WorldTerrainData.Hash(wi, wj, 31 + triHalf[t]) % (uint)rows);
-                float v = Mathf.Lerp(0.5f, RowV(row), triFacetKeep[t]);
+                float keep = triFacetKeep[t];
+                int level = keep >= 0.75f ? 0 : keep >= 0.25f ? 1 : KeepLevels - 1;
+                triBlock[t] = (byte)(level * rows + row);
+            }
+        }
+
+        /// Opacity boost per near grid vertex for the eye position, written with the depth into uv stream 1.
+        void RefreshNearView(Vector3 eyePos, float eye)
+        {
+            int n = Cells + 1;
+            float ox = snapX - HalfSize - eyePos.x, oz = snapZ - HalfSize - eyePos.z;
+            for (int k = 0; k < gridOp.Length; k++)
+            {
+                float lx = (k % n) * Spacing + ox, lz = (k / n) * Spacing + oz;
+                gridOp[k] = OpaqueBoost(AlphaOfU(gridU[k]), lx * lx + lz * lz, eye);
+            }
+            int triCount = triBlock.Length;
+            for (int t = 0; t < triCount; t++)
+            {
+                int b = triBlock[t];
                 int o = t * 3;
-                nearUv[o] = new Vector2(gridU[triGrid[o]], v);
-                nearUv[o + 1] = new Vector2(gridU[triGrid[o + 1]], v);
-                nearUv[o + 2] = new Vector2(gridU[triGrid[o + 2]], v);
+                int g0 = triGrid[o], g1 = triGrid[o + 1], g2 = triGrid[o + 2];
+                nearUv[o] = new Vector2(gridU[g0], BlockV(b, gridOp[g0]));
+                nearUv[o + 1] = new Vector2(gridU[g1], BlockV(b, gridOp[g1]));
+                nearUv[o + 2] = new Vector2(gridU[g2], BlockV(b, gridOp[g2]));
             }
             nearMesh.SetVertexBufferData(nearUv, 0, 0, nearUv.Length, 1, SubFlags);
         }
 
-        void RefreshFarUv()
+        void RefreshFarDepth()
         {
             int n = FarCells + 1;
             int step = Mathf.RoundToInt(FarCell / WorldWaterMap.CellSize);
             int baseI = Mathf.RoundToInt((snapX - FarHalf) / WorldWaterMap.CellSize), baseJ = Mathf.RoundToInt((snapZ - FarHalf) / WorldWaterMap.CellSize);
             for (int j = 0; j < n; j++)
                 for (int i = 0; i < n; i++)
-                    farUv[j * n + i] = new Vector2(water != null ? water.UAt(baseI + i * step, baseJ + j * step) : 1f, 0.5f);
+                    farU[j * n + i] = water != null ? water.UAt(baseI + i * step, baseJ + j * step) : 1f;
+        }
+
+        /// The far ring (≥ 120 m) is opaque from any low eye; from the air the lagoon may still show its floor.
+        void RefreshFarView(Vector3 eyePos, float eye)
+        {
+            int n = FarCells + 1;
+            float ox = snapX - FarHalf - eyePos.x, oz = snapZ - FarHalf - eyePos.z;
+            int avg = AverageBlock;
+            for (int j = 0; j < n; j++)
+            {
+                float lz = j * FarCell + oz;
+                for (int i = 0; i < n; i++)
+                {
+                    int k = j * n + i;
+                    float u = farU[k];
+                    float lx = i * FarCell + ox;
+                    float b = u >= 0.999f ? 1f : OpaqueBoost(AlphaOfU(u), lx * lx + lz * lz, eye);
+                    farUv[k] = new Vector2(u, BlockV(avg, b));
+                }
+            }
             farMesh.SetUVs(0, farUv);
         }
 

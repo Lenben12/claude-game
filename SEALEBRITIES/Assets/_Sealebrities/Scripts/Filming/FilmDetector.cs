@@ -22,6 +22,7 @@ namespace Sealebrities
         public static bool IsKnown(SpeciesDef sp)
         {
             if (sp == null) return false;
+            if (!sp.InSealog) return true;   // round 3 (Q23): decoration animals never show '?' / never count as new
             Refresh();
             return known.Contains(sp.id);
         }

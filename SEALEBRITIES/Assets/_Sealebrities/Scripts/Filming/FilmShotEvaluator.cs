@@ -123,6 +123,17 @@ namespace Sealebrities
 
         /// Minimum projected size of a Sealog photo subject for an animal of this body length.
         public static float SealogMinExtentFor(float sizeCm) => sizeCm <= SmallAnimalCm ? SealogMinExtentSmall : SealogMinExtent;
+
+        /// Round 3 (GDD §19 „Viereck-Rahmen erst zeigen, wenn man nah genug am Tier ist“): an animal gets its aim
+        /// bracket only within the photo range – its projected size reaches this share of the Sealog minimum (zoom
+        /// counts, so the zoom lens still frames from a safe distance) and it is not farther than PhotoRangeMax.
+        public const float BracketExtentShare = 0.75f;
+        /// Round 3 UI step (GDD §20 Q41 „Sealog-Foto-Reichweite bis ca. 8 m“): no aim frame and no Sealog photo beyond this
+        /// (distance from the camera to the animal's bounds – a big animal counts from its nearest side).
+        public const float PhotoRangeMax = 8f;
+
+        public static bool InPhotoRange(in FilmShot s, float sizeCm) =>
+            s.distance <= PhotoRangeMax && (s.sealogSized || s.extent >= SealogMinExtentFor(sizeCm) * BracketExtentShare);
         public const float SealogMinLight = 0.35f;
         /// Photo quality: fill factor 1.0 while the subject fills 25–60 % of the frame.
         public const float PhotoFillIdealMin = 0.25f, PhotoFillIdealMax = 0.60f;
@@ -225,7 +236,7 @@ namespace Sealebrities
             shot.weight = FrameWeight(extent, light, ctx.steadiness, dx, dy, ctx.aimed, ctx.cameraQuality);
             shot.framing = shot.weight;
             shot.inSealogFrame = off <= SealogFrameHalf;
-            shot.sealogSized = extent >= SealogMinExtentFor(c.SizeCm);
+            shot.sealogSized = extent >= SealogMinExtentFor(c.SizeCm) && surf <= PhotoRangeMax;
             return FilmGate.Detected;
         }
 

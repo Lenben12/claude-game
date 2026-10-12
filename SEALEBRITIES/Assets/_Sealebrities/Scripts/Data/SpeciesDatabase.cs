@@ -58,6 +58,25 @@ namespace Sealebrities
         /// > 0: only within this many meters of the home site / its landmark island (sea lion 200, humpback 300).
         public float homeRange;
 
+        // ---------------- round 3 (GDD §19/§20, Testversion 5)
+        /// Q23: decoration animal (every island land animal) – reacts and can be filmed, but is NOT in the Sealog
+        /// (no entry, no "?", not counted). Set for all `land` species in SpeciesDatabase.Ensure.
+        public bool deco;
+        /// Q18: a food fish – a spear / speargun hit catches it (raw fish into the backpack). Everything that is neither
+        /// food nor hostile is protected: a hit is refused and brings haters.
+        public bool food;
+        /// Q16: may attack divers when the threat director (FaunaThreat) picks it – circling, music, one charge.
+        public bool hunter;
+        /// The big prehistoric monster of the volcano sinkhole (FaunaVolcano spawns it, never the population).
+        public bool monster;
+        /// Q19: a meme / curiosity (SeaContent places it as a filmable prop or show actor, never spawned by the fauna).
+        public bool meme;
+
+        /// Counts for the Sealog (pages, totals, golden camera) – decoration animals do not.
+        public bool InSealog => !deco;
+        /// Hits on it are self-defence (sharks, barracuda, the monster …): it gets knocked back and flees.
+        public bool Hostile => monster || hunter || (IsDangerous && !unique);
+
         public string Name => Loc.Tr(nameDe, nameEn);
         public string Fact => Loc.Tr(factDe, factEn);
         public float SpawnWeight => SpeciesDatabase.RarityWeight(rarity);
@@ -100,10 +119,14 @@ namespace Sealebrities
         static List<SpeciesDef> all;
         static Dictionary<string, SpeciesDef> byId;
 
+        static int sealogCount;
+
+        /// Every species incl. the decoration animals (net replication indexes into this list – append only).
         public static IReadOnlyList<SpeciesDef> All { get { Ensure(); return all; } }
 
-        /// Number of Sealog entries (55 in round 2b) – the golden camera needs all of them.
-        public static int Count { get { Ensure(); return all.Count; } }
+        /// Number of Sealog entries (round 3: decoration animals excluded; volcano + curiosities added) – the golden
+        /// camera needs all of them.
+        public static int Count { get { Ensure(); return sealogCount; } }
 
         public static SpeciesDef Get(string id)
         {
@@ -159,7 +182,16 @@ namespace Sealebrities
         static string[] Z(params string[] z) => z;
 
         const string HR = Zones.HouseReef, LG = Zones.Lagoon, KF = Zones.Kelp, WR = Zones.Wreck, BD = Zones.BlueDrop, DT = Zones.Trench,
-            OS = Zones.OpenSea, DS = Zones.DeepSea, FI = Zones.FogIsle, TP = Zones.TidePools, BE = Zones.Beach, IS = Zones.Island;
+            OS = Zones.OpenSea, DS = Zones.DeepSea, FI = Zones.FogIsle, TP = Zones.TidePools, BE = Zones.Beach, IS = Zones.Island,
+            VI = Zones.Volcano;
+
+        /// Round 3 Sealog pages of the new entries (SealogPages ids).
+        public const string VolcanoPage = "volcano_isle", MemePage = "memes";
+
+        /// Q18 food fish (spear fishing → raw fish). Everything else that is not hostile is protected.
+        static readonly string[] FoodIds = { "sardine", "yellowfin", "grouper", "lionfish", "flying_fish", "mackerel", "mahi_mahi", "snapper", "jack" };
+        /// Q16 sharks / predators the threat director may send at a diver (circling + one charge).
+        static readonly string[] HunterIds = { "hammerhead", "barracuda", "whitetip_shark", "tiger_shark", "sixgill_shark" };
 
         static void Ensure()
         {
@@ -186,7 +218,7 @@ namespace Sealebrities
                     plan = BodyPlan.Jelly, behavior = BehaviorType.Drifter, groupMin = 2, groupMax = 6, speed = 0.15f,
                     colorA = C("#CFE8FF"), colorB = C("#FFB3D9"), colorC = C("#E8F4FF"), pattern = PatternType.Translucent,
                     bodyHeight = 0.5f, bodyWidth = 1.0f, finSize = 1f, glows = true,
-                    zones = Z(HR, LG, KF, OS), prefDepth = 3, nightWeight = 2f,
+                    zones = Z(HR, LG, KF, OS, VI), prefDepth = 3, nightWeight = 2f,
                     factDe = "Besteht zu 98 % aus Wasser und hat weder Herz noch Gehirn.", factEn = "Is 98% water and has neither heart nor brain." },
                 new SpeciesDef { id = "parrotfish", nameDe = "Papageifisch", nameEn = "Parrotfish", latin = "Scarus frenatus",
                     siteId = "house_reef", minDepth = 2, maxDepth = 18, minCm = 30, maxCm = 90, rarity = Rarity.Common, baseValue = 15,
@@ -339,14 +371,14 @@ namespace Sealebrities
                     plan = BodyPlan.Fish, variant = "barracuda", behavior = BehaviorType.Predator, groupMin = 1, groupMax = 4, speed = 1.6f,
                     colorA = C("#B8C4CC"), colorB = C("#3F4A52"), colorC = C("#7C8890"), pattern = PatternType.VerticalBands,
                     bodyHeight = 0.13f, bodyWidth = 0.09f, finSize = 0.8f,
-                    zones = Z(WR, OS, BD), prefDepth = 15, homeSite = "wreck",
+                    zones = Z(WR, OS, BD, VI), prefDepth = 15, homeSite = "wreck",
                     factDe = "Schießt mit bis zu 58 km/h auf alles, was glänzt.", factEn = "Strikes at anything shiny at up to 58 km/h." },
                 new SpeciesDef { id = "hammerhead", nameDe = "Bogenstirn-Hammerhai", nameEn = "Scalloped Hammerhead", latin = "Sphyrna lewini",
                     siteId = "wreck", minDepth = 20, maxDepth = 60, minCm = 200, maxCm = 450, rarity = Rarity.Rare, baseValue = 250,
                     plan = BodyPlan.Shark, variant = "hammer", behavior = BehaviorType.Predator, groupMin = 1, groupMax = 3, speed = 0.9f,
                     colorA = C("#6E7B85"), colorB = C("#F2F2F0"), colorC = C("#4E5A63"), pattern = PatternType.BellyGradient,
                     bodyHeight = 0.13f, bodyWidth = 0.13f, finSize = 1.2f,
-                    zones = Z(WR, BD, OS), prefDepth = 35, homeSite = "wreck",
+                    zones = Z(WR, BD, OS, VI), prefDepth = 35, homeSite = "wreck",
                     factDe = "Der Hammerkopf funktioniert wie ein Metalldetektor für Beute.", factEn = "Its hammer head works like a metal detector for prey." },
 
                 // ================= Sealog page „Blauwasser“ (5) – gate: blue_drop (dolphin: kelp) =================
@@ -429,7 +461,7 @@ namespace Sealebrities
                     plan = BodyPlan.Fish, variant = "slender", behavior = BehaviorType.Schooling, groupMin = 60, groupMax = 150, speed = 2.0f,
                     colorA = C("#9FB4C4"), colorB = C("#F4EFE6"), colorC = C("#3F5A72"), pattern = PatternType.BellyGradient,
                     bodyHeight = 0.2f, bodyWidth = 0.11f, finSize = 0.8f,
-                    zones = Z(OS, LG, KF), prefDepth = 8, dayMask = DayMask.Day,
+                    zones = Z(OS, LG, KF, VI), prefDepth = 8, dayMask = DayMask.Day,
                     factDe = "Schwimmt im Schwarm, damit Räuber nicht wissen, wen sie nehmen sollen.", factEn = "Swims in a school so predators can't decide whom to pick." },
                 new SpeciesDef { id = "flying_fish", nameDe = "Fliegender Fisch", nameEn = "Flying Fish", latin = "Exocoetus volitans",
                     siteId = "open_sea", minDepth = 0, maxDepth = 2, minCm = 15, maxCm = 35, rarity = Rarity.Common, baseValue = 10,
@@ -443,21 +475,21 @@ namespace Sealebrities
                     plan = BodyPlan.Ray, variant = "eagle", behavior = BehaviorType.Wanderer, groupMin = 2, groupMax = 6, speed = 0.6f,
                     colorA = C("#2E3E5C"), colorB = C("#F4EFE6"), colorC = C("#F4EFE6"), pattern = PatternType.Spots,
                     bodyHeight = 0.1f, bodyWidth = 1.4f, finSize = 1f,
-                    zones = Z(LG, OS, KF), prefDepth = 10,   // Hochsee page: no site gate (L.1 – that page unlocks nothing)
+                    zones = Z(LG, OS, KF, VI), prefDepth = 10,   // Hochsee page: no site gate (L.1 – that page unlocks nothing)
                     factDe = "Springt manchmal einfach aus Spaß aus dem Wasser.", factEn = "Sometimes leaps out of the water just for fun." },
                 new SpeciesDef { id = "yellowfin", nameDe = "Gelbflossen-Thun", nameEn = "Yellowfin Tuna", latin = "Thunnus albacares",
                     siteId = "open_sea", minDepth = 0, maxDepth = 60, minCm = 60, maxCm = 200, rarity = Rarity.Uncommon, baseValue = 55,
                     plan = BodyPlan.Fish, variant = "tuna", behavior = BehaviorType.Schooling, groupMin = 4, groupMax = 10, speed = 2.2f,
                     colorA = C("#2B3A5C"), colorB = C("#D9DEE2"), colorC = C("#F2C94C"), pattern = PatternType.BellyGradient,
                     bodyHeight = 0.24f, bodyWidth = 0.16f, finSize = 1.0f,
-                    zones = Z(OS, BD), prefDepth = 15,   // Hochsee page: no site gate
+                    zones = Z(OS, BD, VI), prefDepth = 15,   // Hochsee page: no site gate
                     factDe = "Kann über 70 km/h schnell schwimmen.", factEn = "Can swim faster than 70 km/h." },
                 new SpeciesDef { id = "lanternfish", nameDe = "Laternenfisch", nameEn = "Lanternfish", latin = "Myctophum punctatum",
                     siteId = "open_sea", minDepth = 40, maxDepth = 98, minCm = 3, maxCm = 15, rarity = Rarity.Common, baseValue = 12,
                     plan = BodyPlan.Fish, variant = "lantern", behavior = BehaviorType.Schooling, groupMin = 20, groupMax = 40, speed = 1.2f,
                     colorA = C("#2E3E5C"), colorB = C("#8EA6C4"), colorC = C("#7FD3E0"), pattern = PatternType.BellyGradient,
                     bodyHeight = 0.22f, bodyWidth = 0.12f, finSize = 0.9f, glows = true,
-                    zones = Z(DS, DT, OS), prefDepth = 60, nightShift = -30f,   // Hochsee page: no site gate – a night open-sea species
+                    zones = Z(DS, DT, OS, VI), prefDepth = 60, nightShift = -30f,   // Hochsee page: no site gate – a night open-sea species
                     factDe = "Wandert jede Nacht hunderte Meter nach oben – die größte Reise der Welt.", factEn = "Rises hundreds of metres every night – the biggest migration on Earth." },
 
                 // ================= Sealog page „Nebelinsel“ (5, K.8) – gate: fog_map =================
@@ -569,13 +601,199 @@ namespace Sealebrities
                     zones = Z(IS), land = true, dayMask = DayMask.Dusk | DayMask.Night,
                     factDe = "Schläft kopfüber und pflanzt nebenbei ganze Wälder – mit Fruchtkernen.", factEn = "Sleeps upside down and plants whole forests on the side – with fruit seeds." },
             };
+            AddRound3(all);
 
             byId = new Dictionary<string, SpeciesDef>();
+            sealogCount = 0;
             foreach (var s in all)
             {
                 byId[s.id] = s;
                 if (s.zones == null) s.zones = new[] { s.siteId };
+                // round 3 (Q23): island land animals are decoration – they react and can be filmed, but are no Sealog entry
+                if (s.land) s.deco = true;
+                if (s.InSealog) sealogCount++;
+                // the glowing curiosities light themselves (camera light factor)
+                if (s.id == "meme_gamingpc" || s.id == "meme_dance") s.glows = true;
             }
+            for (int i = 0; i < FoodIds.Length; i++) if (byId.TryGetValue(FoodIds[i], out var f)) f.food = true;
+            for (int i = 0; i < HunterIds.Length; i++) if (byId.TryGetValue(HunterIds[i], out var h)) h.hunter = true;
         }
+
+        /// Round 3 (Testversion 5, GDD §19/§20): more life everywhere – night predators and rare night animals (Q44),
+        /// food fish for spear fishing (Q18), sharks that may attack (Q16), the volcano island's living fossils + the
+        /// prehistoric monster (Q14, own Sealog page) and the curiosities / memes (Q19, own page). Decoration animals of
+        /// the island (Q22/Q23) follow at the end. APPEND ONLY (co-op replication sends the index into All).
+        static void AddRound3(List<SpeciesDef> l)
+        {
+            // ---- house reef page: the night shift
+            l.Add(new SpeciesDef { id = "whitetip_shark", nameDe = "Weißspitzen-Riffhai", nameEn = "Whitetip Reef Shark", latin = "Triaenodon obesus",
+                siteId = "house_reef", minDepth = 3, maxDepth = 30, minCm = 100, maxCm = 170, rarity = Rarity.Rare, baseValue = 110,
+                plan = BodyPlan.Shark, behavior = BehaviorType.Predator, groupMin = 1, groupMax = 2, speed = 0.8f,
+                colorA = C("#7E8A8E"), colorB = C("#EEF0EE"), colorC = C("#F7F7F4"), pattern = PatternType.BellyGradient,
+                bodyHeight = 0.12f, bodyWidth = 0.12f, finSize = 1.1f,
+                zones = Z(HR, LG, WR, FI), prefDepth = 12, nightWeight = 4f, habitat = "overhang",
+                factDe = "Döst tagsüber in Höhlen und jagt nachts in Riffspalten. Kommt gern nachsehen, wer da taucht.", factEn = "Dozes in caves by day and hunts in reef crevices at night. Likes to check who is diving." });
+            l.Add(new SpeciesDef { id = "flashlight_fish", nameDe = "Blitzlichtfisch", nameEn = "Flashlight Fish", latin = "Anomalops katoptron",
+                siteId = "house_reef", minDepth = 2, maxDepth = 30, minCm = 10, maxCm = 30, rarity = Rarity.Rare, baseValue = 65,
+                plan = BodyPlan.Fish, variant = "lantern", behavior = BehaviorType.Schooling, groupMin = 3, groupMax = 8, speed = 1.5f,
+                colorA = C("#1B1F2E"), colorB = C("#2A3048"), colorC = C("#9FF5FF"), pattern = PatternType.Solid,
+                bodyHeight = 0.3f, bodyWidth = 0.14f, finSize = 0.9f, glows = true,
+                zones = Z(HR, WR, FI), prefDepth = 10, dayMask = DayMask.Night, nightWeight = 1.5f,
+                factDe = "Blinkt mit Leuchtbakterien unter den Augen – wie eine Taschenlampe mit Schalter.", factEn = "Blinks with glowing bacteria under its eyes – like a torch with a switch." });
+
+            // ---- wreck page: schools around the hull (food fish)
+            l.Add(new SpeciesDef { id = "snapper", nameDe = "Rotschnapper", nameEn = "Red Snapper", latin = "Lutjanus campechanus",
+                siteId = "wreck", minDepth = 8, maxDepth = 45, minCm = 30, maxCm = 80, rarity = Rarity.Common, baseValue = 18,
+                plan = BodyPlan.Fish, behavior = BehaviorType.Schooling, groupMin = 6, groupMax = 14, speed = 1.2f,
+                colorA = C("#D9454A"), colorB = C("#F6C1B0"), colorC = C("#B0303A"), pattern = PatternType.BellyGradient,
+                bodyHeight = 0.36f, bodyWidth = 0.15f, finSize = 1f,
+                zones = Z(WR, KF, BD, VI), prefDepth = 22, homeSite = "wreck",
+                factDe = "Ein beliebter Speisefisch – lebt am liebsten in Wracks und Riffen.", factEn = "A popular food fish – loves wrecks and reefs." });
+            l.Add(new SpeciesDef { id = "jack", nameDe = "Großaugen-Stachelmakrele", nameEn = "Bigeye Trevally", latin = "Caranx sexfasciatus",
+                siteId = "wreck", minDepth = 10, maxDepth = 50, minCm = 40, maxCm = 90, rarity = Rarity.Common, baseValue = 22,
+                plan = BodyPlan.Fish, variant = "tall", behavior = BehaviorType.Schooling, groupMin = 10, groupMax = 24, speed = 1.6f,
+                colorA = C("#AEB8C2"), colorB = C("#E8ECEF"), colorC = C("#4E5A66"), pattern = PatternType.BellyGradient,
+                bodyHeight = 0.38f, bodyWidth = 0.13f, finSize = 1f,
+                zones = Z(WR, BD, OS, VI), prefDepth = 18, homeSite = "wreck",
+                factDe = "Dreht in riesigen Schwärmen Tornados um Taucher.", factEn = "Forms huge tornado schools around divers." });
+
+            // ---- open sea page: never empty water
+            l.Add(new SpeciesDef { id = "mackerel", nameDe = "Makrele", nameEn = "Atlantic Mackerel", latin = "Scomber scombrus",
+                siteId = "open_sea", minDepth = 0, maxDepth = 40, minCm = 25, maxCm = 45, rarity = Rarity.Common, baseValue = 6,
+                plan = BodyPlan.Fish, variant = "slender", behavior = BehaviorType.Schooling, groupMin = 20, groupMax = 50, speed = 2.1f,
+                colorA = C("#2E6B7A"), colorB = C("#E8ECEF"), colorC = C("#1E3A44"), pattern = PatternType.BellyGradient,
+                bodyHeight = 0.2f, bodyWidth = 0.12f, finSize = 0.8f,
+                zones = Z(OS, LG, KF, VI), prefDepth = 10,
+                factDe = "Hat keine Schwimmblase und muss deshalb immer schwimmen.", factEn = "Has no swim bladder, so it can never stop swimming." });
+            l.Add(new SpeciesDef { id = "mahi_mahi", nameDe = "Goldmakrele", nameEn = "Mahi-Mahi", latin = "Coryphaena hippurus",
+                siteId = "open_sea", minDepth = 0, maxDepth = 30, minCm = 70, maxCm = 150, rarity = Rarity.Uncommon, baseValue = 45,
+                plan = BodyPlan.Fish, behavior = BehaviorType.Wanderer, groupMin = 1, groupMax = 4, speed = 1.8f,
+                colorA = C("#2FB36B"), colorB = C("#F2D54B"), colorC = C("#2F6FD6"), pattern = PatternType.BellyGradient,
+                bodyHeight = 0.28f, bodyWidth = 0.12f, finSize = 1.2f,
+                zones = Z(OS, BD), prefDepth = 6, dayMask = DayMask.Day,
+                factDe = "Leuchtet grün-gold und wechselt beim Jagen blitzschnell die Farbe.", factEn = "Shines green and gold and flashes new colours while hunting." });
+            l.Add(new SpeciesDef { id = "tiger_shark", nameDe = "Tigerhai", nameEn = "Tiger Shark", latin = "Galeocerdo cuvier",
+                siteId = "open_sea", minDepth = 0, maxDepth = 80, minCm = 300, maxCm = 500, rarity = Rarity.Rare, baseValue = 320,
+                plan = BodyPlan.Shark, behavior = BehaviorType.Predator, groupMin = 1, groupMax = 1, speed = 0.8f,
+                colorA = C("#6F7466"), colorB = C("#E6E4DA"), colorC = C("#3E423A"), pattern = PatternType.VerticalBands,
+                bodyHeight = 0.14f, bodyWidth = 0.15f, finSize = 1.1f,
+                zones = Z(OS, DS, BD, VI), prefDepth = 20, nightWeight = 2.5f,
+                factDe = "Frisst so ziemlich alles – in einem Magen fand man schon ein Nummernschild.", factEn = "Eats pretty much anything – one stomach held a licence plate." });
+            l.Add(new SpeciesDef { id = "comb_jelly", nameDe = "Rippenqualle", nameEn = "Comb Jelly", latin = "Beroe cucumis",
+                siteId = "open_sea", minDepth = 0, maxDepth = 40, minCm = 5, maxCm = 15, rarity = Rarity.Common, baseValue = 14,
+                plan = BodyPlan.Jelly, behavior = BehaviorType.Drifter, groupMin = 2, groupMax = 6, speed = 0.12f,
+                colorA = C("#CFE8FF"), colorB = C("#8EF5FF"), colorC = C("#F28CBE"), pattern = PatternType.Translucent,
+                bodyHeight = 0.6f, bodyWidth = 0.7f, finSize = 1f, glows = true,
+                zones = Z(OS, LG, DS, HR), prefDepth = 12, dayMask = DayMask.Dusk | DayMask.Night, nightWeight = 2f,
+                factDe = "Hat keine Nesseln – die Regenbogenstreifen sind schlagende Wimpern.", factEn = "Has no sting – the rainbow stripes are beating hairs." });
+
+            // ---- Vulkaninsel page (Q14): living fossils + the monster – gate: the wreck unlock (VolcanoGate)
+            l.Add(new SpeciesDef { id = "nautilus", nameDe = "Perlboot", nameEn = "Chambered Nautilus", latin = "Nautilus pompilius",
+                siteId = VolcanoPage, minDepth = 20, maxDepth = 90, minCm = 15, maxCm = 25, rarity = Rarity.Uncommon, baseValue = 90,
+                plan = BodyPlan.Squid, variant = "nautilus", behavior = BehaviorType.Drifter, groupMin = 1, groupMax = 3, speed = 0.25f,
+                colorA = C("#F2E6D0"), colorB = C("#A8562E"), colorC = C("#6B3A22"), pattern = PatternType.VerticalBands,
+                bodyHeight = 0.6f, bodyWidth = 0.4f, finSize = 1f,
+                zones = Z(VI), prefDepth = 50, nightShift = -25f, homeSite = "wreck",
+                factDe = "Schwimmt rückwärts per Rückstoß – seit 500 Millionen Jahren fast unverändert.", factEn = "Jets backwards – almost unchanged for 500 million years." });
+            l.Add(new SpeciesDef { id = "horseshoe_crab", nameDe = "Pfeilschwanzkrebs", nameEn = "Horseshoe Crab", latin = "Tachypleus tridentatus",
+                siteId = VolcanoPage, minDepth = 1, maxDepth = 25, minCm = 30, maxCm = 60, rarity = Rarity.Common, baseValue = 35,
+                plan = BodyPlan.Crab, variant = "horseshoe", behavior = BehaviorType.Crawler, groupMin = 1, groupMax = 4, speed = 0.15f,
+                colorA = C("#6B5A3A"), colorB = C("#A08A5E"), colorC = C("#3A3020"), pattern = PatternType.Mottled,
+                bodyHeight = 0.28f, bodyWidth = 0.9f, finSize = 1f,
+                zones = Z(VI), prefDepth = 6, homeSite = "wreck", habitat = "sand",
+                factDe = "Hat blaues Blut und zehn Augen – und ist älter als die Dinosaurier.", factEn = "Has blue blood and ten eyes – and is older than the dinosaurs." });
+            l.Add(new SpeciesDef { id = "sixgill_shark", nameDe = "Sechskiemer-Hai", nameEn = "Bluntnose Sixgill Shark", latin = "Hexanchus griseus",
+                siteId = VolcanoPage, minDepth = 30, maxDepth = 90, minCm = 250, maxCm = 480, rarity = Rarity.Rare, baseValue = 280,
+                plan = BodyPlan.Shark, behavior = BehaviorType.Predator, groupMin = 1, groupMax = 1, speed = 0.5f,
+                colorA = C("#5A5650"), colorB = C("#8A847A"), colorC = C("#3A3632"), pattern = PatternType.BellyGradient,
+                bodyHeight = 0.14f, bodyWidth = 0.15f, finSize = 0.9f,
+                zones = Z(VI), prefDepth = 60, nightShift = -30f, nightWeight = 2f, homeSite = "wreck",
+                factDe = "Sechs Kiemenspalten statt fünf – so sahen Haie vor 200 Millionen Jahren aus.", factEn = "Six gill slits instead of five – that's what sharks looked like 200 million years ago." });
+            l.Add(new SpeciesDef { id = "frilled_shark", nameDe = "Kragenhai", nameEn = "Frilled Shark", latin = "Chlamydoselachus anguineus",
+                siteId = VolcanoPage, minDepth = 40, maxDepth = 100, minCm = 100, maxCm = 200, rarity = Rarity.Rare, baseValue = 240,
+                plan = BodyPlan.Eel, variant = "frilled", behavior = BehaviorType.Drifter, groupMin = 1, groupMax = 1, speed = 0.3f,
+                colorA = C("#6A4A3E"), colorB = C("#8A6A5A"), colorC = C("#3A2A22"), pattern = PatternType.BellyGradient,
+                bodyHeight = 0.09f, bodyWidth = 0.08f, finSize = 1.1f,
+                zones = Z(VI), prefDepth = 70, homeSite = "wreck",
+                factDe = "Ein Hai wie ein Aal mit 300 dreizackigen Zähnen. Kaum jemand hat ihn lebend gefilmt.", factEn = "A shark shaped like an eel with 300 three-pronged teeth. Hardly anyone has filmed one alive." });
+            l.Add(new SpeciesDef { id = "sea_lily", nameDe = "Seelilie", nameEn = "Sea Lily", latin = "Metacrinus rotundus",
+                siteId = VolcanoPage, minDepth = 8, maxDepth = 60, minCm = 30, maxCm = 80, rarity = Rarity.Common, baseValue = 25,
+                plan = BodyPlan.Starfish, variant = "crinoid", behavior = BehaviorType.Crawler, groupMin = 1, groupMax = 3, speed = 0.005f,
+                colorA = C("#E8B04A"), colorB = C("#F2D27A"), colorC = C("#A86A2A"), pattern = PatternType.Solid,
+                bodyHeight = 0.6f, bodyWidth = 0.9f, finSize = 1f,
+                zones = Z(VI), prefDepth = 20, homeSite = "wreck", habitat = "seafan",
+                factDe = "Sieht aus wie eine Pflanze, ist aber ein Tier – und kann sogar langsam laufen.", factEn = "Looks like a plant but is an animal – and can even walk, slowly." });
+            l.Add(new SpeciesDef { id = "hagfish", nameDe = "Schleimaal", nameEn = "Hagfish", latin = "Eptatretus stoutii",
+                siteId = VolcanoPage, minDepth = 30, maxDepth = 110, minCm = 30, maxCm = 60, rarity = Rarity.Common, baseValue = 30,
+                plan = BodyPlan.Eel, behavior = BehaviorType.BottomDweller, groupMin = 1, groupMax = 3, speed = 0.3f,
+                colorA = C("#C8A8A0"), colorB = C("#E0C8C0"), colorC = C("#8A6A66"), pattern = PatternType.Solid,
+                bodyHeight = 0.07f, bodyWidth = 0.07f, finSize = 0.6f,
+                zones = Z(VI), prefDepth = 70, homeSite = "wreck", habitat = "sand",
+                factDe = "Macht in Sekunden einen Eimer voll Schleim – Haie spucken ihn sofort wieder aus.", factEn = "Makes a bucket of slime in seconds – sharks spit it straight back out." });
+            l.Add(new SpeciesDef { id = "mosasaurus", nameDe = "Mosasaurus „Big Mo“", nameEn = "Mosasaurus “Big Mo”", latin = "Mosasaurus hoffmannii",
+                siteId = VolcanoPage, minDepth = 20, maxDepth = 125, minCm = 1200, maxCm = 1500, rarity = Rarity.Legendary, baseValue = 3000,
+                plan = BodyPlan.Shark, variant = "mosasaur", behavior = BehaviorType.Predator, groupMin = 1, groupMax = 1, speed = 0.18f,
+                colorA = C("#3E4A42"), colorB = C("#C8C2A8"), colorC = C("#26302A"), pattern = PatternType.BellyGradient,
+                bodyHeight = 0.11f, bodyWidth = 0.12f, finSize = 1.2f,
+                zones = Z(), prefDepth = 100, homeSite = "wreck", unique = true, monster = true,
+                factDe = "Galt seit 66 Millionen Jahren als ausgestorben. Wohnt im Urzeit-Schlund – und mag keinen Besuch.", factEn = "Thought extinct for 66 million years. Lives in the Primeval Sinkhole – and hates visitors." });
+
+            // ---- Kuriositäten page (Q19): memes – placed by SeaContent, filmable for bonus views
+            l.Add(Meme("meme_shades", "Cooler Barsch", "Deal-With-It Grouper", BodyPlan.Fish, "grouper", 70f, 90, "#7B5B3E", "#D8C29A", "#4A3422",
+                "Trägt Sonnenbrille. Unter Wasser. Weil er es kann. (Hausriff)", "Wears sunglasses. Under water. Because he can. (House Reef)"));
+            l.Add(Meme("meme_dance", "Disco-Krake", "Disco Octopus", BodyPlan.Octopus, "", 80f, 120, "#C2408A", "#F2A0C8", "#7A1E52",
+                "Tanzt jeden Tag. Niemand weiß, woher die Musik kommt. (Kelpwald)", "Dances every day. Nobody knows where the music comes from. (Kelp Forest)"));
+            l.Add(Meme("meme_stonks", "Stonks-Rochen", "Stonks Ray", BodyPlan.Ray, "eagle", 180f, 150, "#1E3A5C", "#F4EFE6", "#3FD46A",
+                "Kennt nur eine Richtung: nach oben. Meistens. (Hochsee)", "Knows only one direction: up. Mostly. (Open Sea)"));
+            l.Add(Meme("meme_crabrave", "Krabben-Rave", "Crab Rave", BodyPlan.Crab, "flat", 14f, 140, "#E2552E", "#F28C4A", "#3FA9B5",
+                "Acht Krabben, ein Beat. Die Party läuft seit 1987. (Lagune)", "Eight crabs, one beat. The party has been going since 1987. (Lagoon)"));
+            l.Add(Meme("meme_throne", "Thron am Meeresgrund", "Seabed Throne", BodyPlan.Fish, "", 180f, 110, "#E8C65A", "#B3261E", "#6B4A1E",
+                "Wer hier wohl regiert? Die Krone ist jedenfalls echt. (Wrack)", "Who rules down here? The crown is real, at least. (Wreck)"));
+            l.Add(Meme("meme_gamingpc", "Gaming-PC im Wrack", "Sunken Gaming PC", BodyPlan.Fish, "", 90f, 130, "#2B2D3A", "#3FD4FF", "#FF3FD4",
+                "RGB läuft noch. Der Spielstand leider nicht. (Flugzeugwrack)", "The RGB still works. The save game doesn't. (Plane wreck)"));
+            l.Add(Meme("meme_ducks", "Quietscheentchen-Flotte", "Rubber Duck Flotilla", BodyPlan.Fish, "", 400f, 100, "#F2D23C", "#F28C1E", "#1E1B2B",
+                "Seit einem Container-Unfall auf Weltreise. (Hochsee, an der Oberfläche)", "On a world tour since a container spill. (Open sea, at the surface)"));
+            l.Add(Meme("meme_cart", "Versunkener Einkaufswagen", "Sunken Shopping Cart", BodyPlan.Fish, "", 100f, 70, "#B8C4CC", "#D9454A", "#4E5A66",
+                "Jemand hat seinen Einkauf vergessen. Der Fisch darin will ihn behalten. (Hausriff)", "Someone forgot their shopping. The fish inside wants to keep it. (House Reef)"));
+            l.Add(Meme("meme_gnome", "Taucher-Gartenzwerg", "Scuba Garden Gnome", BodyPlan.Fish, "", 50f, 80, "#D9454A", "#2F6FD6", "#F4EFE6",
+                "Bewacht den Kelpwald. Mit Schnorchel. (Kelpwald)", "Guards the kelp forest. With a snorkel. (Kelp Forest)"));
+            l.Add(Meme("meme_dino", "Gummi-Dino", "Rubber Dino", BodyPlan.Fish, "", 60f, 160, "#4FB84A", "#F2D23C", "#2E6B2A",
+                "Das Lieblingsspielzeug von Big Mo? Lieber nicht fragen. (Vulkaninsel)", "Big Mo's favourite toy? Better not ask. (Volcano Isle)"));
+
+            // ---- island decoration (Q22/Q23: birds, crabs, lizards – no Sealog)
+            l.Add(new SpeciesDef { id = "red_crab", nameDe = "Rote Landkrabbe", nameEn = "Red Land Crab", latin = "Gecarcoidea natalis",
+                siteId = "island", minDepth = -60, maxDepth = 0, minCm = 6, maxCm = 11, rarity = Rarity.Common, baseValue = 4,
+                plan = BodyPlan.Crab, behavior = BehaviorType.Crawler, groupMin = 1, groupMax = 3, speed = 0.9f,
+                colorA = C("#C8282A"), colorB = C("#E85A3A"), colorC = C("#2B2533"), pattern = PatternType.Solid,
+                bodyHeight = 0.4f, bodyWidth = 1.1f, finSize = 1f, zones = Z(IS), land = true });
+            l.Add(new SpeciesDef { id = "booby", nameDe = "Blaufußtölpel", nameEn = "Blue-footed Booby", latin = "Sula nebouxii",
+                siteId = "island", minDepth = -60, maxDepth = 0, minCm = 75, maxCm = 90, rarity = Rarity.Common, baseValue = 6,
+                plan = BodyPlan.Bird, variant = "gull", behavior = BehaviorType.Perch, groupMin = 1, groupMax = 3, speed = 1.4f,
+                colorA = C("#8A6A4A"), colorB = C("#F4EFE6"), colorC = C("#3FA9E0"), pattern = PatternType.Solid,
+                bodyHeight = 0.3f, bodyWidth = 0.25f, finSize = 2.5f, zones = Z(IS), land = true, dayMask = DayMask.Day | DayMask.Dusk });
+            l.Add(new SpeciesDef { id = "skink", nameDe = "Blauschwanz-Skink", nameEn = "Blue-tailed Skink", latin = "Emoia caeruleocauda",
+                siteId = "island", minDepth = -60, maxDepth = 0, minCm = 12, maxCm = 20, rarity = Rarity.Common, baseValue = 4,
+                plan = BodyPlan.Lizard, variant = "gecko", behavior = BehaviorType.Bask, groupMin = 1, groupMax = 2, speed = 1.2f,
+                colorA = C("#4A3A2A"), colorB = C("#D8B070"), colorC = C("#2F8FE0"), pattern = PatternType.Solid,
+                bodyHeight = 0.12f, bodyWidth = 0.14f, finSize = 1f, zones = Z(IS), land = true, dayMask = DayMask.Day });
+            l.Add(new SpeciesDef { id = "reef_heron", nameDe = "Riffreiher", nameEn = "Reef Heron", latin = "Egretta sacra",
+                siteId = "island", minDepth = -60, maxDepth = 0, minCm = 55, maxCm = 65, rarity = Rarity.Uncommon, baseValue = 8,
+                plan = BodyPlan.Bird, variant = "tropic", behavior = BehaviorType.Perch, groupMin = 1, groupMax = 1, speed = 1.2f,
+                colorA = C("#3A4048"), colorB = C("#E8ECEF"), colorC = C("#F2C94C"), pattern = PatternType.Solid,
+                bodyHeight = 0.24f, bodyWidth = 0.18f, finSize = 2.4f, zones = Z(IS), land = true, dayMask = DayMask.Day | DayMask.Dusk });
+        }
+
+        static SpeciesDef Meme(string id, string de, string en, BodyPlan plan, string variant, float cm, int value, string a, string b, string c, string factDe, string factEn)
+            => new SpeciesDef
+            {
+                id = id, nameDe = de, nameEn = en, latin = "Memeus maximus", siteId = MemePage, page = MemePage,
+                minDepth = 0, maxDepth = 40, minCm = cm * 0.95f, maxCm = cm * 1.05f, rarity = Rarity.Epic, baseValue = value,
+                plan = plan, variant = variant ?? "", behavior = BehaviorType.Wanderer, speed = 0.5f,
+                colorA = C(a), colorB = C(b), colorC = C(c), pattern = PatternType.Mottled,
+                bodyHeight = plan == BodyPlan.Ray ? 0.1f : plan == BodyPlan.Crab ? 0.25f : 0.36f,
+                bodyWidth = plan == BodyPlan.Ray ? 1.4f : plan == BodyPlan.Crab ? 1.2f : plan == BodyPlan.Octopus ? 0.4f : 0.22f,
+                finSize = 1f, zones = Z(), meme = true,
+                factDe = factDe, factEn = factEn,
+            };
     }
 }

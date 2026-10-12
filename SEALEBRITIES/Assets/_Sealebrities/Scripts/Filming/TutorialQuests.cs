@@ -423,13 +423,13 @@ namespace Sealebrities
 
                 case Step.TakeCamera:
                     q.icon = QuestIcon.Camera;
-                    if (Hands.Find(HoldItem.Camera, out _, out _))
+                    if (Hands.Find(HoldItem.Camera, out int _))
                     {
                         q.title = Loc.Tr("Kamera nehmen ", "Take the camera ") + SlotKey(HoldItem.Camera);
                         // built from the current bindings (only rebuilt when the signature – incl. bindingsVersion – changes)
-                        string r = GameInput.BindingLabel(GameAction.RightSlot1) + "–" + GameInput.BindingLabel(GameAction.RightSlot3);
-                        string l = GameInput.BindingLabel(GameAction.LeftSlot1) + "–" + GameInput.BindingLabel(GameAction.LeftSlot3);
-                        q.detail = Loc.Tr($"Rechte Hand {r}, linke Hand {l}.", $"Right hand {r}, left hand {l}.");
+                        string r = GameInput.BindingLabel(GameInput.SlotAction(0)) + "–" + GameInput.BindingLabel(GameInput.SlotAction(Hands.SlotCount - 1));
+                        string l = GameInput.BindingLabel(GameAction.Inventory);
+                        q.detail = Loc.Tr($"Leiste {r} · Rucksack {l}.", $"Hotbar {r} · backpack {l}.");
                     }
                     else
                     {
@@ -444,7 +444,9 @@ namespace Sealebrities
                     q.progress = Mathf.Min(SpeciesGoal, DiscoveredCount(s));
                     q.goal = SpeciesGoal;
                     q.title = Loc.Tr($"{SpeciesGoal} Arten fürs Sealog fotografieren", $"Photograph {SpeciesGoal} species for the Sealog") + Counter(q);
+                    // round 3: recording only by the player's own click (no auto-record under water)
                     q.detail = Key(GameAction.Down) + Loc.Tr(" runter · ", " down · ")
+                               + Key(GameAction.Use) + Loc.Tr(" filmen · ", " record · ")
                                + Key(GameAction.Aim) + "+" + Key(GameAction.Use) + Loc.Tr(" Foto", " photo");
                     if (EnvState.Night01 > 0.3f)
                         q.detail += " · " + SlotKey(HoldItem.Flashlight) + Loc.Tr(" Lampe", " lamp");
@@ -487,14 +489,8 @@ namespace Sealebrities
                 return q;
             }
 
-            // most side quests live in the village (needVillage) – point there once after the tutorial
-            if (VillageGoal(s))
-            {
-                q.icon = QuestIcon.Site;
-                q.title = Loc.Tr("Dorf Altriff besuchen", "Visit Oldreef village");
-                q.detail = Loc.Tr("Im Süden – dort gibt es Aufgaben.", "In the south – people need help.");
-                return q;
-            }
+            // round 3: the village is gone (its jobs moved to Horst, Wanda, Dr. Fin, Toni and the hidden hermits) – after
+            // the tutorial Horst's hammock is the place to ask for side jobs (no goal line for it: Horst shows „!“)
 
             // Q21: going live earns money – make the first stream a goal as soon as it is possible
             if (s.followers >= Progression.LivestreamFollowers && (s.streams == null || s.streams.Count == 0))
@@ -540,30 +536,14 @@ namespace Sealebrities
                 return q;
             }
 
+            // round 3 (GDD §19 / §20 Q42): the next dive site is NOT announced here any more – its requirement stands
+            // small at the top centre (UISiteGoal) and the banner only comes when it is reached
             var next = NextLockedSite(s);
             if (next != null)
             {
-                q.icon = QuestIcon.Site;
-                if (Progression.SiteRequirementsMet(next, out string reason) || string.IsNullOrEmpty(reason))
-                {
-                    q.title = Loc.Tr("Neuer Tauchplatz: ", "New dive site: ") + next.Name;
-                    q.detail = Loc.Tr("Gleich freigeschaltet!", "Unlocking now!");
-                }
-                else if (next.prevSiteId != null && Journal.SiteCompletion(next.prevSiteId) < next.prevCompletionNeeded)
-                {
-                    q.title = next.Name + ": " + PageName(next.prevSiteId) + Loc.Tr("-Seite", " page");
-                    q.progress = Mathf.RoundToInt(Journal.SiteCompletion(next.prevSiteId) * 100f);
-                    q.goal = Mathf.RoundToInt(next.prevCompletionNeeded * 100f);
-                    q.unit = " %";
-                    q.detail = reason;
-                }
-                else
-                {
-                    q.title = next.Name + Loc.Tr(": Follower", ": followers");
-                    q.progress = (int)Math.Min(s.followers, next.followersNeeded);
-                    q.goal = (int)Math.Min(next.followersNeeded, int.MaxValue);
-                    q.detail = reason;
-                }
+                q.icon = QuestIcon.Star;
+                q.title = Loc.Tr("Ziel: 1.000.000 Follower", "Goal: 1,000,000 followers");
+                q.detail = Loc.Tr("Sealog füllen + Follower sammeln öffnet neue Plätze.", "Filling the Sealog + followers opens new sites.");
                 return q;
             }
 
@@ -573,8 +553,8 @@ namespace Sealebrities
             return q;
         }
 
-        /// After the tutorial, until somebody walked into the village (its side-quest givers).
-        static bool VillageGoal(GameState s) => StoryFlags.Has(StoryKeys.TutorialDone) && !StoryFlags.Has(StoryKeys.VillageVisited);
+        /// Round 2: after the tutorial, until somebody walked into the village – the village is gone in round 3.
+        static bool VillageGoal(GameState s) => false;   // round 3: no village any more
 
         /// Short Sealog page name of a dive site („Hausriff“, „Wrack“) – falls back to the site name.
         static string PageName(string siteId)
@@ -651,8 +631,8 @@ namespace Sealebrities
         /// Key of the hotbar slot that holds the item, or the inventory key when it is not on the hotbar.
         static string SlotKey(HoldItem item)
         {
-            if (!Hands.Find(item, out Hand hand, out int slot)) return Key(GameAction.Inventory);
-            var a = (GameAction)((hand == Hand.Right ? (int)GameAction.RightSlot1 : (int)GameAction.LeftSlot1) + slot);
+            if (!Hands.Find(item, out int slot)) return Key(GameAction.Inventory);
+            var a = GameInput.SlotAction(slot);
             return Key(a);
         }
 
@@ -734,7 +714,7 @@ namespace Sealebrities
             }
         }
 
-        static int SlotSig(HoldItem item) => Hands.Find(item, out Hand hand, out int slot) ? 1 + (int)hand * 3 + slot : 0;
+        static int SlotSig(HoldItem item) => Hands.Find(item, out int slot) ? 1 + (int)Hands.SlotHand(slot) * 16 + slot : 0;
 
         // ------------------------------------------------------------------ helpers (allocation free)
         static long TankPrice

@@ -16,7 +16,7 @@ namespace Sealebrities
         /// Chance (‰) that a delivery has a mishap at all (≈ 3 in 10); express orders halve it.
         public const int MishapChance = 300;
         /// Weights inside the mishap share (sum 300 ‰ of all deliveries – L.12 table).
-        public const int WeightWater = 50, WeightRoof = 60, WeightPalm = 60, WeightWrong = 60, WeightVillage = 40, WeightGoat = 20, WeightBoat = 10;
+        public const int WeightWater = 50, WeightRoof = 60, WeightPalm = 60, WeightWrong = 60, WeightVillage = 0, WeightGoat = 20, WeightBoat = 10;
         /// Goat mishap: nudges needed. Village: Delivery.nudges ≥ this = paid. Palm / roof: ≥ 1 = the crate came down.
         public const int GoatNudges = 3, PaidMarker = 3;
         /// The search beacon smokes this long (s), then blinks until the crate is opened.
@@ -200,7 +200,7 @@ namespace Sealebrities
                 case DeliveryMishap.HutRoof: return Loc.Tr("Ich dachte, das Dach ist der Landeplatz. Sieht von oben gleich aus.", "Thought the roof was the pad. Looks the same from up here.");
                 case DeliveryMishap.Palm: return Loc.Tr("Die Palme wollte es mehr als du.", "The palm wanted it more than you.");
                 case DeliveryMishap.WrongPlace: return Loc.Tr("Ups. Falsche Insel? Nein, richtige Insel, falsche Ecke. Folg dem Rauch!", "Oops. Wrong island? No – right island, wrong corner. Follow the smoke!");
-                case DeliveryMishap.Village: return Loc.Tr("Die Kinder haben's. Zahl mit einem Selfie.", "The kids have it. Pay with a selfie.");
+                case DeliveryMishap.Village: return Loc.Tr("Dein Paket liegt am Südstrand. Ein Selfie dort, dann gehört's dir.", "Your parcel is on the south beach. Take a selfie there and it's yours.");
                 case DeliveryMishap.Goat: return Loc.Tr("Da sitzt eine Ziege drauf. Das ist nicht mein Problem.", "A goat is sitting on it. Not my problem.");
                 case DeliveryMishap.Boat: return Loc.Tr("Direkt aufs Boot! Ich bin ein Genie. Oder es war Zufall.", "Straight onto the boat! I'm a genius. Or it was luck.");
             }
@@ -216,7 +216,7 @@ namespace Sealebrities
                 case DeliveryMishap.HutRoof: return Loc.Tr("Paket auf dem Hüttendach", "Parcel on the hut roof");
                 case DeliveryMishap.Palm: return Loc.Tr("Paket in der Palme", "Parcel stuck in a palm");
                 case DeliveryMishap.WrongPlace: return Loc.Tr("Paket suchen!", "Find the parcel!");
-                case DeliveryMishap.Village: return Loc.Tr("Paket im Dorf", "Parcel in the village");
+                case DeliveryMishap.Village: return Loc.Tr("Paket am Südstrand", "Parcel on the south beach");
                 case DeliveryMishap.Goat: return Loc.Tr("Ziege auf dem Paket", "Goat on the parcel");
                 case DeliveryMishap.Boat: return Loc.Tr("Paket auf dem Boot", "Parcel on the boat");
             }

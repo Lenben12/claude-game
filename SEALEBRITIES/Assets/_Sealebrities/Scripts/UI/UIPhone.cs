@@ -169,6 +169,7 @@ namespace Sealebrities
         public readonly UIAppDeals Deals;
         public readonly UIAppFin Fin;
         public readonly UIAppWeather Weather;
+        public readonly UIAppCookbook Cookbook;
         public readonly UIAppSettings Settings;
 
         static Texture2D wallpaper;
@@ -293,6 +294,7 @@ namespace Sealebrities
             Deals = Register(new UIAppDeals());
             Fin = Register(new UIAppFin());
             Weather = Register(new UIAppWeather());
+            Cookbook = Register(new UIAppCookbook());
             Settings = Register(new UIAppSettings());
 
             CreateRenderTarget(mainSettings);

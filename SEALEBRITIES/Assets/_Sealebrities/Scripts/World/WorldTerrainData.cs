@@ -385,6 +385,11 @@ namespace Sealebrities
             var mi = WorldFeatures.MiniIslands;
             for (int i = 0; i < mi.Length; i++)
                 if (RectCircle(x0, z0, x1, z1, mi[i].center.x, mi[i].center.z, mi[i].shoreRadius + 18f)) return true;
+            // round 3: the volcano island and its black-sand shelf
+            var vol = WorldLayout.VolcanoIsland;
+            if (RectCircle(x0, z0, x1, z1, vol.x, vol.z, WorldLayout.VolcanoShoreRadius + 40f)) return true;
+            var ab = WorldLayout.VolcanoAbyss;
+            if (RectCircle(x0, z0, x1, z1, ab.x, ab.z, WorldLayout.VolcanoAbyssRadius + 6f)) return true;
             return false;
         }
 
@@ -537,7 +542,7 @@ namespace Sealebrities
                         float my = (c.Vy[p0] + c.Vy[p1] + c.Vy[p2]) / 3f;
                         float mz = (c.Vz[p0] + c.Vz[p1] + c.Vz[p2]) / 3f;
                         uint hash = Hash(c.Cx * n + i, c.Cz * n + j, seed + 11 + h);
-                        var k = (byte)FogIsleTint(Classify(mx, mz, my, upY, hash), mx, mz, hash);
+                        var k = (byte)VolcanoTint(FogIsleTint(Classify(mx, mz, my, upY, hash), mx, mz, hash), mx, mz, my, hash);
                         cls[t] = k;
                         count[k]++;
                         t++;
@@ -586,6 +591,37 @@ namespace Sealebrities
             return near < 62f + 16f * r ? TerrainClass.SandPink : k;
         }
 
+        /// Round 3 "every island individual": the volcano island has black sand (DeepRock facets with a few dark-grey
+        /// sparkles), dark lava rock, a darker sea floor around it and lush dark-green fern slopes. Others keep their class.
+        static TerrainClass VolcanoTint(TerrainClass k, float x, float z, float h, uint hash)
+        {
+            if (!WorldHeightField.InVolcanoZone(x, z, out float d)) return k;
+            float r = ((hash >> 7) & 0x3FF) / 1023f;
+            float shore = WorldLayout.VolcanoShoreRadius;
+            switch (k)
+            {
+                case TerrainClass.Sand:
+                case TerrainClass.SandAlt:
+                    return r < 0.12f ? TerrainClass.RockDark : TerrainClass.DeepRock;
+                case TerrainClass.WetSand:
+                    return TerrainClass.DeepRock;
+                case TerrainClass.Seabed:
+                case TerrainClass.SeabedAlt:
+                    // black sand on the shelf, fading into the normal pale sand ~50–70 m out
+                    if (d < shore + 45f + 20f * r) return r < 0.2f ? TerrainClass.RockDark : TerrainClass.DeepRock;
+                    return k;
+                case TerrainClass.Rock:
+                    return h > 0.3f && r < 0.6f ? TerrainClass.RockDark : k;
+                case TerrainClass.Grass:
+                case TerrainClass.GrassDry:
+                    return r < 0.75f ? TerrainClass.GrassDark : k;
+                case TerrainClass.Soil:
+                    return TerrainClass.RockDark;
+                default:
+                    return k;
+            }
+        }
+
         /// Flat color class of one triangle (centroid x/z, centroid height h, normal.y, per-triangle hash for dithering).
         static TerrainClass Classify(float x, float z, float h, float ny, uint hash)
         {
@@ -610,6 +646,8 @@ namespace Sealebrities
                 }
                 // small trampled yards (hut, helipad, lighthouse) fade out in scattered facets; paths are solid dirt
                 if (Yard(x, z) > 0.15f + 0.7f * r1 || PathMask(x, z) > 0.3f + 0.4f * r1) return TerrainClass.Soil;
+                // round 3: the hermits' game trail is only a faint strip of trampled, dry grass (no dirt path)
+                if (h > 12f && WorldHeightField.CampTrailMask(x, z) > 0.45f + 0.5f * r1) return r2 < 0.25f ? TerrainClass.Soil : TerrainClass.GrassDry;
                 // art polish: the sand/grass border follows a coherent noise edge with only a little per-facet jitter
                 // (jagged triangle rows, How to Fish) – the old per-facet random 0.2-0.8 threshold spread a 20 m
                 // checkerboard of big green/sand facets over flat beach terraces where the blend sits near 0.5

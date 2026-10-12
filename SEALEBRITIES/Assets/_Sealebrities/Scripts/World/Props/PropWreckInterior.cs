@@ -216,6 +216,13 @@ namespace Sealebrities
             var sm = new PropMeshBuilder();
             sm.Box(new Vector3(0f, 1.08f, 0.5f), new Vector3(0.06f, 2.16f, 1.0f));
             PropUtil.MeshObject(sleaf, "StoreLeaf", sm.ToMesh("WreckStoreLeaf"), PropMats.Rust, Vector3.zero, Quaternion.identity);
+            // round 3 (GDD §19): the store door leaf is solid and swings with its kinematic body (open, it leaves 1.2 m of
+            // the corridor free – the interior passage stays passable; when it slams, the player is pushed out)
+            var sblock = sleaf.gameObject.AddComponent<BoxCollider>();
+            sblock.center = new Vector3(0f, 1.08f, 0.5f);
+            sblock.size = new Vector3(0.08f, 2.16f, 1.0f);
+            PropSolid.Kinematic(sleaf.gameObject);
+            PropSolid.Count++;
             var slam = sdoor.AddComponent<PropSlamDoor>();
             slam.leaf = sleaf;
             var wheel = new GameObject("CheeseWheel").transform;

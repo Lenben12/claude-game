@@ -10,7 +10,63 @@ namespace Sealebrities
 
         public virtual bool IsHallucination => false;
 
-        public void Bind(FaunaCreature creature) { c = creature; }
+        public void Bind(FaunaCreature creature) { c = creature; reactT = 0f; temperSet = false; }
+
+        // ------------------------------------------------------------------ round 3: reactions by species (Q21)
+        float reactT;
+        Vector3 reactFrom;
+        FaunaTemper temper;
+        bool temperSet;
+
+        /// The species' reaction profile (FaunaReact.TemperOf).
+        protected FaunaTemper Temper
+        {
+            get
+            {
+                if (!temperSet) { temper = FaunaReact.TemperOf(c.species); temperSet = true; }
+                return temper;
+            }
+        }
+
+        /// Round 3 (GDD §20 Q21 "Flucht je nach Art"): small fish dart away when a diver comes close / rushes in or
+        /// something scary happens nearby (FaunaReact.Startle); bottom animals duck down; curious and cool animals do
+        /// nothing here. Returns true while fleeing (the outputs are written – the caller skips its own tick).
+        protected bool React(float dt)
+        {
+            var t = Temper;
+            if (t != FaunaTemper.Darter && t != FaunaTemper.Hider) return false;
+            if (reactT > 0f) reactT -= dt;
+            bool trigger = false;
+            if (FaunaReact.Startled(c.pos, out Vector3 sf)) { trigger = true; reactFrom = sf; }
+            else if (FaunaContext.HasPlayer && FaunaContext.PlayerInWater)
+            {
+                float r = t == FaunaTemper.Darter ? 2.2f + c.lengthM * 3f : 1.4f + c.lengthM * 1.5f;
+                if (FaunaContext.PlayerSpeed > 1.6f) r += 2f;   // rushing in scares everybody
+                if (c.distToPlayer < r) { trigger = true; reactFrom = FaunaContext.PlayerPos; }
+            }
+            if (trigger && reactT <= 0f) reactT = t == FaunaTemper.Darter ? Random.Range(1.2f, 2.2f) : Random.Range(1.5f, 3f);
+            if (reactT <= 0f) return false;
+            Vector3 away = c.pos - reactFrom;
+            if (away.sqrMagnitude < 1e-4f) away = -c.Transform.forward;
+            away.Normalize();
+            if (t == FaunaTemper.Darter)
+            {
+                away += new Vector3(Mathf.Sin(FaunaContext.Time * 2.1f + c.slot), Mathf.Sin(FaunaContext.Time * 1.3f + c.slot) * 0.3f, Mathf.Cos(FaunaContext.Time * 1.7f + c.slot)) * 0.25f;
+                c.desiredVel = away.normalized * Mathf.Max(c.cruise * 3.2f, 1.5f);
+                c.accelMul = 4f;
+                c.turnMul = 3f;
+                c.activityTarget = 0.95f;
+            }
+            else
+            {
+                // hiders back off and press down to the floor (into their crevice)
+                away.y = -0.6f;
+                c.desiredVel = away.normalized * Mathf.Max(c.cruise * 1.8f, 0.4f);
+                c.accelMul = 2.5f;
+                c.activityTarget = 0.6f;
+            }
+            return true;
+        }
 
         /// Called on every (re)spawn after the creature was placed.
         public virtual void Reset() { }
@@ -20,6 +76,8 @@ namespace Sealebrities
         public static FaunaBehavior Create(SpeciesDef s, bool hallucination)
         {
             if (hallucination) return new FaunaHallucinationBehavior();
+            // ---- round 3: the volcano's prehistoric monster (FaunaVolcano)
+            if (s.monster) return new FaunaMonsterBehavior();
             // ---- round 2: body plans with their own movement first
             switch (s.plan)
             {

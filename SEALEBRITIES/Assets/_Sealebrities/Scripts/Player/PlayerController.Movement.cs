@@ -36,6 +36,14 @@ namespace Sealebrities
         // seat
         bool seated;
         Transform seat;
+        /// Round 3: the current seat is a passenger seat (SeatRules) – hands stay free (camera, phone, map).
+        bool passengerSeat;
+
+        void SetPassenger(bool on)
+        {
+            passengerSeat = on;
+            SeatRules.LocalPassenger = on;
+        }
 
         // water
         bool isInWater, isUnderwater;
@@ -95,7 +103,8 @@ namespace Sealebrities
             // L.6 crouch (Down held on land): 1.2 m capsule, ×0.45 speed, stands up only where the head has room
             float crouchF = UpdateCrouch(input, mv, dt);
             bool sprint = input && GameInput.Sprint && mv.y > 0.1f && !crouching;
-            float speed = (sprint ? SprintSpeed : WalkSpeed) * crouchF * (selfie ? SelfieMoveFactor : 1f);
+            // round 3: hungry / thirsty divers walk a little slower (Survival, never below ×0.8)
+            float speed = (sprint ? SprintSpeed : WalkSpeed) * crouchF * (selfie ? SelfieMoveFactor : 1f) * Survival.SpeedFactor;
             Vector3 p = transform.position;
             // wading through shallow water slows you down
             float wade = Mathf.Clamp01((Waves.HeightAt(p.x, p.z) - p.y) / 0.6f);
@@ -684,6 +693,15 @@ namespace Sealebrities
             // (L.13), releasing stops; nothing climbs by itself
             if (TryClimbLadder(false)) return true;
             if (!LadderInReach(out Vector3 bottom, out Vector3 top)) return false;
+            // round 3 (GDD §19 „Am Steg klettert man selbst hoch“): in reach of the dock ladder but not facing it – grab
+            // it with the player-driven climb anyway (the old scripted climb ran up by itself)
+            int dockIdx = NearestLadder(bottom, 1.2f);
+            if (dockIdx >= 0)
+            {
+                StartGenericLadder(dockIdx, false);
+                return true;
+            }
+            if (PropInfo.Ladders.Count > 0) return false;
             if (mode == PlayerMoveMode.Dive)
             {
                 mode = PlayerMoveMode.Surface;
@@ -760,9 +778,12 @@ namespace Sealebrities
             CancelGenericLadder();
             if (selfie) ExitSelfie();
             if (crouching) SetCrouch(false);
-            Hands.StowAll();
+            // round 3: on the passenger bench the hands stay free (filming from the boat, Q36); the helm stows everything
+            bool passenger = SeatRules.IsPassengerSeat(seatTransform);
+            if (!passenger) Hands.StowAll();
             seat = seatTransform;
             seated = true;
+            SetPassenger(passenger);
             seatYaw = 0f;
             if (cc != null) cc.enabled = false;
             vel = Vector3.zero;
@@ -793,6 +814,7 @@ namespace Sealebrities
             seated = false;
             seat = null;
             seatYaw = 0f;
+            SetPassenger(false);
             PlaceAt(exitPosition, yaw);
         }
 
@@ -812,6 +834,7 @@ namespace Sealebrities
         {
             if (!initialized) return;
             if (seated) { seated = false; seat = null; seatYaw = 0f; }
+            SetPassenger(false);
             if (vaulting) { vaulting = false; vaultRef = null; }
             if (ladderClimbing && genLadder) RestoreLadderHands();
             ladderClimbing = false;

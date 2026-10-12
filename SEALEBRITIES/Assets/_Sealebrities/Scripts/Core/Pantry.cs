@@ -87,6 +87,7 @@ namespace Sealebrities
             if (Net.IsClient) Net.Command(NetCommand.Custom, CoreCommands.EatKey, "eat", foodId);
             if (!RemoveLocal(foodId)) return false;
             Buffs.Apply(def);
+            Survival.AddFromFood(def);   // round 3: food also fills hunger / thirst
             return true;
         }
 
@@ -166,6 +167,7 @@ namespace Sealebrities
             HostGrill(fish.uid);
             if (!eat) return true;
             Buffs.Apply(def, fish.weightKg >= FoodDatabase.BigFishKg ? FoodDatabase.BigFishBonus : 0f);
+            Survival.AddFromFood(def);
             var rec = PlayerRecords.Local;
             if (rec != null) { rec.grilled++; Achievements.OnLocalCounter(rec); }
             return true;
@@ -184,6 +186,34 @@ namespace Sealebrities
             }
             s.lastGrillDay = s.day;
             FishMarket.RaiseChanged();
+        }
+
+        /// Round 3 (backpack „Kühlbox“ tab): takes one fish out of the SHARED cooler as a raw fish into the local backpack
+        /// (to cook it at a campfire / the grill). Clients forward CoreCommands.TakeFishKey (uid) and apply optimistically.
+        public static bool TakeFishToBackpack(FishItem f)
+        {
+            var s = S;
+            if (s == null || f == null || !s.fishInventory.Contains(f)) return false;
+            if (Backpack.SpaceFor(ItemIds.RawFish) <= 0) { Backpack.Add(ItemIds.RawFish, 1); return false; }
+            if (Net.IsClient) Net.Command(NetCommand.Custom, CoreCommands.TakeFishKey, f.uid.ToString(Inv));
+            HostTakeFish(f.uid);
+            Backpack.Add(ItemIds.RawFish, 1);
+            return true;
+        }
+
+        /// Removes a fish from the shared cooler (no grill day). No routing.
+        public static bool HostTakeFish(int uid)
+        {
+            var s = S;
+            if (s == null) return false;
+            for (int i = 0; i < s.fishInventory.Count; i++)
+            {
+                if (s.fishInventory[i] == null || s.fishInventory[i].uid != uid) continue;
+                s.fishInventory.RemoveAt(i);
+                FishMarket.RaiseChanged();
+                return true;
+            }
+            return false;
         }
 
         // ---------------------------------------------------------------- coconut palms (E.1)
@@ -206,14 +236,34 @@ namespace Sealebrities
             return true;
         }
 
-        /// "E – Trinken": the local player drinks a coconut (drink buff).
+        /// "E – Trinken": the local player drinks a coconut (drink buff + thirst, coconut counter).
         public static void DrinkCoconut()
         {
-            var def = FoodDatabase.Get(FoodDatabase.Coconut);
-            if (def == null) return;
-            Buffs.Apply(def);
-            var rec = PlayerRecords.Local;
-            if (rec != null) { rec.coconuts++; Achievements.OnLocalCounter(rec); }
+            Survival.Consume(ItemDatabase.Get(FoodDatabase.Coconut));
+        }
+
+        /// Round 3 fridge / kiosk counter: takes every pantry item into the local backpack (as much as fits). SHARED
+        /// pantry: clients forward EatKey "eat" per item (the host removes it). Returns how many were taken.
+        public static int TakeAllToBackpack()
+        {
+            var s = S;
+            if (s == null) return 0;
+            int taken = 0;
+            for (int i = s.pantry.Count - 1; i >= 0; i--)
+            {
+                var p = s.pantry[i];
+                if (p == null || p.count <= 0 || FoodDatabase.Get(p.foodId) == null) continue;
+                int n = Mathf.Min(p.count, Backpack.SpaceFor(p.foodId));
+                for (int k = 0; k < n; k++)
+                {
+                    string id = p.foodId;
+                    if (Net.IsClient) Net.Command(NetCommand.Custom, CoreCommands.EatKey, "eat", id);
+                    if (!RemoveLocal(id)) break;
+                    Backpack.Add(id, 1, false);
+                    taken++;
+                }
+            }
+            return taken;
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

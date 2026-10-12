@@ -60,10 +60,13 @@ namespace Sealebrities
             GameEvents.SideQuestChanged += OnSideQuestChanged;
             GameEvents.LanguageChanged += OnLanguage;
             GameEvents.CarryChanged += OnCarryChanged;
+            GameEvents.SiteUnlocked += OnSiteUnlocked;
+            Combat.LocalKnockedOut += OnLocalKnockedOut;
             Gallery.Added += OnPhoto;
             Net.StateSynced += OnStateSynced;
             Net.PlayerLeft += OnPlayerLeft;
             Dialogue.Resolve = DialogueDatabase.Resolve;
+            NpcInteract.Create(transform);
         }
 
         void Start()
@@ -92,9 +95,12 @@ namespace Sealebrities
             GameEvents.SideQuestChanged -= OnSideQuestChanged;
             GameEvents.LanguageChanged -= OnLanguage;
             GameEvents.CarryChanged -= OnCarryChanged;
+            GameEvents.SiteUnlocked -= OnSiteUnlocked;
+            Combat.LocalKnockedOut -= OnLocalKnockedOut;
             Gallery.Added -= OnPhoto;
             Net.StateSynced -= OnStateSynced;
             Net.PlayerLeft -= OnPlayerLeft;
+            if (fightHooked) { GameEvents.Fight -= OnHostFight; fightHooked = false; }
             if (I == this) I = null;
         }
 
@@ -137,6 +143,7 @@ namespace Sealebrities
             vl.Add(Vehicle("canoe2", VCanoe2, NpcVehicleBuilder.Canoe(2)));
             vehicles = vl.ToArray();
             BuildDressing();
+            BindHermits();
             Debug.Log("[Npc] built " + CountActors() + " NPCs, " + vehicles.Length + " vehicles, " + DialogueDatabase.Count + " lines");
         }
 
@@ -209,6 +216,9 @@ namespace Sealebrities
             ResetVisitorSession();
             ResetVillageSession();
             ResetQuestSession();
+            ResetHermitSession();
+            ResetRivalSession();
+            NpcInteract.ResetSession();
         }
 
         /// HOST: a guest left (disconnect / back to the menu) while carrying a quest pickup → it respawns at its spot.
@@ -479,6 +489,14 @@ namespace Sealebrities
                 case "evt": HostEvent(fromId, a, b, c, d); break;
                 case "obj": HostObject(fromId, a, b); break;
                 case "carry": SetRemoteCarry(fromId, a); break;
+                // round 3: the gesture wheel, gifts, barter, stick fights, the tie-up, backpack hand-ins
+                case "sign": HostSign(fromId, Actor(a), NpcNet.ParseI(b, -1), c, d == "1"); break;
+                case "gift": HostGift(fromId, Actor(a), b); break;
+                case "trade": HostTrade(fromId, Actor(a), NpcNet.ParseI(b, -1)); break;
+                case "hit": HostHit(fromId, Actor(a), NpcNet.ParseF(b)); break;
+                case "tied": HostTied(fromId, Actor(a)); break;
+                case "freed": HostFreed(fromId, Actor(a)); break;
+                case "handin": HostHandIn(fromId, Actor(a), b, NpcNet.ParseI(c, 1)); break;
             }
         }
 
@@ -490,14 +508,16 @@ namespace Sealebrities
             if ((a.Flags & NpcActor.FlagChoice) != 0) return Prompts.Get("give", "Zurückgeben", "Give back");
             if ((a.Flags & NpcActor.FlagOffer) != 0) return Prompts.Get("accept", "Annehmen", "Accept");
             if ((a.Flags & NpcActor.FlagConversation) != 0) return Prompts.Get("next", "Weiter", "Next");
-            if (Carry.IsCarrying && a.MarkerValue == 2) return Prompts.Get("handin", "Übergeben", "Hand over");
-            return Prompts.Name(a.Def);
+            if ((Carry.IsCarrying && a.MarkerValue == 2) || BackpackHandInReady(a)) return Prompts.Get("handin", "Übergeben", "Hand over");
+            return Prompts.NameWithWheel(a.Def);
         }
 
         public static bool CanInteract(NpcActor a)
         {
             if (a == null || I == null) return false;
             if (a.Motion == NpcMotion.Swim) return false;
+            // asleep in a hammock: Horst can be woken up (E), washed-up Toni talked to – the hermits sleep on
+            if (a.Motion == NpcMotion.Lie && NpcDatabase.IsHermit(a.Id)) return false;
             return true;
         }
 
@@ -507,6 +527,8 @@ namespace Sealebrities
             if (a == null || I == null) return;
             if ((a.Flags & NpcActor.FlagOffer) != 0) { NpcNet.Request("accept", a.Id); return; }
             if ((a.Flags & NpcActor.FlagConversation) != 0) { NpcNet.Request("next", NpcNet.I(a.Index)); return; }
+            // round 3: quest food / materials come from the backpack (coconuts, grilled fish …) – handed in locally
+            if (TryBackpackHandIn(a)) return;
             NpcNet.Request("talk", a.Id);
         }
 
@@ -541,6 +563,8 @@ namespace Sealebrities
                 case NpcNet.EvPickCarry: if (!Carry.IsCarrying) Carry.Pick(a); break;
                 case NpcNet.EvGullSteal: if (dir.gull != null) dir.gull.Steal(); break;
                 case NpcNet.EvNotify: dir.LocalNotify(a, b); break;
+                case NpcNet.EvHurt: dir.LocalHermitHurt(a, NpcNet.ParseF(b)); break;
+                case NpcNet.EvGive: LocalReceive(a, NpcNet.ParseI(b, 1)); break;
             }
         }
 
@@ -749,12 +773,13 @@ namespace Sealebrities
         {
             static readonly Dictionary<string, string> cache = new Dictionary<string, string>();
             static Language lang;
-            static string ekey;
+            static string ekey, gkey;
+            static readonly Dictionary<string, string> nameKeys = new Dictionary<string, string>();
 
             static void Check()
             {
-                string k = GameInput.BindingLabel(GameAction.Interact);
-                if (lang != Loc.Current || !ReferenceEquals(k, ekey)) { cache.Clear(); lang = Loc.Current; ekey = k; }
+                string k = GameInput.BindingLabel(GameAction.Interact), g = GameInput.BindingLabel(GameAction.Gestures);
+                if (lang != Loc.Current || !ReferenceEquals(k, ekey) || !ReferenceEquals(g, gkey)) { cache.Clear(); lang = Loc.Current; ekey = k; gkey = g; }
             }
 
             public static string Get(string id, string de, string en)
@@ -777,6 +802,21 @@ namespace Sealebrities
                 Check();
                 string k = "n_" + d.id;
                 if (!cache.TryGetValue(k, out var s)) { s = (ekey ?? "E") + " – " + d.Name; cache[k] = s; }
+                return s;
+            }
+
+            /// "E – Horst · G Mehr" / "E – Ebbe · G Zeichen": talk + the gesture wheel (round 3).
+            public static string NameWithWheel(NpcDef d)
+            {
+                Check();
+                if (!nameKeys.TryGetValue(d.id, out var k)) { k = "nw_" + d.id; nameKeys[d.id] = k; }
+                if (!cache.TryGetValue(k, out var s))
+                {
+                    bool hermit = d.kind == NpcKind.Hermit;
+                    s = (ekey ?? "E") + " – " + d.Name + "   " + GameInput.BindingLabel(GameAction.Gestures) + " – "
+                        + (hermit ? Loc.Tr("Zeichen", "Signs") : Loc.Tr("Mehr", "More"));
+                    cache[k] = s;
+                }
                 return s;
             }
         }

@@ -205,6 +205,16 @@ namespace Sealebrities
                     break;
                 case Zones.OpenSea:
                     if (day) { candidates.Add("feeding_frenzy"); candidates.Add("big_school"); }
+                    if (glowNight) candidates.Add("night_glow");   // round 3: open-water nights glow too
+                    break;
+                case Zones.Volcano:
+                    // round 3: the volcano waters (only once they are open – before that they are plain open sea)
+                    if (!VolcanoGate.Open) { if (day) candidates.Add("big_school"); break; }
+                    if (day) { candidates.Add("feeding_frenzy"); candidates.Add("big_school"); }
+                    if (glowNight) candidates.Add("night_glow");
+                    break;
+                case Zones.DeepSea:
+                    if (day) candidates.Add("big_school");
                     break;
             }
             while (candidates.Count > 0)

@@ -61,8 +61,8 @@ namespace Sealebrities
         public void SetOn(bool value)
         {
             if (value && !hasLamp) return;
-            if (value && !Hands.IsHeld(HoldItem.Flashlight) && Hands.Find(HoldItem.Flashlight, out Hand h, out int slot))
-                Hands.Select(h, slot);
+            if (value && !Hands.IsHeld(HoldItem.Flashlight) && Hands.Find(HoldItem.Flashlight, out int slot))
+                Hands.Select(slot);
             on = value;
             wasHeld = Hands.IsHeld(HoldItem.Flashlight);
             flicker = 0f;
@@ -126,9 +126,9 @@ namespace Sealebrities
             if (!held)
             {
                 // F with the lamp on the hotbar but not in hand: take it (selection switches it on)
-                if (Hands.Find(HoldItem.Flashlight, out Hand h, out int slot))
+                if (Hands.Find(HoldItem.Flashlight, out int slot))
                 {
-                    Hands.Select(h, slot);
+                    Hands.Select(slot);
                     if (Hands.IsHeld(HoldItem.Flashlight))
                     {
                         wasHeld = true;

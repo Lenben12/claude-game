@@ -45,7 +45,7 @@ namespace Sealebrities
             A("big_bertha", "Big Bertha!", "Big Bertha!", "Den Buckelwal gefilmt", "Filmed the humpback whale"),
             A("bow_riders", "Bugwelle", "Bow Riders", "Delfine an deiner Bugwelle", "Dolphins rode your bow wave"),
             A("bottomed_out", "Bottom erreicht", "Bottomed Out", "Die Bottom-Brüder entlarvt", "Exposed the Bottom brothers"),
-            A("horst_overboard", "Horst im Hafenbecken", "Horst Overboard", "Horst vom Steg fallen sehen", "Saw Horst fall off the dock"),
+            A("horst_overboard", "Horst fällt raus", "Horst Overboard", "Horst aus der Hängematte fallen sehen", "Saw Horst fall out of his hammock"),
             A("full_crew", "Volle Crew", "Full Crew", "Mit 4 Tauchern gespielt", "Played with 4 divers"),
             A("live_from_the_deep", "Live aus der Tiefe", "Live from the Deep", "Das Finale geschafft", "Finished the finale"),
         };

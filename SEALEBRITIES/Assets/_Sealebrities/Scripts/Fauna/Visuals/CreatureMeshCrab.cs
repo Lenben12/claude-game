@@ -29,7 +29,7 @@ namespace Sealebrities
         {
             var s = ctx.S;
             string v = s.variant ?? "";
-            bool hermit = v == "hermit", ghost = v == "ghost", flat = v == "flat", coconut = v == "coconut";
+            bool hermit = v == "hermit", ghost = v == "ghost", flat = v == "flat", coconut = v == "coconut", horseshoe = v == "horseshoe";
             float H = CreatureMeshMath.Clamp(s.bodyHeight, 0.15f, 1f);
             float footY = -H * 0.5f;
             ctx.EyeStyle = CreatureMeshEyeStyle.Friendly;
@@ -42,7 +42,9 @@ namespace Sealebrities
             else if (flat) { sp.Cw = 0.34f; sp.Cl = 0.42f; sp.Ch = 0.065f; sp.Cb = 0.03f; sp.Reach = 0.86f; sp.KneeUp = 0.07f; sp.RLeg = 0.025f; sp.ClawR = 0.75f; sp.ClawL = 0.75f; sp.StalkLen = 0.05f; sp.EyeR = 0.034f; sp.Square = 2.3f; }
             else if (hermit) { sp.Cw = 0.17f; sp.Cl = 0.22f; sp.Ch = 0.07f; sp.Cb = 0.04f; sp.Z0 = 0.34f; sp.Cy = footY + 0.17f; sp.Pairs = 3; sp.Reach = 0.42f; sp.KneeUp = 0.1f; sp.RLeg = 0.034f; sp.RTip = 0.01f; sp.ClawR = 0.8f; sp.ClawL = 1.3f; sp.StalkLen = 0.06f; sp.EyeR = 0.04f; }
             else if (coconut) { sp.Cw = 0.27f; sp.Cl = 0.44f; sp.Ch = 0.15f; sp.Cb = 0.05f; sp.Z0 = 0.26f; sp.Reach = 0.74f; sp.KneeUp = 0.15f; sp.RLeg = 0.045f; sp.RTip = 0.012f; sp.ClawR = 1.3f; sp.ClawL = 1.75f; sp.StalkLen = 0.04f; sp.EyeR = 0.03f; sp.Antennae = true; }
+            else if (horseshoe) { sp.Cw = 0.46f; sp.Cl = 0.6f; sp.Ch = 0.17f; sp.Cb = 0.02f; sp.Z0 = 0.38f; sp.Reach = 0.5f; sp.KneeUp = 0.02f; sp.RLeg = 0.02f; sp.RTip = 0.008f; sp.Pairs = 5; sp.StalkLen = 0.004f; sp.EyeR = 0.02f; sp.Square = 1.7f; }
             if (!hermit) sp.Cy = footY + sp.KneeUp * 0.55f + 0.06f;
+            if (horseshoe) sp.Cy = footY + 0.035f;   // round 3: the living fossil lies flat on the sand
 
             int root = ctx.Bone("Root", -1, Vector3.zero);
             int body = ctx.Bone("Body", root, new Vector3(0f, sp.Cy, sp.Z0 - sp.Cl * 0.5f));
@@ -79,6 +81,27 @@ namespace Sealebrities
                 Vector3 ab = new Vector3(0f, sp.Cy - 0.02f, sp.Z0 - sp.Cl - 0.06f);
                 CreatureMeshLimbs.Blob(ctx, ab, Vector3.forward, Vector3.up, 0.17f, 0.11f, 0.13f, CreatureMeshSkin.Fixed(body), CreatureMeshPaint.PalUv(PShellB), 5, 8);
                 CreatureMeshLimbs.Blob(ctx, ab + new Vector3(0f, -0.05f, -0.07f), Vector3.forward, Vector3.up, 0.12f, 0.07f, 0.08f, CreatureMeshSkin.Fixed(body), CreatureMeshPaint.PalUv(PBelly), 4, 7);
+            }
+
+            if (horseshoe)
+            {
+                // round 3 (volcano fauna): hinged abdomen plate + the long tail spike (telson)
+                float z1 = sp.Z0 - sp.Cl;
+                var abd = new CreatureMeshSweep
+                {
+                    Ts = new[] { 0f, 0.15f, 0.5f, 0.85f, 1f }, Sides = 6,
+                    Center = tt => new Vector3(0f, sp.Cy + 0.01f, z1 + 0.02f - 0.24f * tt),
+                    HalfW = tt => Math.Max(1e-4f, CreatureMeshMath.Lerp(0.3f, 0.12f, tt)),
+                    HalfTop = tt => Math.Max(1e-4f, CreatureMeshMath.Lerp(0.09f, 0.04f, tt)),
+                    HalfBot = tt => 0.015f,
+                    Square = tt => 1.8f,
+                    U0 = 0f, U1 = CreatureMeshPaint.PalBodyU,
+                    CapStart = true, CapEnd = true,
+                };
+                abd.Build(ctx.B, CreatureMeshSlot.Skin, CreatureMeshSkin.Fixed(body));
+                Vector3 tb = new Vector3(0f, sp.Cy + 0.02f, z1 - 0.2f);
+                CreatureMeshParts.Cone(ctx.B, CreatureMeshSlot.Skin, tb, tb + new Vector3(0f, -0.02f, -0.5f), 0.03f, 5,
+                    CreatureMeshPaint.PalUv(PShellB), CreatureMeshPaint.PalUv(PLegTip), CreatureMeshSkin.One(body));
             }
 
             // ---- mouth plate
@@ -121,8 +144,8 @@ namespace Sealebrities
                 }
             }
 
-            // ---- claws
-            for (int side = 1; side >= -1; side -= 2)
+            // ---- claws (the horseshoe crab has none worth the name)
+            for (int side = 1; side >= -1 && !horseshoe; side -= 2)
             {
                 float c = side > 0 ? sp.ClawR : sp.ClawL;
                 float cc = 0.7f + 0.3f * c;

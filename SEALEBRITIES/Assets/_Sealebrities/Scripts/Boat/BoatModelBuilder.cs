@@ -21,6 +21,11 @@ namespace Sealebrities
         public Vector3 foredeckCrateLocal;
         /// Flag pole top (boat flag cosmetic / sponsor pennant).
         public Transform flag;
+        // ---- round 3 (GDD §19 „ein zweiter Sitzplatz, z. B. eine Sitzbank vorne“, Q36)
+        /// The two passenger seats on the foredeck bench (sitter's root, facing across the deck to starboard).
+        public Transform[] benchSeats;
+        /// Where a passenger stands up (boat local, one per seat).
+        public Vector3[] benchExitLocal;
     }
 
     /// Builds the "Rostlaube" in the low-poly toy style: a chunky faceted ~7.5 m teal fishing boat (rusty boot stripe,
@@ -52,6 +57,7 @@ namespace Sealebrities
             BuildDeckProps(set);
             BuildStern(set, root, parts);
             BuildBow(set, root, parts);
+            BuildBench(set, root, parts);
             BuildTires(set);
 
             set.Build("BoatBody", root, true);
@@ -62,7 +68,8 @@ namespace Sealebrities
             parts.sternWakeLocal = new Vector3(0f, 0f, -4.4f);
             parts.bowSprayLeftLocal = new Vector3(-0.55f, 0.15f, 2.6f);
             parts.bowSprayRightLocal = new Vector3(0.55f, 0.15f, 2.6f);
-            parts.foredeckCrateLocal = new Vector3(0f, Y0 + 0.02f, 1.45f);
+            // round 3: the passenger bench takes the port side of the foredeck – a dropped crate lands starboard of it
+            parts.foredeckCrateLocal = new Vector3(0.32f, Y0 + 0.02f, 1.45f);
 
             BuildCompassNeedles(root, parts);
             BuildCompressor(root, parts);
@@ -484,6 +491,52 @@ namespace Sealebrities
             parts.anchorStowLocal = anchor.transform.localPosition;
         }
 
+        // ------------------------------------------------------------------ passenger bench (round 3)
+        /// Bench on the port side of the foredeck, its back against the bulwark: two cushions, the sitters face across the
+        /// deck to starboard (look ±150° – forward over the bow and back to the wheelhouse). The starboard half of the
+        /// foredeck stays free to walk to the bow.
+        public const float BenchX = -0.61f, BenchZ0 = 0.98f, BenchZ1 = 1.94f, BenchSeatY = 0.44f, BenchDepth = 0.38f;
+
+        static void BuildBench(BoatMeshSet set, Transform root, BoatParts parts)
+        {
+            float zc = (BenchZ0 + BenchZ1) * 0.5f, len = BenchZ1 - BenchZ0;
+            float top = Y0 + BenchSeatY;
+            // plank seat + front lip
+            set[BoatMats.Deck].Box(new Vector3(BenchX, top - 0.03f, zc), new Vector3(BenchDepth, 0.06f, len));
+            set[BoatMats.DeckDark].Box(new Vector3(BenchX + BenchDepth * 0.5f - 0.02f, top - 0.08f, zc), new Vector3(0.04f, 0.1f, len));
+            // legs
+            for (int i = 0; i < 2; i++)
+                for (int k = 0; k < 2; k++)
+                {
+                    float x = BenchX + (i == 0 ? -1f : 1f) * (BenchDepth * 0.5f - 0.05f);
+                    float z = k == 0 ? BenchZ0 + 0.06f : BenchZ1 - 0.06f;
+                    set[BoatMats.DeckDark].Box(new Vector3(x, Y0 + (BenchSeatY - 0.06f) * 0.5f, z), new Vector3(0.05f, BenchSeatY - 0.06f, 0.05f));
+                }
+            // backrest boards against the bulwark (slightly tilted)
+            Quaternion lean = Quaternion.Euler(0f, 0f, -8f);
+            set[BoatMats.Deck].Box(new Vector3(BenchX - BenchDepth * 0.5f + 0.02f, top + 0.24f, zc), new Vector3(0.05f, 0.14f, len), lean);
+            set[BoatMats.DeckB].Box(new Vector3(BenchX - BenchDepth * 0.5f + 0.04f, top + 0.42f, zc), new Vector3(0.05f, 0.12f, len), lean);
+            // two cushions (orange + white – lifejacket colours) and a coiled rope under the bench
+            set[BoatMats.LifeOrange].TaperBox(new Vector3(BenchX + 0.02f, top + 0.035f, BenchZ0 + len * 0.27f), new Vector2(0.32f, 0.42f), new Vector2(0.28f, 0.38f), 0.07f, Quaternion.identity);
+            set[BoatMats.White].TaperBox(new Vector3(BenchX + 0.02f, top + 0.035f, BenchZ1 - len * 0.27f), new Vector2(0.32f, 0.42f), new Vector2(0.28f, 0.38f), 0.07f, Quaternion.identity);
+            set[BoatMats.Rope].Torus(new Vector3(BenchX, Y0 + 0.03f, zc), Quaternion.identity, 0.13f, 0.022f, 10, 4);
+
+            // seats: the sitter's root (hips at root + 0.36 m) facing +X
+            parts.benchSeats = new Transform[2];
+            parts.benchExitLocal = new Vector3[2];
+            for (int i = 0; i < 2; i++)
+            {
+                float z = i == 0 ? BenchZ0 + len * 0.27f : BenchZ1 - len * 0.27f;
+                var s = new GameObject("BenchSeat" + i).transform;
+                s.SetParent(root, false);
+                s.localPosition = new Vector3(BenchX + 0.03f, top - 0.36f, z);
+                s.localRotation = Quaternion.Euler(0f, 90f, 0f);
+                parts.benchSeats[i] = s;
+                parts.benchExitLocal[i] = new Vector3(0.2f, Y0 + 0.08f, z);
+                SeatRules.RegisterPassengerSeat(s);
+            }
+        }
+
         // ------------------------------------------------------------------ tire fenders
         static void BuildTires(BoatMeshSet set)
         {
@@ -597,6 +650,17 @@ namespace Sealebrities
             var winch = Child(root, "AnchorWinch", Vector3.zero, Quaternion.identity);
             AddBox(winch, new Vector3(0f, Y0 + 0.26f, 2.45f), new Vector3(0.72f, 0.5f, 0.44f));
             winch.AddComponent<BoatAnchorInteractable>().boat = boat;
+
+            // round 3: the passenger bench (solid seat + backrest; E – sit down)
+            {
+                float zc = (BenchZ0 + BenchZ1) * 0.5f, len = BenchZ1 - BenchZ0;
+                var bench = Child(root, "PassengerBench", Vector3.zero, Quaternion.identity);
+                AddBox(bench, new Vector3(BenchX, Y0 + BenchSeatY * 0.5f, zc), new Vector3(BenchDepth, BenchSeatY, len));
+                AddBox(bench, new Vector3(BenchX - BenchDepth * 0.5f + 0.03f, Y0 + BenchSeatY + 0.3f, zc), new Vector3(0.08f, 0.6f, len));
+                var bi = bench.AddComponent<BoatBenchInteractable>();
+                bi.boat = boat;
+                bi.parts = parts;
+            }
 
             // round 2: the cooler box is a snack spot (E.1); the whole hull says "E – board" from a dock / jetty / beach
             var cooler = cols.Find("Cooler");

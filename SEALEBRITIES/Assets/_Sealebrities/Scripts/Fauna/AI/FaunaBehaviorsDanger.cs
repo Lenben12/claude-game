@@ -57,21 +57,9 @@ namespace Sealebrities
                             c.hasFaceDir = true;
                             c.faceDir = Vector3.Lerp(c.velocity.sqrMagnitude > 0.01f ? c.velocity.normalized : c.Transform.forward, c.ToPlayer / d, 0.35f);
                         }
-                        if (inside && cooldown <= 0f)
-                        {
-                            if (!wasInside) rollTimer = 0f;   // roll immediately when the diver enters the 8 m ring
-                            rollTimer -= dt;
-                            if (rollTimer <= 0f)
-                            {
-                                rollTimer = 3f;
-                                float chance = Mathf.Clamp01(0.3f * FaunaContext.Aggression) * (1f + 0.3f * EnvState.Night01);
-                                if (Random.value < chance)
-                                {
-                                    st = St.Charge;
-                                    timer = 4.5f;
-                                }
-                            }
-                        }
+                        // round 3 (GDD §20 Q16 "Angriffe selten, aber spannend"): predators no longer charge on their
+                        // own – FaunaThreat picks a hunter now and then, announces it (circling + music) and steers the
+                        // one charge with a director. Here they only patrol and keep an eye on the diver ("cool").
                         wasInside = inside;
                         break;
                     }

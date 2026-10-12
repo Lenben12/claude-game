@@ -127,6 +127,7 @@ namespace Sealebrities
 
         static float Weight(SpeciesDef s)
         {
+            if (s == null || s.meme) return 0f;   // round 3: no floating throne chairs (memes are props)
             float w = 1f;
             if (s.IsDangerous) w += 2f;
             if (s.maxCm > 200f) w += 1.5f;

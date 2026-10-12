@@ -577,5 +577,73 @@ Der Spieler hat die Vorschau mit einem Freund im Koop getestet. Umsetzung als Na
 - **Story:** muss mehr Sinn ergeben.
 - **Fischmarkt:** bleibt so.
 
+## 19b. Nachtrag Koop und Spielstände (12.10.2026, für Testversion 5)
+- **Einladen:** Man kann eine Person **mehrmals einladen**, wenn sie die erste Einladung nicht angenommen hat. Der Knopf heißt dabei **immer gleich „Einladen“**, also kein „Erneut einladen“ und keine andere Anzeige. Er bleibt einfach jederzeit klickbar.
+- **4 Spielstände (Slots):**
+  - Jeder kann gelöscht werden.
+  - Jede Karte zeigt z. B. die **Spielzeit in dieser Welt**, die **Erfolge in dieser Welt**, Tag, Follower und Geld.
+  - Alles hängt am jeweiligen Spielstand und ist nicht kontoweit. Erfolge, Fortschritt und Fotos sind je Welt getrennt.
+- **Koop:**
+  - Nur der Ersteller des Spielstands (Host) kann einladen.
+  - Gespeichert wird nur beim Host.
+  - Verlässt der Host, fliegen alle aus der Welt.
+- **Bilder:**
+  - Sie werden **nicht** in der PC-Galerie bzw. im Bilder-Ordner gespeichert, sondern nur im Spiel, und zwar je Spielstand.
+  - Export auf den PC nur auf ausdrücklichen Knopfdruck.
+
+## 20. 50 Zwischenfragen in der Nacht (12.10.2026, für Testversion 5)
+| # | Thema | Antwort |
+|---|---|---|
+| 1 | Inselgröße | Klein und dicht: ca. 2–3 Minuten quer drüber, überall etwas zu entdecken |
+| 2 | Lager-Bewohner | **Aussteiger-Einsiedler**, die das Meer verehren und Fremden misstrauen |
+| 3 | Anzahl | 4–6 mit eigenen Rollen (Anführer, Schmied, Jäger, Koch, Späher …) |
+| 4 | Laune verbessern | Geschenke + richtige Gesten |
+| 5 | Zeichensprache | Gesten-Rad mit Symbolen (falsche Gesten verärgern) |
+| 6 | Niederlage gegen Einsiedler | **Sie fesseln dich kurz**, du befreist dich per Minispiel |
+| 7 | Sieg mit dem Stock | **Er respektiert dich** (Stärke bringt Respekt und bessere Laune) |
+| 8 | Was sie geben | Handwerk (Speere schärfen, Fischfallen, Rezepte) |
+| 9 | Story-Kern | Onkel Gus' Erbe (Insel, Hütte, Kanal + Rätsel der verschollenen Doku) |
+| 10 | Horst | Taucht immer wieder auf (Tipps, Kommentare, eigene Nebenaufgaben), **aber nicht am Steg, sondern in einer Hängematte am Strand** (am Steg nervt er) |
+| 11 | Nebenaufgaben | **Lustige Filmaufträge** |
+| 12 | Geheimnisse | Mittel mit Hinweisen (klettern/tauchen, Tipps aus Logbuch und von NPCs) |
+| 13 | Vulkaninsel | Erreichbar ab der Wrack-Freischaltung |
+| 14 | Urzeit-Tiere | Mischung: echte lebende Fossilien + ein großes Urzeit-Monster |
+| 15 | Fischmenge | Viele, überall Leben, auch im offenen Meer |
+| 16 | Angriffe | Selten, aber spannend, angekündigt durch Musik oder Kreisen |
+| 17 | Hai-Treffer | Luft- und Clip-Verlust, kein Tod |
+| 18 | Speerfischen | Nur Speisefische, geschützte Tiere nie |
+| 19 | Memes | Lustige Fundstücke + Tier-Memes |
+| 20 | Unterwasser zusätzlich | Schätze & Wracks erkunden |
+| 21 | Flucht | Je nach Art (kleine Fische schnell weg, Schildkröten neugierig, Haie cool) |
+| 22 | Inseltiere | Vögel, Krabben, Echsen |
+| 23 | Landtiere im Sealog | **Nein, nur Deko** |
+| 24 | Hunger/Durst | **Schneller** sinken (mehr Survival-Gefühl) |
+| 25 | Wasser filtern | Ca. 45 Spielminuten |
+| 26 | Lagerfeuer | Feste Plätze + Treibholz |
+| 27 | Rucksack | **Unbegrenzt** |
+| 28 | Hotbar | 8 Plätze |
+| 29 | Haltbarkeit | Ja, langsam (schärfen/reparieren am Schleifgerät) |
+| 30 | Handy-Karte | Gezeichnete Schatzkarte, zoom- und verschiebbar, Orte erst nach Entdeckung |
+| 31 | Markierungen | **Geteilte Koop-Pins** |
+| 32 | Chopper-Shop | Katalog mit großen Bildern |
+| 33 | FinTube-Studio | Clips auswählen & sortieren + Statistiken & Kommentare |
+| 34 | Neue App | Kochbuch |
+| 35 | Ladebildschirm | Animierte Unterwasser-Szene mit Tipps und Fakten |
+| 36 | Beifahrer | Filmen + Karte ansehen |
+| 37 | Boot | **Nur Upgrades**, kein eigenes Design |
+| 38 | Figuren | How-to-Fish-Stil, natürlicher (Low-Poly-Menschen mit echten Proportionen) |
+| 39 | Weltstil | Low-Poly, aber detaillierter |
+| 40 | Kameramodus | Minimal: REC, Zoom + kleine Symbole erkannter Tiere |
+| 41 | Sealog-Foto-Reichweite | Bis ca. 8 m |
+| 42 | Tauchplätze | Anforderung oben in der Mitte, Banner erst beim Erreichen |
+| 43 | Rivalen | Gegenspieler mit Sabotage (Motive klauen, Streams stören, Follower-Duelle) |
+| 44 | Nachttauchen | Gruselig, mehr Raubtiere, seltene Nachttiere |
+| 45 | Kampf im Livestream | **Jeder Kampf bringt Hype** |
+| 46 | Haus einrichten | **Feste Varianten wählen** (Wandfarbe, Boden, Teppich …) |
+| 47 | Funde verkaufen | Ja: Fischmarkt + Tausch bei den Einsiedlern |
+| 48 | Wetter | Beeinflusst Sicht, Wellen und welche Tiere erscheinen |
+| 49 | Wichtigstes für Testversion 5 | **Mehr Inhalt im Meer** |
+| 50 | Spielzeit einer Testversion | 2–3 Stunden |
+
 ## 12. Offene Punkte
 Werden in den nächsten Frage-Runden geklärt.

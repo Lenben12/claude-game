@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace Sealebrities
 {
@@ -114,8 +114,31 @@ namespace Sealebrities
         public static readonly Vector3 CaveRampTop = Vector3.zero, CaveRampBottom = Vector3.zero;
 
         // ------------------------------------------------------------------ village (round 2b)
-        /// Flat village terrace behind the second beach (ellipse half axes along x / z, y = terrace height).
+        /// Flat village terrace behind the second beach (ellipse half axes along x / z, y = terrace height). Round 3: the
+        /// houses are gone – the terrace stays as the open beach meadow of the south beach.
         public const float VillageTerraceY = 1.7f, VillageHalfX = 24f, VillageHalfZ = 12f;
+
+        // ------------------------------------------------------------------ hermit camp (round 3)
+        /// Floor height of the hidden camp hollow (WorldLayout.HermitCamp, flat within HermitCampRadius, the wooded rim
+        /// rises ~3–5 m around it).
+        public const float CampFloorY = 17.2f;
+        /// Unit direction from the camp centre to its only easy way in: a narrow, overgrown game trail that leaves the
+        /// waterfall amphitheater beside the grotto (no dirt strip, no signpost – cairns and hermit marks only).
+        public static readonly Vector3 CampEntranceDir;
+        /// The game trail: start beside the grotto clearing (y = ground) → bend → gap in the camp rim (y = CampFloorY).
+        public static readonly Vector3 CampTrailStart, CampTrailBend, CampTrailGap;
+        /// The sea lookout on the camp's west rim (a flat rock above the cliff coast), y = ground.
+        public static readonly Vector3 CampLookout;
+
+        // ------------------------------------------------------------------ volcano island (round 3)
+        /// Crater: rim radius (the summit ring at WorldLayout.VolcanoPeak), floor radius and floor height.
+        public const float CraterRimRadius = 11f, CraterFloorRadius = 6.5f, CraterFloorY = 28f;
+        /// Unit direction from the volcano centre toward its black-sand beach (it faces the main island and the dock).
+        public static readonly Vector3 VolcanoBeachDir;
+        /// Unit direction of the lava flow (down the east flank into the sea).
+        public static readonly Vector3 VolcanoLavaDir;
+        /// Point on the black-sand beach (y = ground ~1 m) where boats land and props / fauna anchor.
+        public static readonly Vector3 VolcanoBeach;
 
         // ------------------------------------------------------------------ sea stacks + landmark islands
         /// Rocky islets just off the main island coast (position.y = top height).
@@ -223,6 +246,27 @@ namespace Sealebrities
                 new MiniIsland { id = "deep_trench", center = WorldLayout.TrenchIsland, shoreRadius = 34f, peak = 4f, steepness = 4.6f, rocky = 0.1f },
                 new MiniIsland { id = "fog_isle", center = WorldLayout.FogIsland, shoreRadius = 30f, peak = 16f, steepness = 1.2f, rocky = 0.45f },
             };
+
+            // ---- round 3: hermit camp (west plateau) and the volcano island
+            {
+                Vector3 camp = WorldLayout.HermitCamp;
+                Vector3 caveFront = WorldLayout.CaveEntrance - CaveDir * 6f;
+                CampTrailStart = new Vector3(caveFront.x - 7.5f, CaveFloorY, caveFront.z - 6.5f);
+                CampTrailBend = new Vector3(camp.x + 21f, CampFloorY - 1.2f, camp.z + 2.5f);
+                Vector3 ed = CampTrailBend - camp; ed.y = 0f; ed.Normalize();
+                CampEntranceDir = ed;
+                CampTrailGap = new Vector3(camp.x + ed.x * (WorldLayout.HermitCampRadius + 2f), CampFloorY, camp.z + ed.z * (WorldLayout.HermitCampRadius + 2f));
+                CampLookout = new Vector3(camp.x - 19f, CampFloorY + 0.6f, camp.z + 3f);
+
+                Vector3 v = WorldLayout.VolcanoIsland;
+                Vector3 b = WorldLayout.IslandCenter - v; b.y = 0f; b.Normalize();
+                VolcanoBeachDir = b;
+                // the flow runs down the flank 160° (yaw) from the beach side: east-south-east (Quaternion-free math so the
+                // offline terrain probe can evaluate it)
+                float ca = Mathf.Cos(160f * Mathf.Deg2Rad), sa = Mathf.Sin(160f * Mathf.Deg2Rad);
+                VolcanoLavaDir = new Vector3(b.x * ca + b.z * sa, 0f, -b.x * sa + b.z * ca);
+                VolcanoBeach = new Vector3(v.x + b.x * (WorldLayout.VolcanoShoreRadius - 9f), 1.0f, v.z + b.z * (WorldLayout.VolcanoShoreRadius - 9f));
+            }
 
             // ---- detail pass (positions probed against the 0.62 island: away from anchors, trails, boat lanes)
             SmallCoves = new[]

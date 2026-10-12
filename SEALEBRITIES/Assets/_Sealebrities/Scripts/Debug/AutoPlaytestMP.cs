@@ -130,7 +130,8 @@ namespace Sealebrities
 
         static GameState S => GameManager.I.State;
         static string SettingsPath => Path.Combine(Application.persistentDataPath, "settings.json");
-        static string SavePath => Path.Combine(Application.persistentDataPath, "sealebrities_save.json");
+        /// The player's save: since round 3 step 6b save slot 1 (where the old single save was migrated to).
+        static string SavePath => Path.Combine(Application.persistentDataPath, "save_slot1.json");
         static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
         // ------------------------------------------------------------------ activation (command line only)
@@ -193,7 +194,8 @@ namespace Sealebrities
             SubscribeRound3();
         }
 
-        void OnPhotoAdded(PhotoEntry e) { if (e != null && !string.IsNullOrEmpty(e.file)) testPhotos.Add(e.file); }
+        // full path: the gallery folder belongs to the world (host: its slot / unsaved world, guest: coop/w<seed>)
+        void OnPhotoAdded(PhotoEntry e) { if (e != null && !string.IsNullOrEmpty(e.file)) testPhotos.Add(Gallery.PathOf(e) ?? e.file); }
 
         /// Both roles: the discovery auto-photos / photos of this run never stay in the player's gallery folder.
         void DeleteTestPhotos()
@@ -203,7 +205,7 @@ namespace Sealebrities
             {
                 try
                 {
-                    string p = Path.Combine(Gallery.Folder, testPhotos[i]);
+                    string p = Path.IsPathRooted(testPhotos[i]) ? testPhotos[i] : Path.Combine(Gallery.Folder, testPhotos[i]);
                     if (File.Exists(p)) { File.Delete(p); n++; }
                 }
                 catch (Exception) { }
@@ -441,10 +443,11 @@ namespace Sealebrities
             yield return RunStep(15, "11e NPC dialogue heard by both + side quest accepted by the guest, progress shared (L.7, L.10)", StepNpcQuest, 300f);
             yield return RunStep(16, "11f Food: shared pantry, the eater's own buff, grill takes the shared fish (E.1, E.2)", StepFood, 160f);
             yield return RunStep(17, "11g Chopper mishap: crate at the wrong place on both, the guest finds + opens it (L.12)", StepMishap, 330f);
-            yield return RunStep(18, "12 Client disconnects → avatar removed on host (guest record kept, F.3)", StepDisconnect, 120f);
-            yield return RunStep(19, "13 Drop-in rejoin → client gets the current state + its own hotbar back (F.3)", StepRejoin, 200f);
-            yield return RunStep(20, "13b Host saves, goes to the menu and continues → the guest rejoins with its own hotbar + stats (F.3)", StepHostReload, 300f);
-            yield return RunStep(21, "14 Host quits → client back in the menu with a message", StepHostQuit, 120f, true);
+            yield return RunStep(18, "11h Round 3 core: own backpacks + meters, shared campfire / map piece / daily pickup, the avatar holds the stick", StepRound3Core, 220f);
+            yield return RunStep(19, "12 Client disconnects → avatar removed on host (guest record kept, F.3)", StepDisconnect, 120f);
+            yield return RunStep(20, "13 Drop-in rejoin → client gets the current state + its own hotbar back (F.3)", StepRejoin, 200f);
+            yield return RunStep(21, "13b Host saves, goes to the menu and continues → the guest rejoins with its own hotbar + stats (F.3)", StepHostReload, 300f);
+            yield return RunStep(22, "14 Host quits → client back in the menu with a message", StepHostQuit, 120f, true);
 
             Finish(report.failed == 0 ? 0 : 1);
         }
@@ -475,6 +478,8 @@ namespace Sealebrities
             float t0 = Time.realtimeSinceStartup;
             Note("STEP " + name);
             GameInput.SimClear();
+            // round 3: every step starts fed (hunger / thirst are per player and sink over the long run)
+            if (GameManager.I != null && GameManager.I.InGame) { Survival.Set(Survival.Max, Survival.Max); Combat.Reset(); }
             yield return Guard(body(), name, timeout);
             GameInput.SimClear();
             NetVoice.TestToneHz = 0f;
@@ -1309,7 +1314,7 @@ namespace Sealebrities
             }
             else
             {
-                if (!Hands.IsHeld(HoldItem.Camera) && Hands.Find(HoldItem.Camera, out Hand ch, out int cs)) Hands.Select(ch, cs);
+                if (!Hands.IsHeld(HoldItem.Camera) && Hands.Find(HoldItem.Camera, out Hand ch, out int cs)) Hands.Select(cs);
                 yield return DiveTo(eye, eye + fwd * 10f);
                 Check(Hands.IsHeld(HoldItem.Camera), "camera in hand under water");
                 Check(pc.IsUnderwater, "client under water at the house reef (" + F(pc.Depth) + " m)");
@@ -1432,6 +1437,19 @@ namespace Sealebrities
                 Check(hud1 == Loc.Tr("Schlafen ", "Sleep ") + "1/2", "host HUD under the quest line: '" + hud1 + "'");
                 var pa = PeerAvatar();
                 Check(pa != null && pa.Motion == MotionState.Lie, "the host sees the client's diver lying (" + (pa != null ? pa.Motion.ToString() : "-") + ")");
+                if (pa != null)
+                {
+                    // round 3 (GDD §19, images 4/5): the avatar lies IN the bed / hammock – its root on the spot's pelvis point
+                    float bestD = float.MaxValue;
+                    string spotId = "-";
+                    for (int i = 0; i < PropInfo.SleepSpots.Count; i++)
+                    {
+                        DiverPuppet.LiePose(PropInfo.SleepSpots[i], out Vector3 lr, out _, out _, out _, out _);
+                        float d = Vector3.Distance(lr, pa.transform.position);
+                        if (d < bestD) { bestD = d; spotId = PropInfo.SleepSpots[i].id; }
+                    }
+                    Check(bestD < 0.3f, "round 3: the client's avatar lies IN the " + spotId + " (root " + F(bestD, "0.00") + " m from the spot's pelvis point)");
+                }
                 if (pa != null) { yield return AimAt(pa.HeadPosition); yield return Shot("host_S08_client_lying_1of2"); }
                 yield return Wait(3f);
                 Check(S.day == day0, "1 of 2 in bed: the night is not skipped – both must lie in a bed (L.9)");
@@ -1823,11 +1841,11 @@ namespace Sealebrities
                 yield return WaitUntil(() =>
                 {
                     var r = PlayerRecords.Find(pkey);
-                    return r != null && r.hotbarLeft != null && r.hotbarLeft.Length > 2 && r.hotbarLeft[2] == Hands.ItemName(HoldItem.Camera);
+                    return r != null && r.hotbar != null && r.hotbar.Length > 5 && r.hotbar[5] == ItemIds.Camera;
                 }, 10f);
                 var rec = PlayerRecords.Find(pkey);
-                Check(rec != null && rec.hotbarLeft != null && rec.hotbarLeft.Length > 2 && rec.hotbarLeft[2] == Hands.ItemName(HoldItem.Camera),
-                      "host stored the guest's record (camera in left slot 3)");
+                Check(rec != null && rec.hotbar != null && rec.hotbar.Length > 5 && rec.hotbar[5] == ItemIds.Camera,
+                      "host stored the guest's record (camera on hotbar slot 6)");
                 yield return WaitUntil(() => Net.Find(left) == null, 15f);
                 Check(Net.Find(left) == null && Net.Players.Count == 1, "client left the player list (" + Net.Players.Count + " players)");
                 yield return WaitUntil(() => !NetAvatarSync.TryGet(left, out _), 6f);
@@ -1844,9 +1862,9 @@ namespace Sealebrities
             else
             {
                 // F.3: a personal hotbar layout the host must keep for this machine
-                Hands.Assign(Hand.Left, 2, HoldItem.Camera);
+                Hands.Assign(5, ItemIds.Camera, Hand.Left);
                 yield return Frames(2);
-                Check(Hands.SlotItem(Hand.Left, 2) == HoldItem.Camera, "client moved the camera to left slot 3");
+                Check(Hands.SlotItem(5) == HoldItem.Camera, "client put the camera on hotbar slot 6 (offhand)");
                 PlayerRecords.SendLocal();
                 SendVal("hotbar", "left3=camera");
                 yield return Wait(2.5f);
@@ -1899,8 +1917,8 @@ namespace Sealebrities
                 string theirs = Val("state13") ?? "";
                 Check(mine == theirs, "rejoined client has the current shared state: " + mine + (mine == theirs ? "" : " vs host " + theirs));
                 Check(Journal.IsDiscovered("green_turtle") && S.ownedItems.Contains("tank_t1"), "journal entry and bought tank are still there");
-                yield return WaitUntil(() => Hands.SlotItem(Hand.Left, 2) == HoldItem.Camera, 6f);
-                Check(Hands.SlotItem(Hand.Left, 2) == HoldItem.Camera, "F.3: the guest got its own hotbar back from the host's record (camera in left slot 3)");
+                yield return WaitUntil(() => Hands.SlotItem(5) == HoldItem.Camera, 6f);
+                Check(Hands.SlotItem(5) == HoldItem.Camera, "F.3: the guest got its own hotbar back from the host's record (camera on slot 6)");
                 yield return Wait(1.5f);
                 var a = PeerAvatar();
                 Check(a != null && a.Visible, "host avatar visible after rejoining");
@@ -1943,8 +1961,12 @@ namespace Sealebrities
             string id = c.Species != null ? c.Species.id : "";
             bool disc0 = Journal.IsDiscovered(id);
             Vector3 approach = Flat(c.Position - cam.transform.position);
-            // K.2: under water the camera records by itself; LMB while aiming = a Sealog photo (aiming never toggles REC)
+            // round 3 (GDD §19): no auto-record any more – LMB starts REC (before aiming; LMB while aiming = a Sealog photo)
             if (!aim && hc.IsRecording != record) GameInput.SimTap(GameAction.Use);
+            if (aim && record && !hc.IsRecording)
+            {
+                if (!hc.StartRecording()) { GameInput.SimTap(GameAction.Use); yield return null; yield return null; }
+            }
             if (aim) GameInput.SimPress(GameAction.Aim);
             float t = 0f;
             bool shot = false, photo = false;

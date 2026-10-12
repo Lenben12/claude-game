@@ -73,7 +73,7 @@ namespace Sealebrities
             if (!StoryFlags.Has(NpcKeys.WandaMet) && AnyoneNear(w.Position, 6f))
             {
                 StoryFlags.Set(NpcKeys.WandaMet);
-                w.PlayGesture(NpcGesture.Wave);
+                w.PlayGesture(NpcGesture.Nod);
                 Talk(w, "wanda.met");
                 return;
             }
@@ -190,7 +190,7 @@ namespace Sealebrities
                     fin.FacePoint = NearestDiverPos(fin.Position) ?? (Vector3?)rv.Pos;
                     if (!StoryFlags.Has(NpcKeys.FinMet) && AnyoneNear(fin.Position, 6f))
                     {
-                        fin.PlayGesture(NpcGesture.Wave);
+                        fin.PlayGesture(NpcGesture.Nod);
                         Talk(fin, "fin.first", () => { StoryFlags.Set(NpcKeys.FinMet); EnsureResearchOffers(true); });
                     }
                     else if (NpcUtil.Hash01((int)(Time.time / 9f), 5) < 0.02f) fin.PlayGesture(NpcGesture.Think);
@@ -338,6 +338,7 @@ namespace Sealebrities
                     // one ribbon with the reward in its band (host and guests alike)
                     GameEvents.RaiseBanner(Loc.Tr("Duell gewonnen!\n+5 % Aufrufe", "Duel won!\n+5 % views"), new Color(0.95f, 0.79f, 0.3f));
                     NpcNet.SendEvent(NpcNet.EvNotify, "banner:duel", null);
+                    RadioAll(NpcDatabase.Brad, "rival.duel.won");
                 }
                 else GameEvents.RaiseNotify(NotifyKind.Story, DialogueDatabase.Resolve("rival.duel.lost", null));
             }
@@ -451,7 +452,7 @@ namespace Sealebrities
                     {
                         rivalSpoke = true;
                         chad.PlayGesture(NpcGesture.Selfie);
-                        brad.PlayGesture(NpcGesture.Wave);
+                        brad.PlayGesture(NpcGesture.Nod);
                         switch (rivalPurpose)
                         {
                             case "R1":

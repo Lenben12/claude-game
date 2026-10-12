@@ -315,4 +315,76 @@ namespace Sealebrities
             snapshot = false;
         }
     }
+
+    /// Round 3 (GDD §19 "the water must hide what is under it"): above water the sea is (nearly) opaque beyond a few
+    /// metres (WorldOcean.ViewOpacity), so creatures and props deep below it need not be drawn from the beach, the dock
+    /// or the boat. A module puts such renderers on a layer of its own and registers that layer here (Register); while
+    /// the main camera is above the surface those layers get Camera.layerCullDistances = AboveWaterMeters (merged:
+    /// a shorter distance another module set is kept, every other layer is untouched), under water the camera's own
+    /// distances come back exactly. Allocation-free per frame (the camera array is only read / written on a change).
+    /// Nothing is registered by default (fauna and props live on the Default layer today).
+    public static class FXSurfaceCull
+    {
+        /// Bit mask of the registered "under the surface" layers.
+        public static int Layers { get; private set; }
+        /// Cull distance for those layers while the camera is above the water.
+        public static float AboveWaterMeters = 22f;
+        /// True while the distances are written on the camera (camera above water and at least one layer registered).
+        public static bool Active { get; private set; }
+        /// Last state seen by Tick (true = camera above the surface).
+        public static bool CameraAboveWater { get; private set; } = true;
+
+        static Camera cam;
+        static int appliedMask;
+        static float appliedMeters;
+        static readonly float[] saved = new float[32];
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { Layers = 0; AboveWaterMeters = 22f; Active = false; CameraAboveWater = true; cam = null; appliedMask = 0; appliedMeters = 0f; }
+
+        public static void Register(int layer) { if (layer >= 0 && layer < 32) Layers |= 1 << layer; }
+        public static void Unregister(int layer) { if (layer >= 0 && layer < 32) Layers &= ~(1 << layer); }
+
+        /// Called every frame by the FX director with the main camera.
+        internal static void Tick(Camera c, bool underwater)
+        {
+            CameraAboveWater = !underwater;
+            if (c != cam)
+            {
+                if (cam != null && appliedMask != 0) Restore(cam);
+                cam = c;
+                appliedMask = 0;
+                Active = false;
+            }
+            if (c == null) return;
+            int want = underwater ? 0 : Layers;
+            float meters = Mathf.Max(1f, AboveWaterMeters);
+            if (want == appliedMask && (want == 0 || Mathf.Approximately(meters, appliedMeters))) return;
+
+            float[] d = c.layerCullDistances;   // copy (allocates – only on a state change)
+            for (int l = 0; l < 32; l++)
+            {
+                int bit = 1 << l;
+                bool had = (appliedMask & bit) != 0, wants = (want & bit) != 0;
+                if (wants)
+                {
+                    if (!had) saved[l] = d[l];
+                    d[l] = saved[l] > 0f ? Mathf.Min(saved[l], meters) : meters;
+                }
+                else if (had) d[l] = saved[l];
+            }
+            c.layerCullDistances = d;
+            appliedMask = want;
+            appliedMeters = meters;
+            Active = want != 0;
+        }
+
+        static void Restore(Camera c)
+        {
+            if (c == null) return;
+            float[] d = c.layerCullDistances;
+            for (int l = 0; l < 32; l++) if ((appliedMask & (1 << l)) != 0) d[l] = saved[l];
+            c.layerCullDistances = d;
+        }
+    }
 }

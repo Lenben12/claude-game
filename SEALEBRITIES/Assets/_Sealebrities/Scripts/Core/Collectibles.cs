@@ -10,7 +10,8 @@ namespace Sealebrities
         GoldenShell,    // shiny shells hidden on islands and in shallow water
         BottleMessage,  // message in a bottle (clue to the lost deep-sea documentary / TV studio)
         Treasure,       // chests, old cameras, odd finds
-        Secret          // hidden places (counted when discovered)
+        Secret,         // hidden places (counted when discovered)
+        MapPiece        // round 3: buried / hidden treasure-map pieces (MapPieces) – APPEND new kinds after this
     }
 
     /// Optional exploration collectibles. Not needed for the story; tracked for the phone and achievements.
@@ -22,6 +23,9 @@ namespace Sealebrities
         public static event Action<string, CollectibleKind> Found;
 
         static GameState S => GameManager.I.State;
+
+        /// Highest valid kind (network clamps).
+        public const CollectibleKind LastKind = CollectibleKind.MapPiece;
 
         /// Called by the placing module once per kind after the world is built.
         public static void RegisterTotal(CollectibleKind kind, int total) => Totals[kind] = total;
@@ -57,6 +61,7 @@ namespace Sealebrities
                 case CollectibleKind.GoldenShell: return "shell:";
                 case CollectibleKind.BottleMessage: return "bottle:";
                 case CollectibleKind.Treasure: return "treasure:";
+                case CollectibleKind.MapPiece: return "map:";
                 default: return "secret:";
             }
         }
@@ -69,6 +74,7 @@ namespace Sealebrities
                 case CollectibleKind.GoldenShell: return Loc.Tr("Goldene Muschel", "Golden shell");
                 case CollectibleKind.BottleMessage: return Loc.Tr("Flaschenpost", "Message in a bottle");
                 case CollectibleKind.Treasure: return Loc.Tr("Fundstück", "Treasure");
+                case CollectibleKind.MapPiece: return Loc.Tr("Kartenstück", "Map piece");
                 default: return Loc.Tr("Geheimnis", "Secret");
             }
         }

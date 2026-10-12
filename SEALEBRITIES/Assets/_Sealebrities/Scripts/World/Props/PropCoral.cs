@@ -256,7 +256,8 @@ namespace Sealebrities
         static float G(float x, float z) => PropGround.H(x, z);
 
         /// Places one coral of the given type. Returns false when it would reach too close to the surface.
-        public static bool Place(PropBatch batch, System.Random rng, Vector3 pos, Vector3 normal, PropCoralType type, float scaleMul, float maxTopY = -1.2f)
+        /// cols != null: solid kinds get a cheap static collider (ClassicCollider).
+        public static bool Place(PropBatch batch, System.Random rng, Vector3 pos, Vector3 normal, PropCoralType type, float scaleMul, float maxTopY = -1.2f, Transform cols = null)
         {
             var list = PropCoralKit.Of(type);
             if (list.Count == 0) return false;
@@ -283,7 +284,23 @@ namespace Sealebrities
             float follow = type == PropCoralType.Fan || type == PropCoralType.Whip ? 0.25f : 0.6f;
             Quaternion rot = PropUtil.OnGround(normal.normalized, follow, PropUtil.Range(rng, 0f, 360f));
             batch.Add(model, Matrix4x4.TRS(pos - normal * 0.03f, rot, Vector3.one * s));
+            if (cols != null) ClassicCollider(cols, type, pos - normal * 0.03f, rot, model.radius * s, model.height * s);
             return true;
+        }
+
+        /// Round 3 (GDD §19): the solid part of a kit coral (radius / height in metres). Brains, branching, tables and
+        /// sponges are solid from 0.5 m; a sea fan only gets a thin plate when it is ≥ 1.1 m; whips and anemones stay
+        /// passable (soft).
+        public static void ClassicCollider(Transform cols, PropCoralType type, Vector3 p, Quaternion rot, float r, float h)
+        {
+            switch (type)
+            {
+                case PropCoralType.Brain: PropSolid.CoralLump(cols, p, r, h, 0.95f); break;
+                case PropCoralType.Branching: PropSolid.CoralLump(cols, p, r, h, 0.72f); break;
+                case PropCoralType.Table: PropSolid.CoralTable(cols, p, r, h); break;
+                case PropCoralType.Sponge: PropSolid.CoralLump(cols, p, r, h, 0.85f); break;
+                case PropCoralType.Fan: PropSolid.CoralFan(cols, p, rot, r, h); break;
+            }
         }
 
         public static PropCoralType RandomType(System.Random rng, float branching, float brain, float table, float fan, float sponge, float whip)

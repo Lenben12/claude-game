@@ -37,8 +37,11 @@ namespace Sealebrities
         public DifficultySettings Difficulty => DifficultySettings.For(State.difficulty);
         public GearStats Gear => GearDatabase.Stats(State);
 
-        static string SavePath => Path.Combine(Application.persistentDataPath, "sealebrities_save.json");
-        public static bool HasSave => File.Exists(SavePath);
+        /// Round 3 step 6b (GDD §19b): four save slots (SaveSlots) – the running world saves into SaveSlots.Active
+        /// (save_slot{n}.json); null = nothing to save (no slot / co-op guest).
+        static string SavePath => SaveSlots.ActiveFile;
+        /// At least one save slot is used.
+        public static bool HasSave => SaveSlots.AnyUsed;
 
         /// Set by automated test runs (AutoShot) so they never overwrite the player's save.
         public static bool SavingDisabled;
@@ -56,6 +59,12 @@ namespace Sealebrities
             Settings.Load();
             if (!Settings.FileExisted) MigrateLegacySettings();
             Settings.Apply();
+            // round 3 step 6b: the old single save becomes save slot 1 (never from a test run)
+            if (!AutomatedRun && !SavingDisabled)
+            {
+                try { SaveSlots.MigrateLegacy(); }
+                catch (Exception e) { Debug.LogWarning("Sealebrities: save migration failed: " + e.Message); }
+            }
             Achievements.Hook();
             if (!hooked)
             {
@@ -100,8 +109,18 @@ namespace Sealebrities
         public bool NeedsPrologue => InGame && !State.prologueDone;
 
         // ------------------------------------------------------------------ game flow
-        public void NewGame(Difficulty difficulty)
+        /// New world without choosing a slot: the first free slot (automated runs / saving disabled: no slot at all, the
+        /// world is never saved). The menu and the host pages pass the slot themselves.
+        public void NewGame(Difficulty difficulty) => NewGame(difficulty, AutomatedRun || SavingDisabled ? 0 : SaveSlots.FirstFree());
+
+        /// New world in save slot `slot` (1..4; 0 = an unsaved world). An old world in that slot (file + photos) is
+        /// removed first – the menu only offers empty slots, so this only clears leftovers.
+        public void NewGame(Difficulty difficulty, int slot)
         {
+            if (!SaveSlots.Valid(slot)) slot = 0;
+            if (slot > 0 && !SavingDisabled) SaveSlots.PrepareNew(slot);
+            SaveSlots.SetActive(slot);
+            if (slot > 0 && !SavingDisabled) SaveSlots.SetLastUsed(slot);
             State = new GameState
             {
                 difficulty = DifficultySettings.Normalize(difficulty),
@@ -134,19 +153,33 @@ namespace Sealebrities
             ViewfinderInfo.Clear();
             SelfieState.Active = false;
             FaunaEventInfo.End();
+            Combat.Reset();
         }
 
-        public bool LoadGame()
+        /// „Fortsetzen“: loads the last played slot (SaveSlots.ContinueSlot).
+        public bool LoadGame() => LoadSlot(SaveSlots.ContinueSlot);
+
+        /// Loads save slot `slot` (1..4) – this world's progress, achievements, map pins, hut, photos. The slot becomes
+        /// the one this world saves into and the one „Fortsetzen“ continues.
+        public bool LoadSlot(int slot)
         {
-            if (!HasSave) return false;
+            if (!SaveSlots.Exists(slot)) return false;
             string json;
-            try { json = File.ReadAllText(SavePath); }
+            try { json = File.ReadAllText(SaveSlots.FileOf(slot)); }
             catch (Exception e)
             {
-                Debug.LogWarning("Sealebrities: could not read save: " + e.Message);
+                Debug.LogWarning("Sealebrities: could not read save slot " + slot + ": " + e.Message);
                 return false;
             }
-            return LoadFromJson(json);
+            int prev = SaveSlots.Active;
+            SaveSlots.SetActive(slot);   // before loading: the gallery / photo book of THIS world are read from now on
+            if (!LoadFromJson(json))
+            {
+                SaveSlots.SetActive(prev);
+                return false;
+            }
+            SaveSlots.SetLastUsed(slot);
+            return true;
         }
 
         /// Loads a save from its JSON text – LoadGame reads the file; the automated co-op test reloads the host's world
@@ -173,6 +206,8 @@ namespace Sealebrities
                 Gallery.ImportLegacy(loaded.photos);
                 loaded.photos.Clear();
                 State = loaded;
+                // the world's achievements are the host's own (no notification burst when one fires again)
+                Achievements.RememberSilently(State.achievements);
                 GearDatabase.GiveStartingGear(State);
                 if (!State.unlockedSites.Contains("house_reef")) State.unlockedSites.Add("house_reef");
                 // a story site in the list without its flag (hand-edited / old test saves) is locked again
@@ -185,7 +220,10 @@ namespace Sealebrities
                 State.diveFootage.Clear();
                 State.activeRight = -1;          // both hands empty after loading
                 State.activeLeft = -1;
+                State.activeMain = -1;
+                State.activeOff = -1;
                 State.carried = null;            // carried items are not saved in the hands
+                Survival.FinishFilterAfterLoad(State);   // the night passed: the water filter is done
                 ResetRuntimeState();
                 InGame = true;
                 if (State.challengesToday.Count == 0) Challenges.RollForDay(State);
@@ -239,17 +277,23 @@ namespace Sealebrities
             }
         }
 
-        /// Writes the save (compact JSON, atomically through a temp file so a crash mid-write never corrupts it).
-        /// Skipped on co-op clients (they play in the host's world) and in automated runs.
+        /// Writes the save into the active slot (compact JSON, atomically through a temp file so a crash mid-write never
+        /// corrupts it). Skipped on co-op clients (only the host saves – into the host's slot, with every guest's
+        /// PlayerRecord), in automated runs and for worlds without a slot.
         public void Save()
         {
             if (!InGame || SavingDisabled || Net.IsClient) return;
+            string path = SavePath;
+            if (string.IsNullOrEmpty(path)) return;
             try
             {
                 State.language = Loc.Current;
+                State.lastPlayedUtc = DateTime.UtcNow.Ticks;
                 PlayerRecords.Store(PlayerRecords.CaptureLocal());   // F.3: the host's own record next to the guests'
                 string json = JsonUtility.ToJson(State);
-                string path = SavePath, tmp = path + ".tmp";
+                string tmp = path + ".tmp";
+                string dir = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
                 File.WriteAllText(tmp, json);
                 if (!File.Exists(path)) File.Move(tmp, path);
                 else
@@ -262,13 +306,16 @@ namespace Sealebrities
                         File.Delete(tmp);
                     }
                 }
+                SaveSlots.NotifyChanged(SaveSlots.Active);
             }
             catch (Exception e) { Debug.LogWarning("Sealebrities: could not save: " + e.Message); }
         }
 
+        /// Deletes the running world's slot (permadeath): save file + its photos.
         public void DeleteSave()
         {
-            try { if (HasSave) File.Delete(SavePath); } catch (Exception) { }
+            if (SavingDisabled || Net.IsClient || !SaveSlots.Valid(SaveSlots.Active)) return;
+            try { SaveSlots.Delete(SaveSlots.Active); } catch (Exception) { }
         }
 
         public void ReturnToMenu()
@@ -298,10 +345,12 @@ namespace Sealebrities
         /// First start of this version: take language and mouse sensitivity from the old save.
         void MigrateLegacySettings()
         {
-            if (!HasSave) return;
+            string path = SaveSlots.LegacyPath;
+            if (!File.Exists(path)) path = SaveSlots.Exists(SaveSlots.ContinueSlot) ? SaveSlots.FileOf(SaveSlots.ContinueSlot) : null;
+            if (path == null) return;
             try
             {
-                var old = JsonUtility.FromJson<LegacySettings>(File.ReadAllText(SavePath));
+                var old = JsonUtility.FromJson<LegacySettings>(File.ReadAllText(path));
                 if (old == null) return;
                 Settings.Data.language = old.language;
                 if (old.mouseSensitivity > 0.05f) Settings.Data.mouseSensitivity = old.mouseSensitivity;
@@ -326,12 +375,18 @@ namespace Sealebrities
         {
             if (snapshot == null) return;
             snapshot.EnsureValid();
-            // from the menu: the guest's own hotbar and equipment choice of its last co-op session (coop_player.json)
-            snapshot.CopyPerPlayerFrom(InGame ? State : LoadCoopPlayer());
+            // from the menu: the guest's own hotbar and equipment choice of its last session in THIS host world
+            // (coop/w{seed}/coop_player.json – per world, GDD §19b)
+            snapshot.CopyPerPlayerFrom(InGame ? State : LoadCoopPlayer(snapshot.saveSeed));
             snapshot.activeRight = -1;
             snapshot.activeLeft = -1;
+            snapshot.activeMain = -1;
+            snapshot.activeOff = -1;
+            snapshot.EnsurePerPlayer();   // round 3: a first-time guest gets the starter backpack
             snapshot.diveFootage.Clear();
             snapshot.carried = null;
+            // the host's world is none of this PC's save slots: nothing of it can ever be written into one
+            SaveSlots.SetActive(0);
             State = snapshot;
             GearDatabase.GiveStartingGear(State);
             ResetRuntimeState();
@@ -429,39 +484,57 @@ namespace Sealebrities
         public string SnapshotJson() => JsonUtility.ToJson(State);
 
         // ------------------------------------------------------------------ co-op guest: own per-player fields
-        /// A guest never saves (the host owns the save). Its hotbar layout and equipment choice are kept per machine in
-        /// coop_player.json so they survive leaving and re-joining (the gallery has its own per-machine index).
+        /// A guest never saves (the host owns the save). Its hotbar layout and equipment choice are kept per HOST WORLD in
+        /// coop/w{saveSeed}/coop_player.json so they survive leaving and re-joining that world (round 3 step 6b: nothing
+        /// carries over into another world; the photos of that world lie next to it in coop/w{saveSeed}/gallery).
         [Serializable]
         class CoopPlayerFile
         {
             public string[] hotbarRight;
             public string[] hotbarLeft;
             public List<string> equipped = new List<string>();
+            // round 3: one hotbar, backpack, survival meters
+            public string[] hotbar;
+            public int hotbarOffMask = GameState.DefaultOffMask;
+            public List<InvStack> backpack = new List<InvStack>();
+            public List<InvStack> pouch = new List<InvStack>();
+            public bool backpackInit;
+            public float hunger = 100f, thirst = 100f;
         }
 
-        static string CoopPlayerPath => Path.Combine(Application.persistentDataPath, "coop_player.json");
+        static string CoopPlayerPath(int seed) => Path.Combine(SaveSlots.GuestFolder(seed), "coop_player.json");
         int coopPlayerHash;
         float coopPlayerTimer;
 
-        GameState LoadCoopPlayer()
+        GameState LoadCoopPlayer(int seed)
         {
             var st = new GameState();
             if (AutomatedRun) return st;    // tests expect the default hotbar
             try
             {
-                if (File.Exists(CoopPlayerPath))
+                string path = CoopPlayerPath(seed);
+                if (File.Exists(path))
                 {
-                    var f = JsonUtility.FromJson<CoopPlayerFile>(File.ReadAllText(CoopPlayerPath));
+                    var f = JsonUtility.FromJson<CoopPlayerFile>(File.ReadAllText(path));
                     if (f != null)
                     {
                         if (f.hotbarRight != null) st.hotbarRight = f.hotbarRight;
                         if (f.hotbarLeft != null) st.hotbarLeft = f.hotbarLeft;
                         if (f.equipped != null) st.equipped = f.equipped;
+                        if (f.hotbar != null && f.hotbar.Length == Hands.SlotCount) { st.hotbar = f.hotbar; st.hotbarOffMask = f.hotbarOffMask; }
+                        if (f.backpackInit)
+                        {
+                            st.backpack = f.backpack ?? new List<InvStack>();
+                            st.pouch = f.pouch ?? new List<InvStack>();
+                            st.backpackInit = true;
+                            st.hunger = f.hunger;
+                            st.thirst = f.thirst;
+                        }
                     }
                 }
             }
             catch (Exception e) { Debug.LogWarning("Sealebrities: coop_player.json could not be read: " + e.Message); }
-            st.EnsureHotbar();
+            st.EnsureValid();
             coopPlayerHash = CoopPlayerHash(st);
             return st;
         }
@@ -471,9 +544,17 @@ namespace Sealebrities
             unchecked
             {
                 int h = 17;
-                if (s.hotbarRight != null) for (int i = 0; i < s.hotbarRight.Length; i++) h = h * 31 + (s.hotbarRight[i] != null ? s.hotbarRight[i].GetHashCode() : 0);
-                if (s.hotbarLeft != null) for (int i = 0; i < s.hotbarLeft.Length; i++) h = h * 31 + (s.hotbarLeft[i] != null ? s.hotbarLeft[i].GetHashCode() : 0);
+                if (s.hotbar != null) for (int i = 0; i < s.hotbar.Length; i++) h = h * 31 + (s.hotbar[i] != null ? s.hotbar[i].GetHashCode() : 0);
+                h = h * 31 + s.hotbarOffMask;
                 if (s.equipped != null) for (int i = 0; i < s.equipped.Count; i++) h = h * 31 + (s.equipped[i] != null ? s.equipped[i].GetHashCode() : 0);
+                if (s.backpack != null)
+                    for (int i = 0; i < s.backpack.Count; i++)
+                    {
+                        var st = s.backpack[i];
+                        h = h * 31 + (st != null && st.id != null ? st.id.GetHashCode() * 7 + st.count * 131 + Mathf.RoundToInt(st.durability) * 17 + Mathf.RoundToInt(st.sharpness * 100f) : 0);
+                    }
+                if (s.pouch != null) for (int i = 0; i < s.pouch.Count; i++) h = h * 31 + (s.pouch[i] != null ? s.pouch[i].count : 0);
+                h = h * 31 + Mathf.RoundToInt(s.hunger * 0.2f) * 101 + Mathf.RoundToInt(s.thirst * 0.2f);
                 return h;
             }
         }
@@ -487,8 +568,15 @@ namespace Sealebrities
             coopPlayerHash = h;
             try
             {
-                var f = new CoopPlayerFile { hotbarRight = State.hotbarRight, hotbarLeft = State.hotbarLeft, equipped = State.equipped };
-                File.WriteAllText(CoopPlayerPath, JsonUtility.ToJson(f));
+                var f = new CoopPlayerFile
+                {
+                    hotbarRight = State.hotbarRight, hotbarLeft = State.hotbarLeft, equipped = State.equipped,
+                    hotbar = State.hotbar, hotbarOffMask = State.hotbarOffMask, backpack = State.backpack, pouch = State.pouch,
+                    backpackInit = State.backpackInit, hunger = State.hunger, thirst = State.thirst,
+                };
+                string path = CoopPlayerPath(State.saveSeed);
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllText(path, JsonUtility.ToJson(f));
             }
             catch (Exception e) { Debug.LogWarning("Sealebrities: coop_player.json could not be written: " + e.Message); }
         }
@@ -564,7 +652,11 @@ namespace Sealebrities
             Journal.TickSightings(Time.unscaledDeltaTime);
             SleepVote.Tick(Time.unscaledDeltaTime);
             if (UIState.PauseOpen && !Net.IsOnline) return;   // offline the pause menu stops the clock; online the world runs on
+            // round 3 step 6b: play time of this world (slot card); the host counts, guests get it with the snapshot
+            if (!Net.IsClient) State.playSeconds += Mathf.Min(Time.unscaledDeltaTime, 1f);
             Buffs.Tick(Time.deltaTime);
+            Survival.Tick(Time.deltaTime);
+            Combat.Tick(Time.deltaTime);
             PlayerRecords.Tick(Time.deltaTime);
             State.timeOfDay += Time.deltaTime / DayLengthSeconds;
             if (State.timeOfDay >= 1f)

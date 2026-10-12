@@ -15,6 +15,8 @@ namespace Sealebrities
 
         public static void Install(Transform root)
         {
+            // round 3: Sealog icons of the curiosities / memes come from their own models
+            CreatureIcons.CustomModel = SeaMemeActor.IconModel;
             if (Spawner != null)
             {
                 Refs.Spawner = Spawner;
@@ -31,6 +33,10 @@ namespace Sealebrities
             go.AddComponent<CreatureSwarm>();
             go.AddComponent<LandAmbient>();
             go.AddComponent<FaunaBowRiders>();
+            // round 3 (Testversion 5): shark attacks + hit command + weather, the volcano monster, open-water bait clouds
+            go.AddComponent<FaunaThreat>();
+            go.AddComponent<FaunaVolcano>();
+            go.AddComponent<FaunaAmbientSchools>();
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

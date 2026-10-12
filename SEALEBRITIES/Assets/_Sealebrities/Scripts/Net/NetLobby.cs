@@ -9,10 +9,12 @@ namespace Sealebrities
     /// "Mit Freunden" screens (Net.OpenLobby): the profile card (1c: live 3D thumbnail of your bean diver, your name and
     /// „Charakter anpassen“ → the character screen), then the clear first choice "Über Steam (empfohlen)" when Steam
     /// runs (host a Steam lobby + friends who host right now, NetLobbySteam.cs) and "Per IP / Heimnetz" second: Spiel
-    /// hosten (continue / new game with 3 difficulty cards, port, own addresses + internet hint), Beitreten (IP[:port] +
+    /// hosten (round 3 step 6b: pick WHICH of the four save slots to host – a used slot continues that world, an empty
+    /// one starts a new world there with 3 difficulty cards; port, own addresses + internet hint), Beitreten (IP[:port] +
     /// LAN list), connecting state, notices (session ended, errors).
-    /// In game: the Steam invite card while the pause menu is open in a Steam session ("Freunde einladen"), the
-    /// (disabled) co-op card and the F3 diagnostics overlay. Built into the UI module's document as its own layer.
+    /// In game: the Steam invite card while the pause menu is open in a Steam session ("Freunde einladen" – only the
+    /// HOST, the creator of the world, can invite), the (disabled) co-op card and the F3 diagnostics overlay. Built into
+    /// the UI module's document as its own layer.
     public static partial class NetLobby
     {
         enum Page { Home, Host, Join, Connecting, SteamHost }
@@ -37,7 +39,8 @@ namespace Sealebrities
         static NetLanListener lan;
         static Page page;
         static bool open, dirty, installed, profileDirty;
-        static bool hostContinue = true;
+        /// The save slot the host pages host (1..4): used = continue that world, empty = a new world there.
+        static int hostSlot = 1;
         static Difficulty hostDifficulty = Difficulty.OpenWater;
         static string portText = "27015", joinText = "";
         static float dotsTimer, coopRefresh, overlayRefresh;
@@ -51,7 +54,7 @@ namespace Sealebrities
             layer = null; lobby = null; body = null; lanBox = null; notice = null; coopCard = null;
             statusLabel = null; connectingLabel = null; overlay = null; lan = null;
             page = Page.Home; open = false; dirty = false; installed = false; profileDirty = false;
-            hostContinue = true; hostDifficulty = Difficulty.OpenWater; portText = "27015"; joinText = "";
+            hostSlot = 1; hostDifficulty = Difficulty.OpenWater; portText = "27015"; joinText = "";
             dotsTimer = 0f; coopRefresh = 0f; overlayRefresh = 0f; dots = 0;
             lobbyPreview = null; characterFromLobby = false; characterOpenedAt = 0f;
         }
@@ -178,9 +181,86 @@ namespace Sealebrities
             {
                 try { joinText = PlayerPrefs.GetString(LastJoinKey, ""); } catch (Exception) { joinText = ""; }
             }
-            hostContinue = GameManager.HasSave;
+            hostSlot = DefaultHostSlot();
             StartLan();
             Build();
+        }
+
+        /// The slot played last, else the first empty one (a damaged slot is never preselected).
+        static int DefaultHostSlot()
+        {
+            int s = SaveSlots.ContinueSlot;
+            if (SaveSlots.Valid(s) && !SaveSlots.Info(s).broken) return s;
+            int free = SaveSlots.FirstFree();
+            if (free > 0) return free;
+            for (int i = 1; i <= SaveSlots.Count; i++) if (!SaveSlots.Info(i).broken) return i;
+            return 1;
+        }
+
+        /// The selected host slot holds a world (→ continue it) – else a new world starts in it.
+        static bool HostSlotUsed => SaveSlots.Exists(hostSlot);
+
+        /// Host pages: „Welche Welt?“ – the four save slots as small tiles (used: day, followers, play time,
+        /// achievements; empty: „+ Neue Welt“). The selected one is hosted.
+        static void BuildHostSlotPicker()
+        {
+            if (!SaveSlots.Valid(hostSlot) || SaveSlots.Info(hostSlot).broken) hostSlot = DefaultHostSlot();
+            body.Add(NetLobbyStyle.Text(Loc.Tr("Welche Welt hostest du?", "Which world do you host?"), 20f, NetLobbyStyle.Ink, true));
+            body.Add(NetLobbyStyle.Gap(8f));
+            var row = NetLobbyStyle.Row();
+            row.style.alignItems = Align.Stretch;
+            for (int i = 1; i <= SaveSlots.Count; i++)
+            {
+                if (i > 1) row.Add(NetLobbyStyle.Gap(10f, true));
+                row.Add(HostSlotTile(i));
+            }
+            body.Add(row);
+            body.Add(NetLobbyStyle.Gap(16f));
+        }
+
+        static VisualElement HostSlotTile(int slot)
+        {
+            var info = SaveSlots.Info(slot);
+            bool sel = slot == hostSlot;
+            var t = NetLobbyStyle.Col();
+            t.name = "sb-host-slot";
+            t.style.flexGrow = 1;
+            t.style.flexBasis = 0;
+            t.style.minHeight = 100f;
+            NetLobbyStyle.Radius(t, 16f);
+            NetLobbyStyle.Pad(t, 10f, 12f);
+            NetLobbyStyle.Border(t, sel ? 3f : 0f, sel ? NetLobbyStyle.TurquoiseDark : Color.clear);
+            Color bg = sel ? NetLobbyStyle.Lighten(NetLobbyStyle.Turquoise, 0.72f) : new Color(1f, 1f, 1f, 0.75f);
+            NetLobbyStyle.Clickable(t, () =>
+            {
+                if (SaveSlots.Info(slot).broken) return;
+                hostSlot = slot;
+                dirty = true;
+            }, bg, sel ? bg : NetLobbyStyle.White);
+
+            var top = NetLobbyStyle.Row();
+            top.pickingMode = PickingMode.Ignore;
+            top.Add(NetLobbyStyle.Chip("#" + slot, sel ? NetLobbyStyle.TurquoiseDark : NetLobbyStyle.Ink, NetLobbyStyle.White, 14f));
+            top.Add(NetLobbyStyle.Flex());
+            if (info.used && !info.broken) top.Add(NetLobbyStyle.Text(Loc.DifficultyName(info.difficulty), 14f, NetLobbyStyle.Muted, true));
+            t.Add(top);
+            t.Add(NetLobbyStyle.Gap(6f));
+            if (info.broken)
+            {
+                t.Add(NetLobbyStyle.Text(Loc.Tr("Defekt", "Damaged"), 20f, NetLobbyStyle.Danger, true));
+            }
+            else if (info.used)
+            {
+                t.Add(NetLobbyStyle.Text(Loc.Tr("Tag ", "Day ") + info.day, 22f, NetLobbyStyle.Ink, true));
+                t.Add(NetLobbyStyle.Text(Loc.Number(info.followers) + " Follower", 15f, NetLobbyStyle.Muted));
+                t.Add(NetLobbyStyle.Text(SaveSlots.FormatPlayTime(info.playSeconds) + " · " + info.achievements + "/" + Achievements.Total + " " + Loc.Tr("Erfolge", "achievements"), 14f, NetLobbyStyle.Muted));
+            }
+            else
+            {
+                t.Add(NetLobbyStyle.Text("+ " + Loc.Tr("Neue Welt", "New world"), 20f, NetLobbyStyle.TurquoiseDark, true));
+                t.Add(NetLobbyStyle.Text(Loc.Tr("leer", "empty"), 15f, NetLobbyStyle.Muted));
+            }
+            return t;
         }
 
         /// Opens the lobby directly on the "connecting" page (command line -join).
@@ -655,35 +735,8 @@ namespace Sealebrities
         // ------------------------------------------------------------------ host page
         static void BuildHost()
         {
-            bool hasSave = GameManager.HasSave;
-            if (hasSave)
-            {
-                var seg = NetLobbyStyle.Row();
-                seg.Add(Segment(Loc.Tr("Spielstand fortsetzen", "Continue my save"), hostContinue, () => { hostContinue = true; dirty = true; }));
-                seg.Add(NetLobbyStyle.Gap(10f, true));
-                seg.Add(Segment(Loc.Tr("Neues Spiel", "New game"), !hostContinue, () => { hostContinue = false; dirty = true; }));
-                body.Add(seg);
-                body.Add(NetLobbyStyle.Gap(16f));
-            }
-            if (!hasSave || !hostContinue)
-            {
-                var cards = NetLobbyStyle.Row();
-                cards.style.alignItems = Align.Stretch;
-                var sel = DifficultySettings.Selectable;
-                for (int i = 0; i < sel.Length; i++)
-                {
-                    if (i > 0) cards.Add(NetLobbyStyle.Gap(14f, true));
-                    cards.Add(DifficultyCard(sel[i]));
-                }
-                body.Add(cards);
-                if (hasSave)
-                {
-                    var warn = NetLobbyStyle.Text(Loc.Tr("Achtung: Ein neues Spiel überschreibt deinen Spielstand.", "Warning: a new game overwrites your save."), 17f, NetLobbyStyle.Danger, true);
-                    warn.style.marginTop = 10f;
-                    body.Add(warn);
-                }
-                body.Add(NetLobbyStyle.Gap(16f));
-            }
+            BuildHostSlotPicker();
+            BuildHostDifficulty();
 
             var info = NetLobbyStyle.Col();
             info.style.backgroundColor = new Color(1f, 1f, 1f, 0.75f);
@@ -734,22 +787,27 @@ namespace Sealebrities
             body.Add(NetLobbyStyle.Gap(18f));
             var row = NetLobbyStyle.Row();
             row.Add(NetLobbyStyle.Flex());
-            var start = NetLobbyStyle.Primary(hasSave && hostContinue ? Loc.Tr("Weiterspielen & hosten", "Continue & host") : Loc.Tr("Spiel starten", "Start game"), OnHostStart, 24f);
+            var start = NetLobbyStyle.Primary(HostSlotUsed ? Loc.Tr("Weiterspielen & hosten", "Continue & host") : Loc.Tr("Neue Welt & hosten", "New world & host"), OnHostStart, 24f);
             start.style.minWidth = 300f;
             NetLobbyStyle.Pad(start, 14f, 30f);
             row.Add(start);
             body.Add(row);
         }
 
-        static VisualElement Segment(string text, bool selected, Action onClick)
+        /// An empty host slot: the 3 difficulty cards of the new world.
+        static void BuildHostDifficulty()
         {
-            var s = NetLobbyStyle.Text(text, 19f, selected ? NetLobbyStyle.White : NetLobbyStyle.Ink, true);
-            NetLobbyStyle.Radius(s, 14f);
-            NetLobbyStyle.Pad(s, 10f, 20f);
-            s.style.unityTextAlign = TextAnchor.MiddleCenter;
-            NetLobbyStyle.Clickable(s, onClick, selected ? NetLobbyStyle.TurquoiseDark : new Color(1f, 1f, 1f, 0.75f),
-                                    selected ? NetLobbyStyle.TurquoiseDark : NetLobbyStyle.White);
-            return s;
+            if (HostSlotUsed) return;
+            var cards = NetLobbyStyle.Row();
+            cards.style.alignItems = Align.Stretch;
+            var sel = DifficultySettings.Selectable;
+            for (int i = 0; i < sel.Length; i++)
+            {
+                if (i > 0) cards.Add(NetLobbyStyle.Gap(14f, true));
+                cards.Add(DifficultyCard(sel[i]));
+            }
+            body.Add(cards);
+            body.Add(NetLobbyStyle.Gap(16f));
         }
 
         static VisualElement DifficultyCard(Difficulty d)
@@ -794,21 +852,30 @@ namespace Sealebrities
                 NetSession.ReportStatus(err, true);
                 return;
             }
-            bool cont = hostContinue && GameManager.HasSave;
+            int slot = hostSlot;
+            bool cont = SaveSlots.Exists(slot);
             var diff = hostDifficulty;
             Close();
-            StartHostedGame(cont, diff);
+            StartHostedGame(slot, cont, diff);
         }
 
-        /// Host: enters the world after StartHost (shared by the lobby and the -host command line).
-        public static void StartHostedGame(bool continueSave, Difficulty difficulty)
+        /// Host (-host command line): continue the last played slot, or a new world in the first free slot (no slot
+        /// when saving is suppressed).
+        public static void StartHostedGame(bool continueSave, Difficulty difficulty) =>
+            StartHostedGame(continueSave ? SaveSlots.ContinueSlot : 0, continueSave, difficulty);
+
+        /// Host: enters the world after StartHost / StartSteamHost – continues save slot `slot` or starts a new world in
+        /// it (slot 0 + new = GameManager picks: first free slot, none when saving is off). Only the host saves – into
+        /// this slot, with every guest's PlayerRecord.
+        public static void StartHostedGame(int slot, bool continueSave, Difficulty difficulty)
         {
             Fader.FadeThrough(() =>
             {
                 var gm = GameManager.I;
                 if (gm == null) return;
                 bool ok = true;
-                if (continueSave) ok = gm.LoadGame();
+                if (continueSave) ok = gm.LoadSlot(slot);
+                else if (SaveSlots.Valid(slot)) gm.NewGame(difficulty, slot);
                 else gm.NewGame(difficulty);
                 if (!ok)
                 {
@@ -1140,5 +1207,29 @@ namespace Sealebrities
         }
 
         static bool ColorClose(Color a, Color b) => Mathf.Abs(a.r - b.r) + Mathf.Abs(a.g - b.g) + Mathf.Abs(a.b - b.b) < 0.06f;
+
+        // ------------------------------------------------------------------ test hooks (AutoPlaytest / AutoShot)
+        /// Opens the lobby on the IP host page (steam = the Steam host page) – main menu only.
+        public static bool DebugOpenHostPage(bool steam)
+        {
+            if (!open) Open();
+            if (!open) return false;
+            page = steam ? Page.SteamHost : Page.Host;
+            Build();
+            return true;
+        }
+
+        /// Selects a save slot on the host pages (as a click on its tile).
+        public static void DebugSelectHostSlot(int slot)
+        {
+            hostSlot = slot;
+            if (open) Build();
+        }
+
+        public static int DebugHostSlot => hostSlot;
+        public static bool DebugHostContinues => HostSlotUsed;
+
+        /// Slot tiles on the open host page.
+        public static int DebugHostSlotTiles => lobby != null ? lobby.Query<VisualElement>("sb-host-slot").ToList().Count : 0;
     }
 }

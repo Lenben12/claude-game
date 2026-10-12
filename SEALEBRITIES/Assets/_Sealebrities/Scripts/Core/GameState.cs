@@ -139,7 +139,15 @@ namespace Sealebrities
         public string key;
         public string name;
         public DiverLook look;
+        /// Legacy 3 + 3 hotbar (records of round-2 saves; migrated on ApplyToLocal).
         public string[] hotbarRight, hotbarLeft;
+        // ---- round 3 (v5): per-player hotbar, backpack, survival
+        public string[] hotbar;
+        public int hotbarOffMask;
+        public List<InvStack> backpack = new List<InvStack>();
+        public List<InvStack> pouch = new List<InvStack>();
+        public bool backpackInit;
+        public float hunger = 100f, thirst = 100f;
         public List<string> equipped = new List<string>();
         public List<string> achievements = new List<string>();
         public int fishCaught, speciesFilmed, rescues, dives, faints;
@@ -219,8 +227,15 @@ namespace Sealebrities
     [Serializable]
     public class GameState
     {
-        /// 4 = round 2b (K/L). v2 saves are migrated in EnsureValid (boat compressor gift, Sealog counters).
-        public const int CurrentVersion = 4;
+        /// 4 = round 2b (K/L). 5 = round 3 (backpack, one 8-slot hotbar, hunger / thirst, campfires, map pieces).
+        /// 6 = round 3 hut furnishing (GameState.hut). 7 = round 3 hermits (GameState.hermits). 8 = round 3 shared
+        /// treasure-map pins (GameState.mapPins). 9 = round 3 save slots (GDD §19b): play time + last played of the
+        /// world (playSeconds, lastPlayedUtc); achievements count per world only (GameState.achievements – no longer
+        /// mixed with a per-PC list).
+        /// Older saves are migrated in EnsureValid (boat compressor gift, Sealog counters, 3 + 3 hotbar → 8 slots,
+        /// starter backpack + the finder's copies of the collectibles, standard hut furnishing, no hermit met yet,
+        /// no map pins, play time from the host's own record).
+        public const int CurrentVersion = 9;
 
         public int version = CurrentVersion;
         /// Random per new game (never 0). Use SeededRandom(salt) for per-save randomness (bottle spot …).
@@ -293,13 +308,44 @@ namespace Sealebrities
         public string dealOfDayItem;                                       // L.12 "Angebot des Tages" (−20 %), rolled by the host each day
         public int giftedCompressorVersion;                                // E.4 migration done
 
+        // ---- round 3 (v5, shared)
+        /// Campfires lit at the fixed campfire spots (Survival).
+        public List<CampfireState> campfires = new List<CampfireState>();
+        /// v6: the hut's furnishing (wall paint, floor, rug, curtains, bought / placed decor) – HutDecor.
+        public HutDecorState hut = new HutDecorState();
+        /// v7: the hermits of the jungle camp (mood, respect, today's signs / gifts / trades) – Hermits.
+        public List<HermitState> hermits = new List<HermitState>();
+        /// v8: shared co-op pins on the treasure map (GDD §20 Q31) – MapPins.
+        public List<MapPin> mapPins = new List<MapPin>();
+        /// v9 (save slots, GDD §19b): real seconds played in THIS world (host / single player; the slot card shows it).
+        public double playSeconds;
+        /// v9: DateTime.UtcNow.Ticks of the last save (slot card „zuletzt gespielt“; 0 = unknown → file time).
+        public long lastPlayedUtc;
+
         // ---- PER PLAYER: equipment choice, hotbar, gallery
         /// Chosen item per gear slot (item ids). Missing slot → best owned item (GearDatabase.Equipped).
         public List<string> equipped = new List<string>();
+        /// LEGACY 3 + 3 hotbar (saves before v5) – only read by EnsureHotbar's migration.
         public string[] hotbarRight = { "Camera", "FishingRod", "None" };
         public string[] hotbarLeft = { "Flashlight", "None", "None" };
-        public int activeRight = -1;    // -1 = empty hand
+        public int activeRight = -1;
         public int activeLeft = -1;
+        /// Round 3: one hotbar of Hands.SlotCount item ids ("None" = empty) – null until EnsureHotbar migrated/created it.
+        public string[] hotbar;
+        /// Bit i set = slot i goes into the OFFHAND (else the main hand).
+        public int hotbarOffMask = DefaultOffMask;
+        /// Held slot of the main hand / offhand (−1 = empty hand).
+        public int activeMain = -1;
+        public int activeOff = -1;
+        /// Round 3 backpack (Backpack) and the collectible pouch (collectibles + map pieces, no slot limit).
+        public List<InvStack> backpack = new List<InvStack>();
+        public List<InvStack> pouch = new List<InvStack>();
+        /// Starter items were given (stick, bottle).
+        public bool backpackInit;
+        /// Survival meters 0..100 (100 = full / not thirsty).
+        public float hunger = 100f, thirst = 100f;
+        /// Seawater bottles in the hut's water filter.
+        public List<FilterJob> filterJobs = new List<FilterJob>();
         public List<PhotoEntry> photos = new List<PhotoEntry>();
         /// PER PLAYER: carried quest item / salvage id (null = none) – Carry.
         public string carried;
@@ -358,6 +404,28 @@ namespace Sealebrities
             if (sponsor.cooldowns == null) sponsor.cooldowns = new List<SponsorCooldown>();
             if (sponsor.done == null) sponsor.done = new List<string>();
             if (sideQuests == null) sideQuests = new List<QuestState>();
+            // round 3
+            if (campfires == null) campfires = new List<CampfireState>();
+            for (int i = campfires.Count - 1; i >= 0; i--) if (campfires[i] == null || string.IsNullOrEmpty(campfires[i].id) || float.IsNaN(campfires[i].until)) campfires.RemoveAt(i);
+            if (backpack == null) backpack = new List<InvStack>();
+            if (pouch == null) pouch = new List<InvStack>();
+            if (filterJobs == null) filterJobs = new List<FilterJob>();
+            for (int i = filterJobs.Count - 1; i >= 0; i--) if (filterJobs[i] == null || filterJobs[i].count <= 0 || float.IsNaN(filterJobs[i].readyAt)) filterJobs.RemoveAt(i);
+            Backpack.Normalize(backpack);
+            Backpack.Normalize(pouch);
+            if (hut == null || version < 6) hut = HutDecor.Default();   // v6: saves before the furnishing get the standard hut
+            HutDecor.Normalize(hut);
+            if (hermits == null) hermits = new List<HermitState>();   // v7: saves before the hermits – nobody met yet
+            Hermits.Normalize(hermits);
+            if (mapPins == null) mapPins = new List<MapPin>();       // v8: saves before the map pins – none set
+            MapPins.Normalize(mapPins);
+            if (double.IsNaN(playSeconds) || double.IsInfinity(playSeconds) || playSeconds < 0.0) playSeconds = 0.0;   // v9
+            if (lastPlayedUtc < 0) lastPlayedUtc = 0;
+            // achievements of this world: no empty ids, no duplicates
+            for (int i = achievements.Count - 1; i >= 0; i--)
+                if (string.IsNullOrEmpty(achievements[i]) || achievements.IndexOf(achievements[i]) != i) achievements.RemoveAt(i);
+            hunger =float.IsNaN(hunger) || float.IsInfinity(hunger) ? Survival.Max : Mathf.Clamp(hunger, 0f, Survival.Max);
+            thirst = float.IsNaN(thirst) || float.IsInfinity(thirst) ? Survival.Max : Mathf.Clamp(thirst, 0f, Survival.Max);
             for (int i = journal.Count - 1; i >= 0; i--) if (journal[i] == null || string.IsNullOrEmpty(journal[i].speciesId)) journal.RemoveAt(i);
             for (int i = players.Count - 1; i >= 0; i--)
             {
@@ -372,6 +440,19 @@ namespace Sealebrities
             if (followers < 0) followers = 0;
             if (version < CurrentVersion) Migrate(version);
             version = CurrentVersion;
+            EnsurePerPlayer();
+        }
+
+        /// Round 3: the per-player starter kit (stick + bottle) for a player that never had a backpack (new game, old
+        /// save, first co-op join). Safe to call again.
+        public void EnsurePerPlayer()
+        {
+            EnsureHotbar();
+            if (backpack == null) backpack = new List<InvStack>();
+            if (pouch == null) pouch = new List<InvStack>();
+            if (backpackInit) return;
+            backpackInit = true;
+            Backpack.GiveStarterItems(this);
         }
 
         /// Old saves (v2 = Testversion 3). Snapshots from a host always carry the current version.
@@ -402,25 +483,99 @@ namespace Sealebrities
                 }
                 for (int i = 0; i < deliveries.Count; i++) if (deliveries[i] != null) { deliveries[i].mishap = 0; deliveries[i].dropZone = -1; }
             }
+            if (from < 5)
+            {
+                // round 3: the finder's copies of the channel's collectibles go into the pouch (old saves had no backpack)
+                if (pouch == null) pouch = new List<InvStack>();
+                for (int i = 0; i < collected.Count; i++)
+                {
+                    string id = collected[i];
+                    if (string.IsNullOrEmpty(id)) continue;
+                    string item = null;
+                    if (id.StartsWith("shell:", StringComparison.Ordinal)) item = ItemIds.Shell;
+                    else if (id.StartsWith("log:", StringComparison.Ordinal)) item = ItemIds.Page;
+                    else if (id.StartsWith("bottle:", StringComparison.Ordinal)) item = ItemIds.Message;
+                    else if (id.StartsWith("treasure:", StringComparison.Ordinal)) item = ItemIds.Treasure;
+                    if (item == null) continue;
+                    InvStack st = null;
+                    for (int k = 0; k < pouch.Count; k++) if (pouch[k] != null && pouch[k].id == item) { st = pouch[k]; break; }
+                    if (st == null) pouch.Add(st = new InvStack { id = item, count = 0 });
+                    st.count = Mathf.Min(99, st.count + 1);
+                }
+            }
+            if (from < 9)
+            {
+                // save slots (GDD §19b): the world's play time was only counted in the host's own record
+                float mins = localRecord != null ? localRecord.playMinutes : 0f;
+                if (playSeconds <= 0.0 && mins > 0f && !float.IsNaN(mins) && !float.IsInfinity(mins)) playSeconds = mins * 60.0;
+                // the world's achievements are the host's own – nothing pops up again after loading
+                if (localRecord != null)
+                {
+                    if (localRecord.achievements == null) localRecord.achievements = new List<string>();
+                    for (int i = 0; i < achievements.Count; i++)
+                        if (!localRecord.achievements.Contains(achievements[i])) localRecord.achievements.Add(achievements[i]);
+                }
+            }
+        }
+
+        /// Default round-3 hotbar: camera, rod, stick (main hand, keys 1–3), lamp on 4 (offhand), 5–8 free.
+        public static string[] DefaultHotbar() => new[]
+        {
+            ItemIds.Camera, ItemIds.FishingRod, ItemIds.Stick, ItemIds.Flashlight, ItemIds.None, ItemIds.None, ItemIds.None, ItemIds.None
+        };
+
+        /// Slots 4–6 belong to the offhand by default (they were the left hand's 1–3 in the old 3 + 3 hotbar).
+        public const int DefaultOffMask = (1 << 3) | (1 << 4) | (1 << 5);
+
+        /// Old 3 + 3 hotbar → one 8-slot row: right 1–3 = slots 1–3 (main), left 1–3 = slots 4–6 (offhand). The new
+        /// stick takes the first free main-hand slot.
+        public static string[] MigrateLegacyHotbar(string[] right, string[] left)
+        {
+            var r = new string[Hands.SlotCount];
+            for (int i = 0; i < r.Length; i++) r[i] = ItemIds.None;
+            for (int i = 0; i < Hands.SlotsPerHand; i++)
+            {
+                r[i] = right != null && i < right.Length && !string.IsNullOrEmpty(right[i]) ? right[i] : (right == null ? DefaultHotbar()[i] : ItemIds.None);
+                r[Hands.SlotsPerHand + i] = left != null && i < left.Length && !string.IsNullOrEmpty(left[i]) ? left[i] : (left == null && i == 0 ? ItemIds.Flashlight : ItemIds.None);
+            }
+            bool hasStick = false;
+            for (int i = 0; i < r.Length; i++) if (r[i] == ItemIds.Stick) hasStick = true;
+            if (!hasStick)
+            {
+                int[] order = { 2, 1, 0, 6, 7 };
+                for (int k = 0; k < order.Length; k++) if (r[order[k]] == ItemIds.None) { r[order[k]] = ItemIds.Stick; break; }
+            }
+            return r;
         }
 
         public void EnsureHotbar()
         {
-            if (hotbarRight == null || hotbarRight.Length != Hands.SlotsPerHand) hotbarRight = Resize(hotbarRight, "Camera", "FishingRod", "None");
-            if (hotbarLeft == null || hotbarLeft.Length != Hands.SlotsPerHand) hotbarLeft = Resize(hotbarLeft, "Flashlight", "None", "None");
-            if (activeRight >= Hands.SlotsPerHand || activeRight < -1) activeRight = -1;
-            if (activeLeft >= Hands.SlotsPerHand || activeLeft < -1) activeLeft = -1;
+            if (hotbar == null || hotbar.Length != Hands.SlotCount)
+            {
+                if (hotbar != null && hotbar.Length > 0)
+                {
+                    var r = new string[Hands.SlotCount];
+                    for (int i = 0; i < r.Length; i++) r[i] = i < hotbar.Length ? hotbar[i] : ItemIds.None;
+                    hotbar = r;
+                }
+                else
+                {
+                    hotbar = MigrateLegacyHotbar(hotbarRight, hotbarLeft);
+                    hotbarOffMask = DefaultOffMask;
+                    activeMain = -1;
+                    activeOff = -1;
+                }
+            }
+            for (int i = 0; i < hotbar.Length; i++)
+                if (string.IsNullOrEmpty(hotbar[i]) || (hotbar[i] != ItemIds.None && ItemDatabase.Get(hotbar[i]) == null)) hotbar[i] = ItemIds.None;
+            hotbarOffMask &= (1 << Hands.SlotCount) - 1;
+            if (activeMain >= Hands.SlotCount || activeMain < -1) activeMain = -1;
+            if (activeOff >= Hands.SlotCount || activeOff < -1) activeOff = -1;
         }
 
-        static string[] Resize(string[] src, string a, string b, string c)
-        {
-            var r = new[] { a, b, c };
-            if (src != null) for (int i = 0; i < r.Length && i < src.Length; i++) r[i] = src[i] ?? "None";
-            return r;
-        }
-
-        /// Copies the per-player fields (hotbar, equipment choice, current dive footage, gallery, carried item, own
-        /// record, quest-line pin) from another state. Used when a host snapshot replaces the shared state on a client.
+        /// Copies the per-player fields (hotbar, backpack, survival meters, equipment choice, current dive footage,
+        /// gallery, carried item, own record, quest-line pin) from another state. Used when a host snapshot replaces the
+        /// shared state on a client.
         public void CopyPerPlayerFrom(GameState src)
         {
             if (src == null) return;
@@ -428,6 +583,16 @@ namespace Sealebrities
             hotbarLeft = src.hotbarLeft;
             activeRight = src.activeRight;
             activeLeft = src.activeLeft;
+            hotbar = src.hotbar;
+            hotbarOffMask = src.hotbarOffMask;
+            activeMain = src.activeMain;
+            activeOff = src.activeOff;
+            backpack = src.backpack ?? new List<InvStack>();
+            pouch = src.pouch ?? new List<InvStack>();
+            backpackInit = src.backpackInit;
+            hunger = src.hunger;
+            thirst = src.thirst;
+            filterJobs = src.filterJobs ?? new List<FilterJob>();
             equipped = src.equipped ?? new List<string>();
             diveFootage = src.diveFootage ?? new List<FootageClip>();
             photos = src.photos ?? new List<PhotoEntry>();
@@ -437,7 +602,9 @@ namespace Sealebrities
         }
     }
 
-    /// Sealog pages (L.1/L.2): site pages unlock the next dive site at 60 %; Hochsee and Insel unlock nothing.
+    /// Sealog pages (L.1/L.2): site pages unlock the next dive site at 60 %; Hochsee unlocks nothing.
+    /// Round 3 (Q23): the island animals are decoration now – the „Insel“ page is gone; new pages: the volcano island's
+    /// living fossils (Q14, hidden until VolcanoGate.Open) and the curiosities / memes (Q19).
     public static class SealogPages
     {
         public struct Page
@@ -457,7 +624,8 @@ namespace Sealebrities
             new Page { id = "deep_trench", nameDe = "Tiefseegraben", nameEn = "Deep Trench", site = true },
             new Page { id = "open_sea", nameDe = "Hochsee", nameEn = "Open Sea", site = false },
             new Page { id = "fog_isle", nameDe = "Nebelinsel", nameEn = "Fog Isle", site = true },
-            new Page { id = "island", nameDe = "Insel", nameEn = "Island", site = false },
+            new Page { id = "volcano_isle", nameDe = "Vulkaninsel", nameEn = "Volcano Isle", site = false },
+            new Page { id = "memes", nameDe = "Kuriositäten", nameEn = "Curiosities", site = false },
         };
 
         public static int IndexOf(string id)
@@ -504,7 +672,12 @@ namespace Sealebrities
                 if (GameManager.I == null) return 0;
                 var j = S.journal;
                 int n = 0;
-                for (int i = 0; i < j.Count; i++) if (j[i] != null && j[i].discovered && SpeciesDatabase.Get(j[i].speciesId) != null) n++;
+                for (int i = 0; i < j.Count; i++)
+                {
+                    if (j[i] == null || !j[i].discovered) continue;
+                    var sp = SpeciesDatabase.Get(j[i].speciesId);
+                    if (sp != null && sp.InSealog) n++;   // round 3: decoration animals (old island page) do not count
+                }
                 return n;
             }
         }
@@ -534,7 +707,7 @@ namespace Sealebrities
         /// SHARED STATE: on co-op clients this sends NetCommand.RegisterFilmed and applies the result optimistically.
         public static (bool isNew, bool isRecord) RegisterFilmed(SpeciesDef def, float sizeCm, SizeTier tier, float clipValue)
         {
-            if (def == null || GameManager.I == null) return (false, false);
+            if (def == null || GameManager.I == null || !def.InSealog) return (false, false);
             if (Net.IsClient)
             {
                 Net.Command(NetCommand.RegisterFilmed, def.id, sizeCm.ToString("R", Inv), ((int)tier).ToString(Inv), clipValue.ToString("R", Inv));
@@ -553,7 +726,8 @@ namespace Sealebrities
         /// zoneBit) and apply it optimistically.
         public static (bool isNew, bool isRecord) RegisterPhoto(SpeciesDef def, float sizeCm, SizeTier tier, float photoQuality, string photoId, float depth, int zoneBit = 0)
         {
-            if (def == null || GameManager.I == null) return (false, false);
+            // round 3 (Q23): decoration animals (island birds, crabs, lizards …) are no Sealog entries
+            if (def == null || GameManager.I == null || !def.InSealog) return (false, false);
             photoQuality = float.IsNaN(photoQuality) ? 0f : Mathf.Clamp01(photoQuality);
             if (float.IsNaN(depth) || float.IsInfinity(depth)) depth = 0f;
             if (Net.IsClient)

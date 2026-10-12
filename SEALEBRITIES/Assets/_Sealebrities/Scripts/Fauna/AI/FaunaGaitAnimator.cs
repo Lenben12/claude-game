@@ -54,6 +54,7 @@ namespace Sealebrities
             root = rootT;
             gait = ex != null ? ex.gait : CreatureGait.None;
             IsGulper = s != null && s.variant == "gulper";
+            HingedJaw = s != null && s.variant == "mosasaur";
             if (ex == null) return;
             seed = Random.Range(0f, 100f);
             walkPhase = Random.Range(0f, Mathf.PI * 2f);
@@ -392,6 +393,11 @@ namespace Sealebrities
                     jaw.localScale = jawScaleRest * m;
                     jaw.localRotation = Quaternion.AngleAxis(10f * action01, jawOpenAxis) * jawRest;
                 }
+                else if (HingedJaw)
+                {
+                    // round 3: the mosasaurus opens its jaws wide (no protrusion) – a slow "breathing" gape at rest
+                    jaw.localRotation = Quaternion.AngleAxis(34f * action01 + 2f * Mathf.Sin(idleT * 0.6f), jawOpenAxis) * jawRest;
+                }
                 else
                 {
                     jaw.localPosition = jawPosRest + jawFwd * (0.09f * action01);
@@ -402,6 +408,8 @@ namespace Sealebrities
 
         /// Gulper eels balloon their pouch (set once from the species in Setup through the caller).
         public bool IsGulper;
+        /// Round 3: a hinged jaw that only opens (mosasaurus).
+        public bool HingedJaw;
 
 
     }

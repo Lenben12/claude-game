@@ -48,6 +48,8 @@ namespace Sealebrities
         public float CameraDepth { get; private set; }
         /// The sky dome (null-safe: Valid is false when the fallback skybox is used).
         public WorldSkyDome Dome => dome;
+        /// The cumulus layer (round 3: weather-driven, drifting, coloured by the time of day).
+        public WorldClouds Clouds => clouds;
 
         static int IdBaseColor = -1, IdExposure, IdThickness, IdSkyTint, IdGround, IdSunSize, IdSunConv;
 
@@ -310,7 +312,13 @@ namespace Sealebrities
             Color fogLin = RenderSettings.fogColor.linear;
             // K.8: inside the Fog Isle's fog bank the sky disappears in the fog (a light haze once the map is known)
             float haze = FXFogBank.Thick01 * (FXFogBank.Map ? 0.45f : 0.92f);
-            if (dome != null) dome.Update(sunDir, elev, az, domeVis, fogLin, false, uw < 0.5f, warm, haze);
+            if (dome != null)
+            {
+                // far horizon cloud bands: as many / as grey as the day's cumulus, drifting with the same wind
+                if (clouds != null) dome.BandYaw = clouds.BandYaw;
+                dome.Update(sunDir, elev, az, domeVis, fogLin, false, uw < 0.5f, warm, haze,
+                            clouds != null ? clouds.Cover : 0.35f, clouds != null ? clouds.Grey : 0f);
+            }
 
             // ---- environment facts for FX / filming / fauna
             EnvState.SkyFogColor = dome != null ? dome.FogColor : new Color(0.52f, 0.70f, 0.86f);
@@ -378,15 +386,12 @@ namespace Sealebrities
             float moonA = SmoothStep(-4f, 2f, moonElev) * Mathf.Lerp(0.35f, 1f, night01) * hide;
             SetLayer(moonR, moonMat, new Color(boost, 0.99f * boost, 0.96f * boost, moonA));
 
-            // ---- clouds: lit like the world, plus a bright emission floor so undersides stay ≥ #DCE5F1 by day
+            // ---- clouds: per-facet colours by sun elevation (white / golden / coral / night blue-grey) and weather,
+            // their own horizon haze with the scene fog pre-compensated, drift on the shared game clock
             if (clouds != null && c != null)
             {
-                float golden = (1f - night01) * SmoothStep(0f, 6f, elev) * (1f - SmoothStep(12f, 22f, elev));
-                Color floor = Color.Lerp(new Color(0.80f, 0.84f, 0.90f), new Color(0.74f, 0.64f, 0.74f), golden);
-                float level = Mathf.Lerp(0.14f, 0.9f, 1f - night01) * Mathf.Lerp(0.55f, 1f, SmoothStep(-4f, 10f, elev));
-                Color glow = floor * level + new Color(0.02f, 0.025f, 0.05f);
-                glow.a = 1f;
-                clouds.Tick(c.transform.position, Time.deltaTime, uw < 0.5f, glow);
+                Color hazeLin = (dome != null && dome.Valid ? dome.FogColor : EnvState.SkyFogColor).linear;
+                clouds.Tick(c.transform.position, sunDir, elev, uw < 0.5f, hazeLin, FXFogBank.Thick01, Time.deltaTime);
             }
         }
 

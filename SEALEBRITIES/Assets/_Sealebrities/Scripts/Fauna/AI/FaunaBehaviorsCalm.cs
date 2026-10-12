@@ -30,6 +30,7 @@ namespace Sealebrities
 
         public override void Tick(float dt)
         {
+            if (!territorial && React(dt)) return;   // round 3 (Q21): small fish dart away
             c.desiredVel = w.Tick(c, dt, 1f);
             c.activityTarget = w.Paused ? 0.2f : 0.25f;
 
@@ -70,7 +71,7 @@ namespace Sealebrities
         public override void Tick(float dt)
         {
             float r = 3f + c.lengthM + (FaunaContext.PlayerSpeed > 2f ? 2f : 0f);
-            if (PlayerNearby(r)) fleeTimer = Mathf.Max(fleeTimer, Random.Range(2f, 3.5f));
+            if (PlayerNearby(r) || FaunaReact.Startled(c.pos, out _)) fleeTimer = Mathf.Max(fleeTimer, Random.Range(2f, 3.5f));
 
             if (fleeTimer > 0f)
             {
@@ -106,7 +107,7 @@ namespace Sealebrities
         public override void Tick(float dt)
         {
             timer -= dt;
-            if (st != St.TakeOff && PlayerNearby(3.5f + c.lengthM))
+            if (st != St.TakeOff && (PlayerNearby(3.5f + c.lengthM) || (c.lengthM < 2.5f && FaunaReact.Startled(c.pos, out _))))
             {
                 st = St.TakeOff;
                 timer = Random.Range(2.5f, 3.5f);

@@ -49,6 +49,8 @@ namespace Sealebrities
 
         static readonly List<FilmPhotoMeta> list = new List<FilmPhotoMeta>();
         static bool loaded, hooked;
+        /// Round 3 step 6b: the gallery folder belongs to the world (save slot / host world) – another world reloads.
+        static string loadedFolder;
 
         /// Raised after a photo was analysed and stored (photo entry + meta).
         public static event Action<PhotoEntry, FilmPhotoMeta> Recorded;
@@ -56,7 +58,7 @@ namespace Sealebrities
         static string FilePath => Path.Combine(Gallery.Folder, "film_photos.json");
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { list.Clear(); loaded = false; hooked = false; Recorded = null; }
+        static void ResetStatics() { list.Clear(); loaded = false; hooked = false; Recorded = null; loadedFolder = null; memory.Clear(); }
 
         // ------------------------------------------------------------------ recording (FilmHandCamera)
         internal static FilmPhotoMeta Record(PhotoEntry e, FilmPhotoReport r)
@@ -224,10 +226,18 @@ namespace Sealebrities
                 hooked = true;
                 Gallery.Removed += OnPhotoRemoved;
             }
-            if (loaded) return;
+            string folder = Gallery.Folder;
+            if (loaded && ReferenceEquals(folder, loadedFolder)) return;
+            // automated runs keep the metadata in memory only: remember it per world folder
+            bool memOnly = GameManager.AutomatedRun && string.IsNullOrEmpty(SaveSlots.RootOverride);
+            if (loaded && loadedFolder != null && memOnly) memory[loadedFolder] = new List<FilmPhotoMeta>(list);
             loaded = true;
-            Read(list);
+            loadedFolder = folder;
+            if (memOnly && memory.TryGetValue(folder, out var mem)) { list.Clear(); list.AddRange(mem); }
+            else Read(list);
         }
+
+        static readonly Dictionary<string, List<FilmPhotoMeta>> memory = new Dictionary<string, List<FilmPhotoMeta>>();
 
         static void OnPhotoRemoved(PhotoEntry e)
         {
@@ -260,7 +270,7 @@ namespace Sealebrities
 
         static void Write()
         {
-            if (GameManager.AutomatedRun) return;   // never touch the player's files from a test run
+            if (GameManager.AutomatedRun && string.IsNullOrEmpty(SaveSlots.RootOverride)) return;   // never touch the player's files from a test run (sandbox ok)
             try
             {
                 // another game window on this PC (co-op test) may have added photos meanwhile: merge them

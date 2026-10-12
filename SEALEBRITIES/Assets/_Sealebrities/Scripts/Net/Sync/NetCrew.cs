@@ -163,6 +163,17 @@ namespace Sealebrities
                 int h = 17;
                 if (r.hotbarRight != null) for (int i = 0; i < r.hotbarRight.Length; i++) h = h * 31 + (r.hotbarRight[i] != null ? r.hotbarRight[i].GetHashCode() : 0);
                 if (r.hotbarLeft != null) for (int i = 0; i < r.hotbarLeft.Length; i++) h = h * 31 + (r.hotbarLeft[i] != null ? r.hotbarLeft[i].GetHashCode() : 0);
+                // round 3: the 8-slot hotbar, the backpack and the meters (in steps of 5) are worth a push too
+                if (r.hotbar != null) for (int i = 0; i < r.hotbar.Length; i++) h = h * 31 + (r.hotbar[i] != null ? r.hotbar[i].GetHashCode() : 0);
+                h = h * 31 + r.hotbarOffMask;
+                if (r.backpack != null)
+                    for (int i = 0; i < r.backpack.Count; i++)
+                    {
+                        var st = r.backpack[i];
+                        if (st != null && st.id != null) h = h * 31 + st.id.GetHashCode() + st.count * 7 + (int)st.durability * 13 + (int)(st.sharpness * 100f);
+                    }
+                if (r.pouch != null) for (int i = 0; i < r.pouch.Count; i++) if (r.pouch[i] != null) h = h * 31 + r.pouch[i].count;
+                h = h * 31 + (int)(r.hunger / 5f) * 101 + (int)(r.thirst / 5f);
                 if (r.equipped != null) for (int i = 0; i < r.equipped.Count; i++) h = h * 31 + (r.equipped[i] != null ? r.equipped[i].GetHashCode() : 0);
                 h = h * 31 + (r.achievements != null ? r.achievements.Count : 0);
                 h = h * 31 + r.fishCaught; h = h * 31 + r.speciesFilmed; h = h * 31 + r.rescues; h = h * 31 + r.dives; h = h * 31 + r.faints;
@@ -321,6 +332,9 @@ namespace Sealebrities
             if (l.cameraOnStrap) f |= FlagCamera;
             if (l.sitting) f |= FlagSitting;
             w.Byte(f);
+            // round 3 (protocol 3): body, hair, beard, nose, accessory
+            w.Byte(ClampByte(l.build)); w.Byte(ClampByte(l.height + 2)); w.Byte(ClampByte(l.hair)); w.Byte(ClampByte(l.hairColor));
+            w.Byte(ClampByte(l.beard)); w.Byte(ClampByte(l.nose)); w.Byte(ClampByte(l.accessory));
         }
 
         public static DiverLook Read(ref SyncReader r)
@@ -339,6 +353,8 @@ namespace Sealebrities
             l.lampOnStrap = (f & FlagLamp) != 0;
             l.cameraOnStrap = (f & FlagCamera) != 0;
             l.sitting = (f & FlagSitting) != 0;
+            l.build = r.Byte(); l.height = r.Byte() - 2; l.hair = r.Byte(); l.hairColor = r.Byte();
+            l.beard = r.Byte(); l.nose = r.Byte(); l.accessory = r.Byte();
             return l;
         }
 
@@ -357,6 +373,8 @@ namespace Sealebrities
             if (l.cameraOnStrap) f |= FlagCamera;
             if (l.sitting) f |= FlagSitting;
             w.Byte(f);
+            w.Byte(ClampByte(l.build)).Byte(ClampByte(l.height + 2)).Byte(ClampByte(l.hair)).Byte(ClampByte(l.hairColor));
+            w.Byte(ClampByte(l.beard)).Byte(ClampByte(l.nose)).Byte(ClampByte(l.accessory));
         }
 
         public static DiverLook Read(NetCoreReader r)
@@ -373,6 +391,8 @@ namespace Sealebrities
             l.lampOnStrap = (f & FlagLamp) != 0;
             l.cameraOnStrap = (f & FlagCamera) != 0;
             l.sitting = (f & FlagSitting) != 0;
+            l.build = r.Byte(); l.height = r.Byte() - 2; l.hair = r.Byte(); l.hairColor = r.Byte();
+            l.beard = r.Byte(); l.nose = r.Byte(); l.accessory = r.Byte();
             return l;
         }
 
@@ -403,6 +423,14 @@ namespace Sealebrities
             l.tankTier = Mathf.Clamp(l.tankTier, 0, 5);
             l.finTier = Mathf.Clamp(l.finTier, 0, 3);
             l.rank = Mathf.Clamp(l.rank, 0, 16);
+            // round 3 fields (Normalized clamps them too)
+            l.build = Mathf.Clamp(l.build, 0, CosmeticsDatabase.BuildCount - 1);
+            l.height = Mathf.Clamp(l.height, -2, 2);
+            l.hair = Mathf.Clamp(l.hair, 0, CosmeticsDatabase.HairCount - 1);
+            l.hairColor = Mathf.Clamp(l.hairColor, 0, CosmeticsDatabase.HairColors.Length - 1);
+            l.beard = Mathf.Clamp(l.beard, 0, CosmeticsDatabase.BeardCount - 1);
+            l.nose = Mathf.Clamp(l.nose, 0, CosmeticsDatabase.NoseCount - 1);
+            l.accessory = Mathf.Clamp(l.accessory, 0, CosmeticsDatabase.AccessoryCount - 1);
             l.suit = Finite(l.suit, new Color(1f, 0.55f, 0.2f));
             l.suit.a = 1f;
             l.cuff = Finite(l.cuff, new Color(0f, 0f, 0f, 0f));
@@ -437,6 +465,8 @@ namespace Sealebrities
                 h = h * 31 + l.skin; h = h * 31 + l.mouth; h = h * 31 + l.tankTier; h = h * 31 + l.finTier; h = h * 31 + l.rank;
                 h = h * 31 + (l.snorkel ? 1 : 0) + (l.lampOnStrap ? 2 : 0) + (l.cameraOnStrap ? 4 : 0) + (l.sitting ? 8 : 0);
                 h = h * 31 + l.sponsor;
+                h = h * 31 + l.build; h = h * 31 + l.height; h = h * 31 + l.hair; h = h * 31 + l.hairColor;
+                h = h * 31 + l.beard; h = h * 31 + l.nose; h = h * 31 + l.accessory;
                 return h;
             }
         }

@@ -26,6 +26,13 @@ namespace Sealebrities
         /// Built-in "Ignore Raycast" layer: the default raycasts of other modules never hit the player capsule.
         public const int PlayerLayer = 2;
 
+        /// Round 3 (npc step, GDD §20 Q6): the local diver is tied up by the hermits – walking is blocked (looking around
+        /// still works) until the wriggle minigame frees them. Set / cleared by the npc module.
+        public static bool Restrained;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetRestrained() { Restrained = false; }
+
         // ------------------------------------------------------------------ references
         CharacterController cc;
         Camera cam;
@@ -54,7 +61,7 @@ namespace Sealebrities
         bool lastPosValid;
 
         // camera effects
-        float eyeHeight = EyeHeight, landDip, trauma, faintAnim, bobPhase, bobAmp;
+        float eyeHeight = EyeHeight, landDip, trauma, faintAnim, bobPhase, bobAmp, sprintCam, strafeRoll;
 
         // ------------------------------------------------------------------ IPlayer
         public Transform Root => transform;
@@ -69,6 +76,8 @@ namespace Sealebrities
         public float MaxSafeDepth => PlayerIntro.Playing ? 9999f : gear.maxDepth;
         public bool FlashlightOn => flashlight != null && flashlight.On;
         public bool IsSeated => seated;
+        /// Round 3: seated on a passenger seat (boat bench) – hands free for the camera, the phone and the map.
+        public bool IsPassenger => seated && passengerSeat;
         /// Fainting (fade to the rescue point) or unconscious in co-op (F.1, PlayerController.Rescue.cs).
         public bool IsFainting => fainting || unconscious;
         public float LookAngularSpeed => lookAngularSpeed;
@@ -135,6 +144,7 @@ namespace Sealebrities
             GameEvents.PlayerBumped += OnBumped;
             GameEvents.BuffsChanged += OnBuffsChanged;
             GameEvents.Mischief += OnMischief;
+            GameEvents.SleepStarted += OnSleepStarted;
             CharacterScreen.LookSaved += OnSelfieLookSaved;
         }
 
@@ -149,6 +159,7 @@ namespace Sealebrities
                 GameEvents.PlayerBumped -= OnBumped;
                 GameEvents.BuffsChanged -= OnBuffsChanged;
                 GameEvents.Mischief -= OnMischief;
+                GameEvents.SleepStarted -= OnSleepStarted;
                 CharacterScreen.LookSaved -= OnSelfieLookSaved;
                 subscribed = false;
             }
@@ -260,12 +271,18 @@ namespace Sealebrities
         void ResetTransientState()
         {
             if (seated) { seated = false; seat = null; seatYaw = 0f; }
+            SetPassenger(false);
             if (vaulting) { vaulting = false; vaultRef = null; }
             ladderClimbing = false;
             CancelGenericLadder();
             if (crouching) SetCrouch(false);
             if (selfie) ExitSelfie();
             lyingCam = false;
+            lieSpot = -1;
+            debugLieSpot = -1;
+            sleepHoldUntil = -1f;
+            lieAllLying = false;
+            if (!SleepVote.LocalLying) PropInfo.LocalSleepSpot = -1;
             fainting = false;
             ResetRescue();
             rescueActive = false;
@@ -366,9 +383,11 @@ namespace Sealebrities
             }
             dt = Mathf.Min(dt, 0.1f);
 
-            bool input = !UIState.BlocksGameplay && !IsFainting && !rescueActive && !vaulting && !ladderClimbing;
+            // round 3 (npc step): tied up by the hermits – no walking until the A/D wriggle minigame frees the diver
+            bool input = !UIState.BlocksGameplay && !IsFainting && !rescueActive && !vaulting && !ladderClimbing && !Restrained;
             // the generic ladders (L.13) still let you look around (pitch −50…+60°, yaw ±80° around the ladder)
-            bool lookInput = !UIState.BlocksGameplay && !IsFainting && !rescueActive && !vaulting && (!ladderClimbing || genLadder);
+            // round 3: the map overlay (M) frees the cursor for the map – the view holds still meanwhile (steering goes on)
+            bool lookInput = !UIState.BlocksGameplay && !UIState.MapOverlayOpen && !IsFainting && !rescueActive && !vaulting && (!ladderClimbing || genLadder);
             UpdateSelfieToggle();
             if (input && !selfie) HandleHotbarInput();
             bool lying = UpdateLying(input);
@@ -384,6 +403,7 @@ namespace Sealebrities
             }
             else if (vaulting) UpdateVault(dt);
             else UpdateMovement(input && !lying, dt);
+            Depenetrate();   // round 3: things that moved into the diver push it out (PlayerController.Collision.cs)
 
             UpdateWaterState(dt);
             UpdateVaultHint(dt);
@@ -464,7 +484,11 @@ namespace Sealebrities
                 else
                 {
                     pitch = Mathf.Clamp(pitch - d.y, -85f, 85f);
-                    if (seated) seatYaw = Mathf.Clamp(seatYaw + d.x, -110f, 110f);
+                    if (seated)
+                    {
+                        float lim = passengerSeat ? SeatRules.PassengerYawLimit : 110f;
+                        seatYaw = Mathf.Clamp(seatYaw + d.x, -lim, lim);
+                    }
                     else yaw = Mathf.Repeat(yaw + d.x, 360f);
                 }
             }
@@ -505,24 +529,35 @@ namespace Sealebrities
             float bobOn = HeadBobOn ? 1f : 0f;
             float shakeOn = CameraShakeOn ? 1f : 0f;
 
+            // round 3 nicer first-person motion (all × the head-bob toggle): a slightly stronger, rolling step bob while
+            // sprinting, a lean into strafing, a calm breathing rise and fall when standing, a small FOV kick at sprint
+            float planarSpeed = mode == PlayerMoveMode.Land && grounded && !seated ? new Vector2(vel.x, vel.z).magnitude : 0f;
+            sprintCam = Mathf.MoveTowards(sprintCam, planarSpeed > WalkSpeed + 0.5f ? 1f : 0f, dt / 0.3f);
+            float lateral = mode == PlayerMoveMode.Land && grounded ? Vector3.Dot(vel, transform.right) : 0f;
+            strafeRoll = Mathf.Lerp(strafeRoll, -Mathf.Clamp(lateral, -4f, 4f) * 0.35f, 1f - Mathf.Exp(-6f * dt));
+
             // Q98: the player's FOV (the filming zoom divides it after us; the selfie view owns its own lens)
             if (cam != null && !SelfieState.Active)
             {
-                float fov = GameplayFov;
+                float fov = GameplayFov + 3f * sprintCam * bobOn;
                 if (Mathf.Abs(cam.fieldOfView - fov) > 0.01f) cam.fieldOfView = fov;
             }
 
-            eyeHeight = Mathf.Lerp(eyeHeight, seated ? HelmEyeHeight : crouching ? CrouchEyeHeight : EyeHeight, 1f - Mathf.Exp(-(crouching ? 10f : 6f) * dt));
+            float seatEye = passengerSeat ? SeatRules.PassengerEyeHeight : HelmEyeHeight;
+            eyeHeight = Mathf.Lerp(eyeHeight, seated ? seatEye : crouching ? CrouchEyeHeight : EyeHeight, 1f - Mathf.Exp(-(crouching ? 10f : 6f) * dt));
             landDip = Mathf.Lerp(landDip, 0f, 1f - Mathf.Exp(-7f * dt));
             head.localPosition = new Vector3(0f, eyeHeight - landDip * shakeOn, 0f);
             head.localRotation = Quaternion.Euler(pitch, 0f, 0f);
 
-            // walking head bob: one vertical dip per step, one lateral sway per two steps
+            // walking head bob: one vertical dip per step, one lateral sway per two steps (stronger when sprinting)
             float vb = (1f - Mathf.Cos(2f * bobPhase)) * 0.5f;
-            Vector3 offset = new Vector3(Mathf.Sin(bobPhase) * 0.016f, -vb * 0.032f, 0f) * (bobAmp * bobOn);
-
+            float bobK = bobAmp * bobOn * (1f + 0.35f * sprintCam);
+            Vector3 offset = new Vector3(Mathf.Sin(bobPhase) * 0.016f, -vb * 0.032f, 0f) * bobK;
             float t = Time.time;
-            float roll = LadderCameraRoll(dt) * bobOn, extraPitch = 0f, extraYaw = 0f;
+            // standing still on land: a slow breath (3 mm)
+            if (mode == PlayerMoveMode.Land && !seated && !ladderClimbing) offset.y += Mathf.Sin(t * 1.5f) * 0.003f * (1f - bobAmp) * bobOn;
+
+            float roll = LadderCameraRoll(dt) * bobOn + (Mathf.Sin(bobPhase) * 0.6f * bobK + strafeRoll) * bobOn, extraPitch = 0f, extraYaw = 0f;
             if (isUnderwater && !seated && !ladderClimbing)
             {
                 roll += Mathf.Sin(t * 0.55f) * 0.9f * bobOn;

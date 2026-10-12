@@ -103,6 +103,11 @@ namespace Sealebrities
             L(ChatCat.Bump, ChatMood.Laugh, "Clip it!", "clip it!"),
             L(ChatCat.Bump, ChatMood.Laugh, "{s} so: nö", "{s} said no"),
             L(ChatCat.Bump, ChatMood.Laugh, "Abzug in der B-Note", "minus points for style"),
+            // round 3 (Q45): fights with sharks and the monster
+            L(ChatCat.Bump, ChatMood.Hype, "ABGEWEHRT!!!", "BLOCKED!!!"),
+            L(ChatCat.Bump, ChatMood.Hype, "was für ein Konter", "what a counter"),
+            L(ChatCat.Bump, ChatMood.Hype, "Speer-Meister!", "spear master!"),
+            L(ChatCat.Bump, ChatMood.Scared, "mein Herz rast", "my heart is racing"),
             // low air
             L(ChatCat.LowAir, ChatMood.Scared, "Luft??", "air??"),
             L(ChatCat.LowAir, ChatMood.Scared, "tauch auf!!", "go up!!"),
@@ -144,6 +149,11 @@ namespace Sealebrities
             L(ChatCat.Hater, ChatMood.Hater, "lass die Tiere in Ruhe", "leave the animals alone"),
             L(ChatCat.Hater, ChatMood.Hater, "früher war mehr Hai", "there used to be more shark"),
             L(ChatCat.Hater, ChatMood.Hater, "die Bottom-Brüder sind besser", "the Bottom brothers are better"),
+            // round 3 (Q18): spear near protected animals
+            L(ChatCat.Hater, ChatMood.Hater, "das ist eine geschützte Art!!", "that's a protected species!!"),
+            L(ChatCat.Hater, ChatMood.Hater, "Speer weg, sofort", "put the spear down, now"),
+            L(ChatCat.Hater, ChatMood.Hater, "unfollow.", "unfollow."),
+            L(ChatCat.Hater, ChatMood.Hater, "ich melde den Kanal", "reporting this channel"),
             // stream lost
             L(ChatCat.Lost, ChatMood.System, "F", "F"),
             L(ChatCat.Lost, ChatMood.System, "F", "F"),

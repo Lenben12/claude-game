@@ -25,7 +25,7 @@ namespace Sealebrities
         Vector3 ladFrom, ladTo;
         float ladH, ladShownH, ladMinY, ladMaxY, ladYaw, ladCycle;
         int ladRung;
-        bool ladIgnoreInput, ladWasInWater;
+        bool ladIgnoreInput, ladWasInWater, ladFromTop;
         int ladSavedRight = -1, ladSavedLeft = -1;
         float ladProbeTimer;
         int ladCandidate = -1;
@@ -125,6 +125,23 @@ namespace Sealebrities
             return best;
         }
 
+        /// Index of the usable ladder whose rail foot is horizontally nearest to p (within maxDist), −1 = none.
+        int NearestLadder(Vector3 p, float maxDist)
+        {
+            var list = PropInfo.Ladders;
+            int best = -1;
+            float bestD = maxDist * maxDist;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var l = list[i];
+                if (!l.Usable) continue;
+                float dx = l.bottom.x - p.x, dz = l.bottom.z - p.z;
+                float d = dx * dx + dz * dz;
+                if (d < bestD) { bestD = d; best = i; }
+            }
+            return best;
+        }
+
         /// Grabs the ladder found by the probe (E on land, Space/E in the water). False when none is in reach.
         /// autoUp: climbs up by itself (S or E take over) – no gameplay caller uses it any more (W / Space held climbs).
         public bool TryClimbLadder(bool autoUp = false)
@@ -170,7 +187,9 @@ namespace Sealebrities
             ladTo = RailPoint(ladH);
             ladStage = 0;
             ladT = 0f;
-            ladDur = fromTop ? 0.5f : 0.25f;
+            ladFromTop = fromTop;
+            // from the water / ground: a short reach for the rungs (longer when the grab point is further away)
+            ladDur = fromTop ? 0.7f : Mathf.Clamp(Vector3.Distance(ladFrom, ladTo) * 0.45f, 0.22f, 0.5f);
             ladIgnoreInput = true;
             ladWasInWater = isInWater;
             if (mode == PlayerMoveMode.Dive) mode = PlayerMoveMode.Surface;
@@ -190,9 +209,16 @@ namespace Sealebrities
                 case 0:   // attach
                 {
                     ladT += dt / Mathf.Max(0.05f, ladDur);
-                    float u = Smooth01(ladT);
-                    Vector3 pos = Vector3.Lerp(ladFrom, ladTo, u);
-                    if (ladFrom.y > ladTo.y) pos.y += Mathf.Sin(u * Mathf.PI) * 0.15f;   // over the edge from the top
+                    Vector3 pos;
+                    if (ladFromTop)
+                    {
+                        // round 3: from the top first step out over the edge (at platform height, turning to face the
+                        // ladder), then lower onto the rungs – the straight line cut through the planks / railing
+                        float a = Smooth01(ladT / 0.5f), b = Smooth01((ladT - 0.4f) / 0.6f);
+                        pos = new Vector3(Mathf.Lerp(ladFrom.x, ladTo.x, a), Mathf.Lerp(ladFrom.y, ladTo.y, b) + Mathf.Sin(a * Mathf.PI) * 0.05f * (1f - b),
+                                          Mathf.Lerp(ladFrom.z, ladTo.z, a));
+                    }
+                    else pos = Vector3.Lerp(ladFrom, ladTo, Smooth01(ladT));
                     transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, yaw, 0f));
                     if (ladT >= 1f) { ladStage = 1; ladT = 0f; }
                     break;
@@ -327,10 +353,10 @@ namespace Sealebrities
 
         void TryReselect(Hand h, int slot)
         {
-            HoldItem item = Hands.SlotItem(h, slot);
-            if (item == HoldItem.None || !Hands.Owns(item)) return;
-            if (Hands.IsTwoHanded(item) && isInWater) return;   // the rod does not go swimming
-            Hands.Select(h, slot);
+            HoldItem item = Hands.SlotItem(slot);
+            if (item == HoldItem.None || !Hands.SlotUsable(slot) || Hands.SlotHand(slot) != h) return;
+            if (item == HoldItem.FishingRod && isInWater) return;   // the rod does not go swimming
+            Hands.Select(slot);
         }
 
         /// Called from ResetTransientState / seats / teleports: drop off the ladder without restoring anything.

@@ -9,11 +9,20 @@ namespace Sealebrities
     /// Rebindable game actions (Settings → Steuerung). Order is stable: append new values at the end.
     /// Round 2: StreamDare (T, accept a livestream dare – C.5), Selfie (H, selfie view – K.4).
     /// Crouch on land (L.6) uses Down (no own action).
+    /// Round 3: ONE hotbar of 8 slots – RightSlot1..3 are slots 1–3, LeftSlot1..3 slots 4–6 (names kept for the
+    /// stored bindings), Slot7 / Slot8 were appended. Use GameInput.SlotAction(i) / SlotPressed(i).
     public enum GameAction
     {
         Forward, Back, Left, Right, Up, Down, Sprint, Jump, Interact, LightToggle, Phone, Journal, Inventory, Pause,
         RightSlot1, RightSlot2, RightSlot3, LeftSlot1, LeftSlot2, LeftSlot3, Anchor, PushToTalk, Use, Aim, Photo,
-        StreamDare, Selfie
+        StreamDare, Selfie,
+        // round 3
+        Slot7, Slot8,
+        /// Round 3 (GDD §20 Q5): hold for the gesture wheel – the hermits' sign language and the action wheel at every NPC.
+        Gestures,
+        /// Round 3 UI step (GDD §19 „Während der Fahrt Zugriff auf die Karte“): the treasure-map overlay (default M) –
+        /// works while driving the boat and on the passenger bench (does not stop steering).
+        Map
     }
 
     /// A key OR a mouse button. key != Key.None → keyboard binding; otherwise mouseButton
@@ -41,7 +50,7 @@ namespace Sealebrities
 
     /// The only place that reads devices (Input System package). Gameplay code must use these members.
     /// Default controls: WASD move, mouse look, Space up/jump, LeftCtrl down, LeftShift sprint, E interact,
-    /// F lamp on/off, Tab phone, J journal, I inventory, Esc pause, 1/2/3 right-hand slots, 4/5/6 left-hand slots,
+    /// F lamp on/off, Tab phone, J journal, I backpack, Esc pause, 1–8 hotbar slots (round 3: one row),
     /// Q anchor, V push-to-talk, LMB use (record / cast), RMB aim, P photo, mouse wheel zoom.
     /// Bindings are stored in Settings.Data.bindings (only changed actions).
     public static class GameInput
@@ -92,7 +101,19 @@ namespace Sealebrities
             d[(int)GameAction.Photo] = InputBinding.FromKey(Key.P);
             d[(int)GameAction.StreamDare] = InputBinding.FromKey(Key.T);
             d[(int)GameAction.Selfie] = InputBinding.FromKey(Key.H);
+            d[(int)GameAction.Slot7] = InputBinding.FromKey(Key.Digit7);
+            d[(int)GameAction.Slot8] = InputBinding.FromKey(Key.Digit8);
+            d[(int)GameAction.Gestures] = InputBinding.FromKey(Key.G);
+            d[(int)GameAction.Map] = InputBinding.FromKey(Key.M);
             return d;
+        }
+
+        /// Round 3: the action of hotbar slot 0..7 (keys 1–8 by default).
+        public static GameAction SlotAction(int slot)
+        {
+            if (slot <= 2) return (GameAction)((int)GameAction.RightSlot1 + Mathf.Max(0, slot));
+            if (slot <= 5) return (GameAction)((int)GameAction.LeftSlot1 + slot - 3);
+            return slot == 6 ? GameAction.Slot7 : GameAction.Slot8;
         }
 
         // ------------------------------------------------------------------ raw device access (allocation free)
@@ -131,7 +152,9 @@ namespace Sealebrities
 
         // ------------------------------------------------------------------ actions
         /// While a text field has focus (UIState.TextInput, L.4) every action except Pause reads as not pressed.
-        static bool Blocked(GameAction a) => UIState.TextInput && a != GameAction.Pause;
+        /// Round 3: while the map overlay frees the cursor, the mouse actions (Use / Aim) belong to the map.
+        static bool Blocked(GameAction a) => (UIState.TextInput && a != GameAction.Pause)
+                                             || (UIState.MapOverlayOpen && (a == GameAction.Use || a == GameAction.Aim));
 
         public static bool Held(GameAction a) => !Blocked(a) && (HeldB(bindings[(int)a]) || (simActive && SimHeld((int)a)));
         public static bool Down(GameAction a) => !Blocked(a) && (DownB(bindings[(int)a]) || (simActive && simDown[(int)a] == Time.frameCount));
@@ -201,11 +224,18 @@ namespace Sealebrities
             simActive = false;
         }
 
-        /// Hotbar key of a hand slot (0..Hands.SlotsPerHand-1) pressed this frame.
+        /// Hotbar key of slot 0..Hands.SlotCount-1 pressed this frame.
+        public static bool SlotPressed(int slot)
+        {
+            if (slot < 0 || slot >= Hands.SlotCount) return false;
+            return Down(SlotAction(slot));
+        }
+
+        /// LEGACY (3 + 3 hotbar keys, used by the selfie expressions 1–6): right i = key i+1, left i = key i+4.
         public static bool SlotPressed(Hand hand, int slot)
         {
             if (slot < 0 || slot > 2) return false;
-            return Down((GameAction)((hand == Hand.Right ? (int)GameAction.RightSlot1 : (int)GameAction.LeftSlot1) + slot));
+            return SlotPressed(hand == Hand.Right ? slot : 3 + slot);
         }
 
         public static Vector2 Move
@@ -247,6 +277,8 @@ namespace Sealebrities
         /// Escape always pauses / closes (it cannot be bound to anything else) plus the Pause binding.
         public static bool PausePressed => Down(Key.Escape) || Down(GameAction.Pause);
         public static bool AnchorPressed => Down(GameAction.Anchor);
+        /// Round 3: the treasure-map overlay key (default M).
+        public static bool MapPressed => Down(GameAction.Map);
         public static bool PhotoPressed => Down(GameAction.Photo);
         public static bool PushToTalkHeld => Held(GameAction.PushToTalk);
 
@@ -279,7 +311,7 @@ namespace Sealebrities
         {
             get
             {
-                if (UIState.TextInput || UIState.BlocksGameplay) return 0;
+                if (UIState.TextInput || UIState.BlocksGameplay || UIState.MapOverlayOpen) return 0;
                 int sim = simActive && simScrollFrame == Time.frameCount ? simScroll : 0;
                 if (sim != 0) return sim;
                 var m = M;
@@ -522,17 +554,21 @@ namespace Sealebrities
                 case GameAction.LightToggle: return Loc.Tr("Lampe an/aus", "Lamp on/off");
                 case GameAction.Phone: return Loc.Tr("Handy", "Phone");
                 case GameAction.Journal: return "Sealog";
-                case GameAction.Inventory: return Loc.Tr("Inventar", "Inventory");
+                case GameAction.Inventory: return Loc.Tr("Rucksack", "Backpack");
                 case GameAction.Pause: return Loc.Tr("Pause", "Pause");
-                case GameAction.RightSlot1: return Loc.Tr("Rechte Hand 1", "Right hand 1");
-                case GameAction.RightSlot2: return Loc.Tr("Rechte Hand 2", "Right hand 2");
-                case GameAction.RightSlot3: return Loc.Tr("Rechte Hand 3", "Right hand 3");
-                case GameAction.LeftSlot1: return Loc.Tr("Linke Hand 1", "Left hand 1");
-                case GameAction.LeftSlot2: return Loc.Tr("Linke Hand 2", "Left hand 2");
-                case GameAction.LeftSlot3: return Loc.Tr("Linke Hand 3", "Left hand 3");
+                case GameAction.RightSlot1: return Loc.Tr("Leiste 1", "Hotbar 1");
+                case GameAction.RightSlot2: return Loc.Tr("Leiste 2", "Hotbar 2");
+                case GameAction.RightSlot3: return Loc.Tr("Leiste 3", "Hotbar 3");
+                case GameAction.LeftSlot1: return Loc.Tr("Leiste 4", "Hotbar 4");
+                case GameAction.LeftSlot2: return Loc.Tr("Leiste 5", "Hotbar 5");
+                case GameAction.LeftSlot3: return Loc.Tr("Leiste 6", "Hotbar 6");
+                case GameAction.Slot7: return Loc.Tr("Leiste 7", "Hotbar 7");
+                case GameAction.Slot8: return Loc.Tr("Leiste 8", "Hotbar 8");
+                case GameAction.Gestures: return Loc.Tr("Gesten-Rad (halten)", "Gesture wheel (hold)");
+                case GameAction.Map: return Loc.Tr("Karte (auch beim Fahren)", "Map (also while driving)");
                 case GameAction.Anchor: return Loc.Tr("Anker", "Anchor");
                 case GameAction.PushToTalk: return Loc.Tr("Sprechen (Push-to-Talk)", "Push to talk");
-                case GameAction.Use: return Loc.Tr("Aufnehmen / Auswerfen", "Record / cast");
+                case GameAction.Use: return Loc.Tr("Benutzen (Filmen, Auswerfen, Schlag)", "Use (record, cast, strike)");
                 case GameAction.Aim: return Loc.Tr("Zielen", "Aim");
                 case GameAction.StreamDare: return Loc.Tr("Mutprobe annehmen", "Accept dare");
                 case GameAction.Selfie: return Loc.Tr("Selfie-Ansicht", "Selfie view");

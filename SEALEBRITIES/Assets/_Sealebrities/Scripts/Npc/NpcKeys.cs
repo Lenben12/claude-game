@@ -49,5 +49,20 @@ namespace Sealebrities
         public const string DepthHintPrefix = "depthhint:";
         /// L.6 clue heard ("clue:<secretKey>").
         public const string CluePrefix = "clue:";
+        // ---- round 3: the hermits (GDD §19/§20 Q2–Q8)
+        /// Crafts the hermits teach (Q8; sharpening is StoryKeys.GrindLearned): fish trap (raw fish every morning),
+        /// the cook's curry recipe (raw fish + coconut on any fire), the gardener's harvest (fruit every morning).
+        public const string TrapLearned = "hermit_traps", RecipeCurry = "hermit_recipe_curry", HarvestLearned = "hermit_harvest";
+        /// First contact (Horst explains the signs on the radio), first won fight, first tie-up, the leader accepts the crew.
+        public const string HermitsMet = "hermits_met", HermitRespect = "hermit_respect", HermitTied = "hermit_tied", HermitsAccepted = "hermits_accepted";
+        /// Horst mentioned the smoke in the west (mid-game rumour – the camp itself stays a secret until found).
+        public const string CampRumour = "camp_rumour";
+        /// Someone saw the hermits' lantern ritual at the old jetty.
+        public const string RitualSeen = "hermit_ritual_seen";
+        // ---- round 3: the rivals' sabotage (Q43)
+        /// "rival_steal:<speciesId>:<day>" – the brothers copied a subject; "rival_steal_won:<day>" – the original won.
+        public const string RivalStealPrefix = "rival_steal:", RivalStealWonPrefix = "rival_steal_won:";
+        /// "rival_raid:<stream serial>" – the brothers raided this livestream.
+        public const string RivalRaidPrefix = "rival_raid:";
     }
 }

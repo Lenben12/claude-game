@@ -875,8 +875,12 @@ namespace Sealebrities
         public void Interact()
         {
             if (!CanInteract()) return;
-            Pantry.DrinkCoconut();
-            GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Kokosnuss", "Coconut"), FoodSpots.BuffChip(FoodDatabase.Get(FoodDatabase.Coconut)));
+            // round 3: picked-up things go into the backpack (drunk right away only when it is full)
+            if (Backpack.Add(FoodDatabase.Coconut, 1) == 0)
+            {
+                Pantry.DrinkCoconut();
+                GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Kokosnuss", "Coconut"), FoodSpots.BuffChip(FoodDatabase.Get(FoodDatabase.Coconut)));
+            }
             BoatParticles.Puff(transform.position, new Color(0.95f, 0.95f, 0.9f, 0.8f), 8, 0.2f);
             Destroy(gameObject);
         }

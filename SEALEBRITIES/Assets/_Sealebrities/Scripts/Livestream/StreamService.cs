@@ -90,6 +90,7 @@ namespace Sealebrities
         void OnEnable()
         {
             GameEvents.PlayerBumped += OnLocalBump;
+            GameEvents.Fight += OnLocalFight;   // round 3: viewers love fights (Combat)
             GameEvents.PlayerFainted += OnLocalFainted;
             GameEvents.ReturnedToMenu += ResetAll;
             GameEvents.GameStarted += ResetAll;
@@ -104,6 +105,7 @@ namespace Sealebrities
         void OnDisable()
         {
             GameEvents.PlayerBumped -= OnLocalBump;
+            GameEvents.Fight -= OnLocalFight;
             GameEvents.PlayerFainted -= OnLocalFainted;
             GameEvents.ReturnedToMenu -= ResetAll;
             GameEvents.GameStarted -= ResetAll;
@@ -172,6 +174,31 @@ namespace Sealebrities
 
         // ================================================================ local: faint, drone, dares
         void OnLocalBump(float airLost) { localBumps = (localBumps + 1) & 0xFF; }
+
+        /// Round 3: a hit / hurt / block of the local diver counts like a bump on the feed (hype spike + laughing chat).
+        void OnLocalFight(string kind, float intensity) { if (intensity > 0.05f) localBumps = (localBumps + 1) & 0xFF; }
+
+        /// Round 3 (Q18, fauna step): somebody tried to spear a protected animal (turtle, ray, dolphin, Gerald …).
+        /// Host / offline only (guests' fouls arrive through the fauna module's hit command): while live the hype drops
+        /// and the haters show up in the chat. strength 1 = normal, 2 = a star animal.
+        public void ReportFoul(int strength)
+        {
+            if (!Net.HasAuthority || !LiveState.IsLive) return;
+            float now = Time.unscaledTime;
+            AddHype(-0.35f * Mathf.Clamp(strength, 1, 3));
+            chat.Push(ChatCat.Hater, -1, 4, now, true);
+            if (strength >= 2) chat.Push(ChatCat.Hater, -1, 3, now, true);
+        }
+
+        /// Round 3 (Q45, fauna step): a fight with a shark / the monster was won (repelled) – a big hype spike.
+        public void ReportFightWon(bool monster)
+        {
+            if (!Net.HasAuthority || !LiveState.IsLive) return;
+            float now = Time.unscaledTime;
+            AddHype(monster ? StreamRules.SpikeRecord * 1.5f : StreamRules.SpikeBump * 1.4f);
+            chat.Push(ChatCat.Bump, -1, 5, now, true);
+            chat.Push(ChatCat.Big, -1, 3, now, false);
+        }
 
         void OnLocalFainted() => ReportFaint(false);
 

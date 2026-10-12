@@ -81,8 +81,8 @@ namespace Sealebrities
             yield return RunStep("36 Sponsor deals (K.7): max 2, no shared topic, cancel, complete", StepR2Deals);
             yield return RunStep("37 FinTube (L.4): own title (60 chars) + collage thumbnail with 3 animals", StepR2FinTube);
             yield return RunStep("38 Under water (K.3): currents push, finds, challenges, air stations; new species photographed", StepR2Underwater, 120f);
-            yield return RunStep("39 Village Altriff + side quests (L.7/L.8)", StepR2Village);
-            yield return RunStep("39b Every side quest driven to its reward (L.7): bring, collect, hold, photo, film, record, selfie, upload, catch, lantern, escort, wait, choice", StepR2SideQuestsAll, 600f);
+            yield return RunStep("39 South beach (village removed) + hermit quest givers (L.7, round 3)", StepR2Village);
+            yield return RunStep("39b Every side quest driven to its reward (L.7 + round 3 filming jobs): bring, collect, hold, photo, film, record, selfie, upload, catch, lantern, wait, choice", StepR2SideQuestsAll, 720f);
             yield return RunStep("40 Chopper mishap (L.12): parcel at the wrong place, smoke + search line", StepR2Mishap, 180f);
             yield return RunStep("41 Toni → map → Fog Isle (K.8): T1–T4, fog_map, exclusive species", StepR2Toni, 220f);
             yield return RunStep("42 'Zur Hütte' brings the boat home (1f) + Hard locked until Normal finished", StepR2BoatHomeHard);
@@ -97,7 +97,9 @@ namespace Sealebrities
             photoNote = "";
             var hc = Refs.HandCamera as FilmHandCamera;
             if (hc == null || c == null || cam == null) { photoNote = "no camera"; yield break; }
-            if (!Hands.IsHeld(HoldItem.Camera) && Hands.Find(HoldItem.Camera, out Hand h, out int slot)) Hands.Select(h, slot);
+            if (!Hands.IsHeld(HoldItem.Camera) && Hands.Find(HoldItem.Camera, out Hand h, out int slot)) Hands.Select(slot);
+            // round 3: earlier steps may have filled the 8 slots with weapons – put the camera into the main hand
+            if (!Hands.IsHeld(HoldItem.Camera)) { Hands.Hold("Camera", Hand.Right); yield return null; yield return null; }
             Vector3 approach = Flat(c.Position - cam.transform.position);
             int photos0 = Gallery.Count;
             GameInput.SimPress(GameAction.Aim);
@@ -252,9 +254,9 @@ namespace Sealebrities
             Check(StoryFlags.Has(StoryKeys.PrologueDone) && StoryFlags.Has(StoryKeys.GusLetterRead),
                   "prologue done (skipped silently in automated runs – start with -prologue to play it)");
             int present = 0;
-            foreach (var id in new[] { NpcDatabase.Horst, NpcDatabase.Wanda, NpcDatabase.Pearl, NpcDatabase.Mira, NpcDatabase.Ada, NpcDatabase.Lio })
+            foreach (var id in new[] { NpcDatabase.Horst, NpcDatabase.Wanda, NpcDatabase.HLeader, NpcDatabase.HSmith, NpcDatabase.HCook, NpcDatabase.HGardener })
                 if (NpcRegistry.Find(id) != null) present++;
-            Check(NpcRegistry.Find(NpcDatabase.Horst) != null, "Horst is on the island (" + NpcRegistry.Active.Count + " NPCs registered, " + present + "/6 story + village NPCs)");
+            Check(NpcRegistry.Find(NpcDatabase.Horst) != null, "Horst is on the island (" + NpcRegistry.Active.Count + " NPCs registered, " + present + "/6 story NPCs + hermits)");
             Check(npcLines > 0, "NPC lines spoken so far: " + npcLines + " (Horst " + horstLines + "), speakers: " + string.Join(",", speakers));
             Metric("npc.lines", npcLines + " lines, Horst " + horstLines + ", speakers " + speakers.Count);
             var horst = NpcRegistry.Find(NpcDatabase.Horst);
@@ -482,7 +484,7 @@ namespace Sealebrities
             pc.TeleportTo(feet, 30f);
             pc.RefillAir();
             yield return Wait(1.2f);
-            if (!Hands.IsHeld(HoldItem.Camera) && Hands.Find(HoldItem.Camera, out Hand h, out int slot)) Hands.Select(h, slot);
+            if (!Hands.IsHeld(HoldItem.Camera) && Hands.Find(HoldItem.Camera, out Hand h, out int slot)) Hands.Select(slot);
             GameInput.SimTap(GameAction.Selfie);
             yield return WaitUntil(() => SelfieState.Active, 2f);
             if (!SelfieState.Active) { Info("H did not reach the selfie view – entering it directly"); pc.TryEnterSelfie(); yield return Frames(3); }
@@ -691,7 +693,7 @@ namespace Sealebrities
             if (!started) started = KrillTv.DebugStart(true);
             Check(started && LiveState.IsLive, "stream started on KRILL.tv");
             if (!LiveState.IsLive) yield break;
-            if (Hands.Find(HoldItem.Camera, out Hand ch, out int cs) && !Hands.IsHeld(HoldItem.Camera)) Hands.Select(ch, cs);
+            if (Hands.Find(HoldItem.Camera, out Hand ch, out int cs) && !Hands.IsHeld(HoldItem.Camera)) Hands.Select(cs);
             yield return Wait(14f);
             yield return Shot("35_livestream");
             Check(LiveState.Viewers > 0, "viewers " + LiveState.Viewers + ", hype " + F(LiveState.Hype, "0.00"));
@@ -837,7 +839,7 @@ namespace Sealebrities
             Vector3 floor = FindSeafloor(site.center, site.radius * 0.7f, -11f, -6f);
             Vector3 eye = KeepInWater(floor + Vector3.up * 3f, 2f, 2f);
             yield return DiveTo(eye, eye + Vector3.forward * 10f);
-            if (!Hands.IsHeld(HoldItem.Camera) && Hands.Find(HoldItem.Camera, out Hand ch, out int cs)) Hands.Select(ch, cs);
+            if (!Hands.IsHeld(HoldItem.Camera) && Hands.Find(HoldItem.Camera, out Hand ch, out int cs)) Hands.Select(cs);
             Vector3 fwd = Flat(cam.transform.forward);
             int ok = 0, tried = 0;
             foreach (var id in new[] { "spotted_eagle_ray", "mandarinfish", "flamboyant_cuttlefish", "hermit_crab" })
@@ -862,15 +864,27 @@ namespace Sealebrities
         IEnumerator StepR2Village()
         {
             Check(SideQuestDatabase.All.Length >= 24, SideQuestDatabase.All.Length + " side quests (+ Toni's chain)");
+            // round 3: the village people are gone (no bodies), the hermits of the jungle camp give jobs instead
+            int gone = 0;
+            foreach (var id in new[] { NpcDatabase.Pearl, NpcDatabase.Mira, NpcDatabase.Tomas, NpcDatabase.Ada, NpcDatabase.Juno, NpcDatabase.Lio })
+                if (NpcRegistry.Find(id) == null) gone++;
+            Check(gone == 6, "the old village quest givers have no bodies any more (" + gone + "/6 gone)");
+            SetTime(0.45f);
+            yield return Wait(1.5f);
             int present = 0;
             string missing = "";
-            foreach (var id in new[] { NpcDatabase.Pearl, NpcDatabase.Mira, NpcDatabase.Tomas, NpcDatabase.Ada, NpcDatabase.Juno, NpcDatabase.Lio })
+            foreach (var id in NpcDatabase.Hermits)
             {
-                if (NpcRegistry.Find(id) != null) present++;
+                var h = NpcRegistry.Find(id) as NpcActor;
+                if (h != null && h.Present) present++;
                 else missing += id + " ";
             }
-            Check(present >= 4, present + "/6 village quest givers present" + (missing.Length > 0 ? " (missing " + missing + ")" : ""));
-            Check(PropInfo.Spot("meeting_house", out Vector3 meeting) || PropInfo.Spot("kiosk", out meeting), "village built (meeting house / kiosk spot)");
+            Check(present >= 5, present + "/6 hermits at work in the camp at 10:48" + (missing.Length > 0 ? " (missing " + missing + ")" : ""));
+            int hermitJobs = 0;
+            foreach (var d in SideQuestDatabase.All) if (SideQuestDatabase.HermitGiver(d)) hermitJobs++;
+            Check(hermitJobs >= 6, hermitJobs + " side quests given by the hermits");
+            // round 3: the village houses are gone (GDD §19) – the south beach keeps its jetty, the hermit camp is new
+            Check(PropInfo.Spot("village_jetty", out Vector3 meeting) && PropInfo.Spot("hermit_camp", out _), "south beach jetty + hermit camp built (village houses removed in round 3)");
             Vector3 v = WorldLayout.Village;
             Vector3 eye = new Vector3(v.x + 18f, Mathf.Max(WorldInfo.GroundHeight(v), Waves.SeaLevel) + 9f, v.z - 26f);
             if (pc != null && cam != null)
@@ -886,7 +900,7 @@ namespace Sealebrities
                 Pose(eye, new Vector3(v.x, Mathf.Max(WorldInfo.GroundHeight(v), Waves.SeaLevel) + 1.5f, v.z));
                 SetTime(0.68f);
                 yield return Wait(2.5f);
-                yield return Shot("39_village_altriff");
+                yield return Shot("39_south_beach_jetty");
                 pc.enabled = true;
             }
             // a side quest: start, quest line, drop
@@ -913,6 +927,9 @@ namespace Sealebrities
             // prerequisites of every quest
             StoryFlags.Set(StoryKeys.TutorialDone);
             StoryFlags.Set(StoryKeys.VillageVisited);
+            // round 3: the hermits give jobs once the camp is known and they are friends
+            StoryFlags.Set(StoryKeys.HermitCampFound);
+            foreach (var hid in NpcDatabase.Hermits) { Hermits.Raise(hid, 50); var hm = Hermits.GetOrAdd(hid); if (hm != null) hm.met = true; }
             StoryFlags.Set(NpcKeys.FirstDelivery);
             StoryFlags.Set(NpcKeys.LanternSeen);
             StoryFlags.Set(NpcKeys.RivalR1Done);
@@ -950,6 +967,14 @@ namespace Sealebrities
                 SetTime(8.5f / 24f);
                 var giver = NpcRegistry.Find(d.giver) as NpcActor;
                 yield return Wait(0.6f);
+                if (d.giver == NpcDatabase.Fin && (giver == null || !giver.Present))
+                {
+                    // Dr. Fin comes by boat on every third day, 8:30–13:00 (B.4) – her jobs need a visit day
+                    if (s.day % 3 != 0) s.day += 3 - s.day % 3;
+                    SetTime(9.2f / 24f);
+                    float tf = Time.realtimeSinceStartup;
+                    while (Time.realtimeSinceStartup - tf < 20f && (giver == null || !giver.Present)) { yield return Wait(0.5f); giver = NpcRegistry.Find(d.giver) as NpcActor; }
+                }
                 if (giver == null || !giver.Present)
                 {
                     skipped++;
@@ -1000,8 +1025,8 @@ namespace Sealebrities
                 switch (st.kind)
                 {
                     case SqStep.Talk:
-                        if (d.id == "P2") { yield return CardNight(d, giver); break; }
-                        // M3: Mira paddles the race to its end (6 legs ≈ 2:16) before she is back on the jetty to talk
+                        // (round 3: no card night any more – P2 is the gardener's goat yoga)
+                        // M3: the hunter paddles the race to its end (6 legs ≈ 2:16) before he is back in the camp to talk
                         if (d.id == "M3" && NpcDirector.I != null && NpcDirector.I.RaceRunning)
                         {
                             float tr = Time.realtimeSinceStartup;
@@ -1009,7 +1034,7 @@ namespace Sealebrities
                             Info("M3: waited " + F(Time.realtimeSinceStartup - tr, "0") + " s for the canoe race to end");
                             t0 = Time.realtimeSinceStartup;   // the wait is the race, not a stuck quest
                         }
-                        if (!giver.Present) { SetTime(15f / 24f); yield return Wait(2f); }   // e.g. Mira paddles the canoe race
+                        if (!giver.Present) { SetTime(15f / 24f); yield return Wait(2f); }   // e.g. the hunter paddles the canoe race
                         yield return NearNpc(giver);
                         yield return TalkUntil(giver, advanced, null, 15f);
                         break;
@@ -1183,7 +1208,7 @@ namespace Sealebrities
             if (food == null) { Info("no krill_bar food – skipped"); yield break; }
             SetTime(0.4f);
             if (S.money < 2000) gm.AddMoney(2000);
-            int pantry0 = Pantry.Count(food.id);
+            int pantry0 = Pantry.Count(food.id), bag0 = Backpack.Count(food.id);
             HeliMishaps.ForceNext = DeliveryMishap.WrongPlace;
             int d0 = S.deliveries.Count;
             bool bought = Shop.BuyFood(food, true);
@@ -1222,7 +1247,7 @@ namespace Sealebrities
             }
             crate.Interact();
             yield return Wait(0.8f);
-            Check(Pantry.Count(food.id) > pantry0, "found and opened: snacks in the pantry (" + Pantry.Count(food.id) + ")");
+            Check(Backpack.Count(food.id) > bag0 || Pantry.Count(food.id) > pantry0, "found and opened: snacks in the opener's backpack (round 3) – " + Backpack.Count(food.id) + " in the backpack, " + Pantry.Count(food.id) + " in the fridge");
             Check(!HeliService.SearchActive, "search line cleared");
         }
 
@@ -1280,7 +1305,7 @@ namespace Sealebrities
                 Vector3 water = FindWater(fog.center, 6f);
                 Vector3 eye = KeepInWater(new Vector3(water.x, Waves.SeaLevel - 5f, water.z), 1.5f, 1.5f);
                 yield return DiveTo(eye, eye + Vector3.forward * 10f);
-                yield return Wait(5f);
+                yield return Wait(8f);
                 int excl = 0, all = 0;
                 var reg = CreatureRegistry.Active;
                 for (int i = 0; i < reg.Count; i++)

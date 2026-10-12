@@ -80,12 +80,59 @@ namespace Sealebrities
         bool lyingHere;
         Vector3 anchor;
 
-        /// Registers a sleep spot and returns its index.
+        /// Registers a sleep spot and returns its index (legacy: only the head-end eye position – the lying pose is
+        /// derived; prefer RegisterBed / RegisterHammock).
         public static int Register(string id, Vector3 lie, float yaw, Vector3 stand, float standYaw, byte kind)
         {
             PropInfo.SleepSpots.Add(new SleepSpotInfo { id = id, lie = lie, yaw = yaw, stand = stand, standYaw = standYaw, kind = kind });
             return PropInfo.SleepSpots.Count - 1;
         }
+
+        /// Round 3: a flat bed / bunk. pillow = top centre of the pillow (world), feetDir = horizontal direction from the
+        /// head end to the foot end, mattressTop = height of the lying surface (blanket top). The diver's pelvis rests
+        /// 0.88 m from the crown (crown at the far edge of the pillow), the head is raised by the pillow.
+        public static int RegisterBed(string id, Vector3 pillow, float pillowLength, Vector3 feetDir, float mattressTop, Vector3 stand, float standYaw, byte kind = SleepSpotInfo.Bed)
+        {
+            feetDir.y = 0f;
+            feetDir = feetDir.sqrMagnitude > 1e-6f ? feetDir.normalized : Vector3.forward;
+            float yaw = Mathf.Atan2(feetDir.x, feetDir.z) * Mathf.Rad2Deg;
+            Vector3 crown = pillow - feetDir * (pillowLength * 0.5f - 0.02f);
+            Vector3 hip = crown + feetDir * 0.88f;
+            hip.y = mattressTop - 0.015f;   // sinks in a little
+            float pillowRise = Mathf.Max(0f, pillow.y - mattressTop);
+            float headRise = Mathf.Clamp(Mathf.Atan2(pillowRise * 0.8f, 0.72f) * Mathf.Rad2Deg, 0f, 14f);
+            var s = new SleepSpotInfo { id = id, yaw = yaw, stand = stand, standYaw = standYaw, kind = kind, hip = hip, headRise = headRise, feetRise = 0f };
+            s.lie = EyeOf(s);
+            PropInfo.SleepSpots.Add(s);
+            return PropInfo.SleepSpots.Count - 1;
+        }
+
+        /// Round 3: a hammock hanging between the hook at the head end and the hook at the foot end with the given sag
+        /// (centre line y(t) = lerp(a, b, t) − sag · sin(πt)). The pelvis lies in the lowest point, torso and legs follow
+        /// the curve up.
+        public static int RegisterHammock(string id, Vector3 hookHead, Vector3 hookFeet, float sag, Vector3 stand, float standYaw, float pillow = 0f)
+        {
+            Vector3 d = hookFeet - hookHead;
+            Vector3 flat = new Vector3(d.x, 0f, d.z);
+            float len = Mathf.Max(0.5f, flat.magnitude);
+            Vector3 dir = flat / len;
+            float yaw = Mathf.Atan2(dir.x, dir.z) * Mathf.Rad2Deg;
+            Vector3 Curve(float t) => Vector3.Lerp(hookHead, hookFeet, t) - Vector3.up * (sag * Mathf.Sin(t * Mathf.PI));
+            Vector3 hip = Curve(0.5f);
+            Vector3 head = Curve(Mathf.Clamp01(0.5f - 0.7f / len));
+            Vector3 feet = Curve(Mathf.Clamp01(0.5f + 0.85f / len));
+            // the head rests on the cloth (+ a pillow when there is one, porch hammocks: 0.11 m)
+            float headRise = Mathf.Clamp(Mathf.Atan2(head.y + Mathf.Max(0f, pillow) - hip.y, 0.7f) * Mathf.Rad2Deg + 2f, 4f, 34f);
+            float feetRise = Mathf.Clamp(Mathf.Atan2(feet.y - hip.y, 0.85f) * Mathf.Rad2Deg, 0f, 28f);
+            hip.y -= 0.01f;
+            var s = new SleepSpotInfo { id = id, yaw = yaw, stand = stand, standYaw = standYaw, kind = SleepSpotInfo.Hammock, hip = hip, headRise = headRise, feetRise = feetRise };
+            s.lie = EyeOf(s);
+            PropInfo.SleepSpots.Add(s);
+            return PropInfo.SleepSpots.Count - 1;
+        }
+
+        /// Eye position of a diver lying on the spot (same maths as DiverPuppet.LieEye at height scale 1).
+        static Vector3 EyeOf(in SleepSpotInfo s) => DiverPuppet.LieEye(s.hip, s.yaw, s.headRise, s.kind == SleepSpotInfo.Hammock, 1f, out _);
 
         bool Lying => lyingHere && SleepVote.LocalLying;
 
@@ -117,7 +164,9 @@ namespace Sealebrities
             }
             if (!Net.IsOnline || Net.PlayerCount <= 1)
             {
-                // solo: unchanged – lying down sleeps until the morning (E.3)
+                // solo: lying down sleeps until the morning (E.3); round 3: the player lies down on this spot through
+                // the fade (the Player module reads LocalSleepSpot on GameEvents.SleepStarted)
+                PropInfo.LocalSleepSpot = spotIndex;
                 SleepVote.SetLying(true);
                 return;
             }
@@ -150,6 +199,8 @@ namespace Sealebrities
             bool up = p == null || p.Root == null || p.IsFainting || (UIState.PauseOpen && !Net.HasAuthority) || GameInput.JumpPressed;
             if (!up)
             {
+                // round 3: the Player module moves the diver onto the mattress / into the hammock – follow it there
+                if (p is PlayerController pcl && pcl.IsLyingDown) anchor = p.Root.position;
                 Vector3 d = p.Root.position - anchor;
                 d.y = 0f;
                 up = d.sqrMagnitude > 1.3f * 1.3f;

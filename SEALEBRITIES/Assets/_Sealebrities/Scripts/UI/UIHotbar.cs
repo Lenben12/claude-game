@@ -33,84 +33,44 @@ namespace Sealebrities
         static void ResetStatics() { Active = false; Label = null; Changed = null; }
     }
 
-    /// How-to-Fish style hotbar at the bottom centre: left hand (offhand) group and right hand group, 3 slots each,
-    /// item icons, key labels from GameInput.BindingLabel, highlighted active slot and the item name below.
-    /// The two-handed rod dims the other hand and joins both groups with a white bracket.
+    /// Round 3 hotbar (GDD §19 „ein großer Balken statt 3 + 3“): ONE row of Hands.SlotCount slots at the bottom centre
+    /// (keys 1–8 from GameInput.BindingLabel). Each slot shows its item icon, a count for stacks, a durability bar for
+    /// weapons and a small mitten for offhand slots. The main hand's slot gets a thick white frame, the offhand's a
+    /// turquoise one; the names of both held items sit below. Used-up stacks / gear not bought yet are dimmed.
     public class UIHotbar
     {
-        public const float SlotSize = 84f, Gap = 10f, GroupGap = 56f;
+        public const float SlotSize = 74f, Gap = 8f;
+        static readonly Color OffColor = UIPalette.Turquoise;
 
         class Slot
         {
-            public VisualElement box;
-            public UIGlyph icon;
-            public Label key;
-            public HoldItem item = (HoldItem)(-1);
-            public bool owned, active;
+            public VisualElement box, durTrack, durFill;
+            public UIGlyph icon, offHand;
+            public Label key, count;
+            public string id;
+            public int shownCount = -1, state = -1, durKey = -1;
+            public bool usable = true;
             public int keyVersion = -1;
+            public bool off;
         }
 
         public readonly VisualElement Root;
-        readonly Slot[] left = new Slot[Hands.SlotsPerHand], right = new Slot[Hands.SlotsPerHand];
-        readonly Label leftName, rightName;
-        readonly VisualElement leftGroup, rightGroup, bracket;
+        readonly Slot[] slots = new Slot[Hands.SlotCount];
+        readonly Label nameLabel;
         bool dirty = true;
         int keyVersion;
-        bool twoHanded;
+        float lastChange;
+        string nameMain, nameOff;
+        Language nameLang;
 
         public UIHotbar()
         {
-            Root = UIKit.Row();
+            Root = UIKit.Col();
             Root.pickingMode = PickingMode.Ignore;
-            Root.style.alignItems = Align.FlexEnd;
+            Root.style.alignItems = Align.Center;
 
-            leftGroup = Group(Hand.Left, left, out leftName);
-            Root.Add(leftGroup);
-            var mid = UIKit.Box();
-            mid.style.width = GroupGap;
-            mid.style.height = SlotSize;
-            mid.style.flexShrink = 0;
-            mid.style.marginBottom = 24f;
-            bracket = UIKit.Box();
-            bracket.style.position = Position.Absolute;
-            bracket.style.left = -SlotSize * 0.5f; bracket.style.right = -SlotSize * 0.5f;
-            bracket.style.bottom = -12f;
-            bracket.style.height = 10f;
-            bracket.style.borderLeftWidth = 3f; bracket.style.borderRightWidth = 3f; bracket.style.borderBottomWidth = 3f;
-            UIKit.BorderColor(bracket, Color.white);
-            bracket.style.borderBottomLeftRadius = 6f; bracket.style.borderBottomRightRadius = 6f;
-            bracket.style.display = DisplayStyle.None;
-            mid.Add(bracket);
-            Root.Add(mid);
-            rightGroup = Group(Hand.Right, right, out rightName);
-            Root.Add(rightGroup);
-
-            UIKit.IgnorePicking(Root);
-            Hands.Changed += MarkDirty;
-            GameEvents.GearChanged += MarkDirty;
-            GameInput.BindingsChanged += OnBindings;
-        }
-
-        public void Dispose()
-        {
-            Hands.Changed -= MarkDirty;
-            GameEvents.GearChanged -= MarkDirty;
-            GameInput.BindingsChanged -= OnBindings;
-        }
-
-        void OnBindings() { keyVersion++; dirty = true; }
-        public void MarkDirty() { dirty = true; }
-        public void RefreshTexts() { keyVersion++; dirty = true; }
-
-        VisualElement Group(Hand hand, Slot[] slots, out Label name)
-        {
-            var g = UIKit.Col();
-            g.style.alignItems = Align.Center;
-            var handIcon = new UIHudGlyph(UIGlyphs.Hand, new Color(1f, 1f, 1f, 0.7f), 28f);
-            if (hand == Hand.Left) handIcon.style.scale = new Scale(new Vector2(-1f, 1f));
-            handIcon.style.marginBottom = 6f;
-            g.Add(handIcon);
             var row = UIKit.Row();
+            row.style.alignItems = Align.FlexEnd;
             for (int i = 0; i < slots.Length; i++)
             {
                 var s = new Slot();
@@ -120,33 +80,76 @@ namespace Sealebrities
                 UIKit.Center(s.box);
                 if (i > 0) s.box.style.marginLeft = Gap;
                 UIKit.Transition(s.box, 0.1f, "scale");
-                s.icon = new UIGlyph(null, Color.white, 64f);
+                s.icon = new UIGlyph(null, Color.white, 56f);
                 s.box.Add(s.icon);
                 s.key = UIKit.HudText("", 13f, Color.white, true);
                 s.key.style.position = Position.Absolute;
-                s.key.style.left = 7f; s.key.style.top = 4f;
+                s.key.style.left = 6f; s.key.style.top = 3f;
                 s.box.Add(s.key);
-                ApplySlotStyle(s, false);
+                s.count = UIKit.HudText("", 15f, Color.white, true);
+                s.count.style.position = Position.Absolute;
+                s.count.style.right = 6f; s.count.style.bottom = 2f;
+                s.box.Add(s.count);
+                // offhand marker: a small mirrored mitten in the lower left corner
+                s.offHand = new UIGlyph(UIGlyphs.Hand, OffColor, 18f);
+                s.offHand.style.position = Position.Absolute;
+                s.offHand.style.left = 4f; s.offHand.style.bottom = 4f;
+                s.offHand.style.scale = new Scale(new Vector2(-1f, 1f));
+                s.offHand.style.display = DisplayStyle.None;
+                s.box.Add(s.offHand);
+                // durability bar (weapons)
+                s.durTrack = UIKit.Box();
+                s.durTrack.style.position = Position.Absolute;
+                s.durTrack.style.left = 10f; s.durTrack.style.right = 10f; s.durTrack.style.bottom = 5f;
+                s.durTrack.style.height = 4f;
+                UIKit.Radius(s.durTrack, 2f);
+                s.durTrack.style.backgroundColor = new Color(0f, 0f, 0f, 0.35f);
+                s.durFill = UIKit.Box();
+                s.durFill.style.height = 4f;
+                UIKit.Radius(s.durFill, 2f);
+                s.durFill.style.backgroundColor = UIPalette.Leaf;
+                s.durTrack.Add(s.durFill);
+                s.durTrack.style.display = DisplayStyle.None;
+                s.box.Add(s.durTrack);
+                ApplySlotStyle(s, 0);
                 row.Add(s.box);
                 slots[i] = s;
             }
-            g.Add(row);
-            name = UIKit.HudText("", 16f, Color.white, true);
-            name.style.marginTop = 6f;
-            name.style.height = 20f;
-            name.style.unityTextAlign = TextAnchor.MiddleCenter;
-            g.Add(name);
-            return g;
+            Root.Add(row);
+            nameLabel = UIKit.HudText("", 16f, Color.white, true);
+            nameLabel.style.marginTop = 6f;
+            nameLabel.style.height = 20f;
+            nameLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
+            Root.Add(nameLabel);
+
+            UIKit.IgnorePicking(Root);
+            Hands.Changed += MarkDirty;
+            Backpack.Changed += MarkDirty;
+            GameEvents.GearChanged += MarkDirty;
+            GameInput.BindingsChanged += OnBindings;
         }
 
-        static void ApplySlotStyle(Slot s, bool active)
+        public void Dispose()
         {
-            s.box.style.backgroundColor = active ? new Color(1f, 1f, 1f, 0.16f) : new Color(15f / 255f, 20f / 255f, 35f / 255f, 0.22f);
-            UIKit.Border(s.box, active ? 3f : 2f, active ? Color.white : new Color(1f, 1f, 1f, 0.45f));
-            s.box.style.scale = new Scale(active ? new Vector2(1.1f, 1.1f) : Vector2.one);
+            Hands.Changed -= MarkDirty;
+            Backpack.Changed -= MarkDirty;
+            GameEvents.GearChanged -= MarkDirty;
+            GameInput.BindingsChanged -= OnBindings;
         }
 
-        float lastChange;
+        void OnBindings() { keyVersion++; dirty = true; }
+        public void MarkDirty() { dirty = true; }
+        public void RefreshTexts() { keyVersion++; dirty = true; nameMain = null; }
+
+        /// 0 = idle, 1 = main hand, 2 = offhand.
+        static void ApplySlotStyle(Slot s, int state)
+        {
+            bool held = state != 0;
+            s.box.style.backgroundColor = held ? new Color(1f, 1f, 1f, 0.16f) : new Color(15f / 255f, 20f / 255f, 35f / 255f, 0.22f);
+            Color border = state == 1 ? Color.white : state == 2 ? OffColor : new Color(1f, 1f, 1f, 0.45f);
+            UIKit.Border(s.box, held ? 3f : 2f, border);
+            s.box.style.scale = new Scale(held ? new Vector2(1.1f, 1.1f) : Vector2.one);
+        }
 
         /// Seconds since the hotbar last changed (Q39 idle fade).
         public float IdleSeconds => Time.unscaledTime - lastChange;
@@ -156,53 +159,74 @@ namespace Sealebrities
             if (!dirty) return;
             dirty = false;
             lastChange = Time.unscaledTime;
-            Refresh(Hand.Left, left, leftName);
-            Refresh(Hand.Right, right, rightName);
-            bool rod = Hands.IsTwoHanded(Hands.Active(Hand.Right)) || Hands.IsTwoHanded(Hands.Active(Hand.Left));
-            if (rod != twoHanded)
-            {
-                twoHanded = rod;
-                UIKit.Show(bracket, rod);
-            }
-            bool rodRight = Hands.IsTwoHanded(Hands.Active(Hand.Right));
-            bool rodLeft = Hands.IsTwoHanded(Hands.Active(Hand.Left));
-            leftGroup.style.opacity = rodRight ? 0.45f : 1f;
-            rightGroup.style.opacity = rodLeft ? 0.45f : 1f;
-            if (rodRight) leftName.text = "";
-            if (rodLeft) rightName.text = "";
-        }
-
-        void Refresh(Hand hand, Slot[] slots, Label name)
-        {
-            int active = Hands.ActiveSlot(hand);
+            int main = Hands.ActiveSlot(Hand.Right), off = Hands.ActiveSlot(Hand.Left);
             for (int i = 0; i < slots.Length; i++)
             {
                 var s = slots[i];
-                var item = Hands.SlotItem(hand, i);
-                bool owned = item != HoldItem.None && Hands.Owns(item);
-                bool act = i == active;
-                if (item != s.item || owned != s.owned)
+                string id = Hands.SlotId(i);
+                var def = ItemDatabase.Get(id);
+                bool usable = Hands.SlotUsable(i);
+                if (id != s.id || usable != s.usable)
                 {
-                    s.item = item;
-                    s.owned = owned;
-                    s.icon.SetDraw(UIGlyphs.ForItem(item));
-                    s.icon.SetColor(new Color(1f, 1f, 1f, owned ? 1f : 0.35f));
+                    s.id = id;
+                    s.usable = usable;
+                    s.icon.SetDraw(UIGlyphs.ForItemId(id));
+                    Color tint = UIGlyphs.TintFor(id);
+                    tint.a = usable ? 1f : 0.35f;
+                    s.icon.SetColor(tint);
                 }
-                if (act != s.active)
+                int cnt = def != null && !def.isGear && def.maxStack > 1 ? Backpack.Count(id) : -1;
+                if (cnt != s.shownCount)
                 {
-                    s.active = act;
-                    ApplySlotStyle(s, act);
+                    s.shownCount = cnt;
+                    s.count.text = cnt > 1 ? cnt.ToString() : cnt == 0 ? "0" : "";
+                }
+                // durability of the best stack of a weapon
+                int dk = -1;
+                float dur01 = 1f;
+                if (def != null && def.HasDurability)
+                {
+                    var st = Backpack.First(id);
+                    dur01 = st != null ? Mathf.Clamp01(st.durability / Mathf.Max(1f, def.durability)) : 0f;
+                    dk = Mathf.RoundToInt(dur01 * 20f);
+                }
+                if (dk != s.durKey)
+                {
+                    s.durKey = dk;
+                    UIKit.Show(s.durTrack, dk >= 0);
+                    if (dk >= 0)
+                    {
+                        s.durFill.style.width = Length.Percent(dur01 * 100f);
+                        s.durFill.style.backgroundColor = dur01 < 0.25f ? UIPalette.Danger : dur01 < 0.5f ? UIPalette.Warn : UIPalette.Leaf;
+                    }
+                }
+                bool isOff = Hands.SlotHand(i) == Hand.Left;
+                if (isOff != s.off) { s.off = isOff; UIKit.Show(s.offHand, isOff); }
+                int state = i == main ? 1 : i == off ? 2 : 0;
+                if (state != s.state)
+                {
+                    s.state = state;
+                    ApplySlotStyle(s, state);
                 }
                 if (s.keyVersion != keyVersion)
                 {
                     s.keyVersion = keyVersion;
-                    s.key.text = GameInput.BindingLabel((GameAction)((hand == Hand.Right ? (int)GameAction.RightSlot1 : (int)GameAction.LeftSlot1) + i));
+                    s.key.text = GameInput.BindingLabel(GameInput.SlotAction(i));
                 }
             }
-            var held = active >= 0 ? Hands.SlotItem(hand, active) : HoldItem.None;
-            string n = held == HoldItem.None ? "" : Hands.DisplayName(held);
-            if (held == HoldItem.FishingRod) n += Loc.Tr(" · beidhändig", " · two-handed");
-            if (!string.Equals(name.text, n)) name.text = n;
+            // names of what is held: "Stock · Lampe" / "Angel · beidhändig"
+            string m = Hands.ActiveId(Hand.Right), o = Hands.ActiveId(Hand.Left);
+            if (m != nameMain || o != nameOff || nameLang != Loc.Current)
+            {
+                nameMain = m;
+                nameOff = o;
+                nameLang = Loc.Current;
+                string n = Hands.DisplayName(m);
+                if (m != null && Hands.IsTwoHandedId(m)) n += Loc.Tr(" · beidhändig", " · two-handed");
+                string on = Hands.DisplayName(o);
+                if (on.Length > 0) n = n.Length > 0 ? n + "  ·  " + on : on;
+                nameLabel.text = n;
+            }
         }
     }
 }

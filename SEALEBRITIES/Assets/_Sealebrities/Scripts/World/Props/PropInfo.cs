@@ -89,6 +89,11 @@ namespace Sealebrities
         public Vector3 stand;
         public float standYaw;
         public byte kind;
+        /// Round 3 (GDD §19 „Figur liegt wirklich in der Hängematte / im Bett“): the point on the mattress / cloth under
+        /// the pelvis (the lying diver's root, Vector3.zero = unknown → derived from `lie`), the torso incline (head end
+        /// up, degrees) and the leg incline (feet up). Filled by PropBed.RegisterBed / RegisterHammock.
+        public Vector3 hip;
+        public float headRise, feetRise;
     }
 
     /// A water current volume (K.3): a capsule from start to end with the given radius; inside it the flow runs

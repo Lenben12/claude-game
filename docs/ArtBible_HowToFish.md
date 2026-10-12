@@ -354,6 +354,13 @@ Three variants `#8A8C96`, `#6E6F7E`, `#5C5A69`; beach rocks `#6E6A78`; cliffs `#
 HtF people (`htf_beach_palms_rod_hands.jpg`, `htf_shop_hut_characters.jpg`, `htf_beach_grill_sea.jpg`) are tall
 beans: no neck, the head is the top of the body, thin tube arms, big round eyes.
 
+> **Round 3 update (GDD §19 „weder klotzig noch zu kugelig“, binding over the bullets below):** the divers are now
+> bean-HUMANS – 1.85 m, a tall egg head (1.53–1.87 m, r 0.125) on a short neck with a wetsuit collar, a torso with
+> defined shoulders (pelvis + chest on a spine joint, elliptical cross-section, depth 0.70 × width), tapered arms /
+> legs with elbows and knees (upper arm 0.29, forearm 0.26, thigh / shin 0.42), mitten gloves, a readable face (eyes
+> r 0.036 at 1.715 m, lids, brows in the hair colour, a nose, ears, mouth), hair that shows under every hat, body type
+> and height options. Smooth normals, LOD0 ≤ 9,000 triangles per option. Builder: `Player/DiverBuilder.cs`.
+
 * Total height **1.85 m**. Body bean: capsule with slight taper (bottom r 0.27 m, top r 0.22 m), 12 radial
   segments, **smooth normals**. Head = top 0.35 m of the bean.
 * Legs: tubes 0.75 m, r 0.11 m, flat boots/fins `#2B2533`. Arms: tubes 0.70 m, r 0.06 m, mitten hands r 0.07 m.

@@ -30,9 +30,13 @@ namespace Sealebrities
         /// L.10 quest line at the top centre.
         public UIQuestLine QuestLine { get; private set; }
         public UISleepCounter SleepCounter { get; private set; }
+        /// Round 3 (Q42): the next dive site's requirement under the quest line.
+        public UISiteGoal SiteGoal { get; private set; }
         public UISubtitles Subtitles { get; private set; }
         public UIRadioCard Radio { get; private set; }
         public UIReelGauge Reel { get; private set; }
+        /// Round 3: the treasure-map overlay (M) – usable while driving / on the passenger bench.
+        public UIMapPanel MapPanel { get; private set; }
 
         public VisualElement Root => root;
 
@@ -69,6 +73,7 @@ namespace Sealebrities
             var questLayer = Layer("sb-layer-quest");
             var subLayer = Layer("sb-layer-subtitles");
             var notesLayer = Layer("sb-layer-notes");
+            var mapLayer = Layer("sb-layer-map");
             var letterLayer = Layer("sb-layer-letter");
             var phoneLayer = Layer("sb-layer-phone");
             var inventoryLayer = Layer("sb-layer-inventory");
@@ -86,12 +91,15 @@ namespace Sealebrities
             Viewfinder = new UIViewfinder(viewLayer);
             QuestLine = new UIQuestLine(questLayer);
             SleepCounter = new UISleepCounter(QuestLine.Below);
+            SiteGoal = new UISiteGoal(QuestLine.Below);
             Subtitles = new UISubtitles(subLayer);
             Radio = new UIRadioCard(subLayer);
             Notes = new UINotifications(notesLayer);
+            MapPanel = new UIMapPanel(mapLayer);
             UILetterCard.Init(letterLayer);
             Phone = new UIPhone(this, phoneLayer, doc.panelSettings);
             Inventory = new UIInventory(inventoryLayer);
+            UIHutDecor.Init(inventoryLayer);   // round 3: „Einrichten“ (hut furnishing)
             Menu = new UIMainMenu(this, menuLayer);
             Pause = new UIPauseMenu(this, pauseLayer);
             Finale = new UIFinale(finaleLayer);
@@ -317,7 +325,7 @@ namespace Sealebrities
         void OnUploadCreated(PendingUpload u) { Phone.MarkDirty(); }
         void OnUploadResolved(VideoRecord v) { Notes.UploadResolved(v); Phone.MarkDirty(); }
         void OnBumped(float airLost) { Hud.OnBumped(airLost); }
-        void OnFainted() { Phone.Close(); Inventory.Close(); UILetterCard.Close(); }
+        void OnFainted() { Phone.Close(); Inventory.Close(); UILetterCard.Close(); MapPanel.Close(); }
         void OnRecordingChanged(bool rec) { Viewfinder.OnRecordingChanged(rec); }
         void OnClipRecorded(FootageClip c) { Hud.OnClipRecorded(); Phone.MarkDirty(); }
         void OnSponsor(string siteId) { Phone.MarkDirty(); }
@@ -405,6 +413,7 @@ namespace Sealebrities
             Pause.Close();
             Phone.Close();
             Inventory.Close();
+            MapPanel.Close();
             UILetterCard.Close();
             Phone.Messages.ResetSession();
             Phone.Tasks.ResetSession();
@@ -429,6 +438,7 @@ namespace Sealebrities
             Pause.Close();
             Phone.Close();
             Inventory.Close();
+            MapPanel.Close();
             UILetterCard.Close();
             Subtitles.Clear();
             Radio.Clear();
@@ -540,17 +550,20 @@ namespace Sealebrities
             Pause.Tick(dt);
             Finale.Tick(dt);
             Phone.Tick(dt);
+            MapPanel.Tick(dt);
             Inventory.Tick(dt);
             Viewfinder.Tick(dt);
             Hud.Tick(dt, aiming);
             QuestLine.Tick(dt, aiming);
             SleepCounter.Tick(Notes);
+            SiteGoal.Tick(dt);
             Subtitles.Tick(dt);
             Radio.Tick(dt, Notes);
             Reel.Tick(dt);
             Notes.Tick(dt);
             Character.Tick(dt);
             UILetterCard.Tick(dt);
+            UIHutDecor.Tick(dt);
             UIDialog.Tick(dt);
         }
 
@@ -625,6 +638,11 @@ namespace Sealebrities
                 Phone.Close();
                 DryHint();
             }
+            if (UIState.MapOverlayOpen && PlayerSwimming())
+            {
+                MapPanel.Close();
+                DryHint();
+            }
         }
 
         void DryHint()
@@ -664,6 +682,7 @@ namespace Sealebrities
             }
 
             if (UILetterCard.HandleInput()) return;
+            if (UIHutDecor.HandleInput()) return;
 
             // finale page: Esc = keep playing, nothing else reaches pause/phone while it is open
             if (Finale.IsOpen)
@@ -678,6 +697,7 @@ namespace Sealebrities
                 if (UIState.MainMenuOpen) { Menu.Back(); return; }
                 if (UIState.InventoryOpen) { Inventory.Close(); return; }
                 if (UIState.PhoneOpen) { Phone.Close(); return; }
+                if (UIState.MapOverlayOpen) { MapPanel.Close(); return; }
                 if (UIState.PauseOpen) { Pause.HandleEscape(); return; }
                 if (inGame) Pause.Open();
                 return;
@@ -689,19 +709,30 @@ namespace Sealebrities
             if (GameInput.InventoryPressed)
             {
                 if (UIState.PhoneOpen) Phone.Close();
+                MapPanel.Close();
                 Inventory.Toggle();
             }
             else if (GameInput.PhonePressed)
             {
                 if (UIState.InventoryOpen) Inventory.Close();
                 if (!UIState.PhoneOpen && PlayerSwimming()) { DryHint(); return; }
+                MapPanel.Close();
                 Phone.Toggle();
             }
             else if (GameInput.JournalPressed)
             {
                 if (UIState.InventoryOpen) Inventory.Close();
                 if (!UIState.PhoneOpen && PlayerSwimming()) { DryHint(); return; }
+                MapPanel.Close();
                 Phone.ToggleApp(Phone.Sealog);
+            }
+            else if (GameInput.MapPressed)
+            {
+                // round 3: the map overlay – also while driving the boat (does not block steering) and on the bench
+                if (UIState.InventoryOpen) Inventory.Close();
+                if (UIState.PhoneOpen) Phone.Close();
+                if (!UIState.MapOverlayOpen && PlayerSwimming()) { DryHint(); return; }
+                MapPanel.Toggle();
             }
         }
 
@@ -719,7 +750,7 @@ namespace Sealebrities
         void LateUpdate()
         {
             if (!initialized) return;
-            bool free = (UIState.BlocksGameplay || UIDialog.IsOpen) && !Intro.Active;
+            bool free = (UIState.BlocksGameplay || UIDialog.IsOpen || UIState.MapOverlayOpen) && !Intro.Active;
             if (free)
             {
                 if (Cursor.lockState != CursorLockMode.None) Cursor.lockState = CursorLockMode.None;
@@ -746,6 +777,7 @@ namespace Sealebrities
             if (Character != null && Character.IsOpen) Character.Close(false);
             Hud?.Hotbar.Dispose();
             Hud?.Food.Dispose();
+            Hud?.Needs.Dispose();
             QuestLine?.Dispose();
             Subtitles?.Dispose();
             Radio?.Dispose();

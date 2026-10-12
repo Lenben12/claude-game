@@ -74,7 +74,7 @@ namespace Sealebrities
         }
 
         /// Debug/AutoShot helper: opens the phone on an app by id ("sealog", "tasks", "market", "gallery", "shop", "deals",
-        /// "fin", "weather",
+        /// "fin", "weather", "cookbook",
         /// "fintube", "krill", "followfish", "map", "messages", "settings"). "sealog:&lt;speciesId&gt;" opens that species'
         /// journal page, null or "" the home screen, "close" closes the phone, "inventory" / "inventory:close" toggles the
         /// inventory. Returns false when the phone cannot open (no game, menu/pause/loading open).

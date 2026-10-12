@@ -176,6 +176,45 @@ namespace Sealebrities
             return true;
         }
 
+        // ---------------------------------------------------------------- backpack items (round 3: spears, speargun)
+        public static bool CanBuyItem(ItemDef d, bool express, out string reason)
+        {
+            reason = null;
+            if (d == null || !d.sold || d.price <= 0) { reason = Loc.Tr("Nicht im Shop", "Not sold in the shop"); return false; }
+            if (IsOrdered(ItemDatabase.DeliveryId(d))) { reason = Loc.Tr("Unterwegs", "On its way"); return false; }
+            if (S.followers < d.followersNeeded) { reason = Loc.Tr($"Ab {Loc.Number(d.followersNeeded)} Followern", $"From {Loc.Number(d.followersNeeded)} followers"); return false; }
+            if (S.money < ItemPrice(d, express)) { reason = Loc.Tr("Zu wenig Geld", "Not enough money"); return false; }
+            return true;
+        }
+
+        public static long ItemPrice(ItemDef d, bool express) => d == null ? 0 : express ? (long)(d.price * (1f + ExpressSurcharge)) : d.price;
+
+        /// Orders a backpack item (spear, speargun). The crate goes into the OPENER's backpack.
+        /// SHARED STATE: clients send NetCommand.Buy ("item:&lt;id&gt;", express).
+        public static bool BuyItem(ItemDef d, bool express)
+        {
+            if (GameManager.I == null) return false;
+            if (!CanBuyItem(d, express, out var reason)) { GameEvents.RaiseNotify(NotifyKind.Warning, reason); return false; }
+            string id = ItemDatabase.DeliveryId(d);
+            long price = ItemPrice(d, express);
+            if (Net.IsClient)
+            {
+                Net.Command(NetCommand.Buy, id, express ? "1" : "0");
+                ArrivalFor(express, out int cday, out float ctime);
+                S.deliveries.Add(new Delivery { itemId = id, express = express, arrivalDay = cday, arrivalTime = ctime });
+                S.money = System.Math.Max(0, S.money - price);
+                GameEvents.RaiseMoneyChanged(S.money);
+                OrderedToast(d.Name, cday, ctime);
+                return true;
+            }
+            if (!GameManager.I.TrySpend(price)) return false;
+            ArrivalFor(express, out int day, out float time);
+            S.deliveries.Add(new Delivery { itemId = id, express = express, arrivalDay = day, arrivalTime = time });
+            if (!(Net.IsHost && NetCommands.ScopeFrom > 0)) OrderedToast(d.Name, day, time);
+            GameManager.I.Save();
+            return true;
+        }
+
         static void OrderedToast(string name, int day, float time)
         {
             string clock = GameManager.Clock(time);
@@ -191,6 +230,8 @@ namespace Sealebrities
             if (d == null) return "";
             var f = FoodDatabase.FromDeliveryId(d.itemId);
             if (f != null) return f.Name;
+            var it = ItemDatabase.FromDeliveryId(d.itemId);
+            if (it != null) return it.Name;
             var g = GearDatabase.Get(d.itemId);
             return g != null ? g.Name : d.itemId;
         }
@@ -235,7 +276,8 @@ namespace Sealebrities
         }
 
         /// Called when the LOCAL player picks up the crate. The opener switches to the new item right away
-        /// (Gear.ClearChoice); other players keep their own equipment choice.
+        /// (Gear.ClearChoice); other players keep their own equipment choice. Round 3: snack packs and backpack items
+        /// (spears) go into the OPENER's backpack (what does not fit: snacks into the shared fridge, items on the ground).
         /// SHARED STATE: on co-op clients this sends NetCommand.OpenCrate (itemId) to the host.
         public static void Receive(Delivery d)
         {
@@ -245,24 +287,48 @@ namespace Sealebrities
                             d.arrivalTime.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
             var item = GearDatabase.Get(d.itemId);
             if (item != null) Gear.ClearChoice(item.slot);
+            ToOpenersBackpack(d);
             Apply(d, item);
         }
 
-        /// Host side of a client's NetCommand.OpenCrate (does not touch the host player's equipment choice).
+        /// Host side of a client's NetCommand.OpenCrate (does not touch the host player's equipment choice or backpack).
         public static void ReceiveForRemote(Delivery d)
         {
             if (d == null || GameManager.I == null || !Net.HasAuthority) return;
             Apply(d, GearDatabase.Get(d.itemId));
         }
 
-        static void Apply(Delivery d, GearItem item)
+        /// Round 3: the crate's snacks / items go into the local opener's backpack.
+        static void ToOpenersBackpack(Delivery d)
         {
-            S.deliveries.Remove(d);
             var food = FoodDatabase.FromDeliveryId(d.itemId);
             if (food != null)
             {
-                Pantry.AddLocal(food.id, Mathf.Max(1, food.packSize));
-                GameEvents.RaiseNotify(NotifyKind.Delivery, food.Name, "+" + Mathf.Max(1, food.packSize) + Loc.Tr(" im Kühlschrank", " in the fridge"));
+                int n = Mathf.Max(1, food.packSize);
+                int added = Backpack.Add(food.id, n, false);
+                if (added < n) Pantry.Add(food.id, n - added);   // the rest waits in the fridge
+                GameEvents.RaiseNotify(NotifyKind.Delivery, food.Name, "+" + n + (added < n ? Loc.Tr(" · Rest im Kühlschrank", " · rest in the fridge") : Loc.Tr(" im Rucksack", " in the backpack")));
+                return;
+            }
+            var it = ItemDatabase.FromDeliveryId(d.itemId);
+            if (it == null) return;
+            int count = Mathf.Max(1, it.packSize);
+            for (int i = 0; i < count; i++)
+            {
+                if (Backpack.Add(it.id, 1, false) > 0) continue;
+                // backpack full: the item lands in front of the player
+                Backpack.DropHandler?.Invoke(new InvStack { id = it.id, count = 1, durability = it.HasDurability ? it.durability : -1f, sharpness = it.Sharpenable ? it.sharpness : -1f },
+                    Refs.Player != null && Refs.Player.Root != null ? Refs.Player.Root.position + Vector3.up : Vector3.zero);
+            }
+            GameEvents.RaiseNotify(NotifyKind.Delivery, it.Name, Loc.Tr("im Rucksack", "in the backpack"));
+            GameEvents.RaiseBanner(Loc.Tr("Neu im Rucksack: ", "New in the backpack: ") + it.Name, new Color(1f, 0.55f, 0.1f));
+        }
+
+        static void Apply(Delivery d, GearItem item)
+        {
+            S.deliveries.Remove(d);
+            if (FoodDatabase.FromDeliveryId(d.itemId) != null || ItemDatabase.FromDeliveryId(d.itemId) != null)
+            {
                 GameManager.I.Save();
                 return;
             }

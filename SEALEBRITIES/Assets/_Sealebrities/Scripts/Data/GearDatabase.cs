@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace Sealebrities
 {
     /// Chopper Shop categories (L.12 – big tiles in the redesigned app).
-    public enum ShopCategory { Diving, Camera, Boat, Fishing, Snacks, Parts }
+    public enum ShopCategory { Diving, Camera, Boat, Fishing, Snacks, Parts, Weapons }
 
     public class GearItem
     {

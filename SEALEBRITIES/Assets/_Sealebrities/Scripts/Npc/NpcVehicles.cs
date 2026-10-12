@@ -212,7 +212,14 @@ namespace Sealebrities
             P(t, "NamePlate", FlatBox(0.1f, 0.5f, 3.2f, 0.2f), gold, new Vector3(3.12f, 1.3f, -6f));
             P(t, "NamePlateL", FlatBox(0.1f, 0.5f, 3.2f, 0.2f), gold, new Vector3(-3.12f, 1.3f, -6f));
             P(t, "Speaker", FlatBox(0.5f, 0.7f, 0.5f, 0.3f), ink, new Vector3(1.9f, 2.0f, 4.5f));
-            AddSolid(go, new Vector3(6.2f, 3.2f, 24f), new Vector3(0f, 0.4f, 0f));
+            // round 3 (GDD §19): the old single box ended at 2.0 m – one walked through both cabin decks. Now the hull
+            // (full beam aft, narrower toward the fine bow) up to the teak deck, both cabins and the hot tub.
+            AddSolid(go, new Vector3(6.2f, 3.3f, 16.4f), new Vector3(0f, 0.03f, -3.8f));
+            AddSolid(go, new Vector3(4.4f, 3.5f, 4.6f), new Vector3(0f, 0.13f, 6.6f));
+            AddSolid(go, new Vector3(2.0f, 3.7f, 2.6f), new Vector3(0f, 0.23f, 10.2f));
+            AddSolid(go, new Vector3(4.6f, 1.75f, 11f), new Vector3(0f, 2.5f, 0.5f));
+            AddSolid(go, new Vector3(3.6f, 1.3f, 6.5f), new Vector3(0f, 3.95f, 1.2f));
+            AddSolid(go, new Vector3(2.5f, 0.65f, 2.5f), new Vector3(0f, 1.95f, -7.2f));
             return go;
         }
 
@@ -234,7 +241,13 @@ namespace Sealebrities
             P(t, "ABar", NpcMesh.Flat(NpcMesh.Cylinder(0.1f, 2.4f, 6), "aframe_bar"), yellow, new Vector3(-1.2f, 3.8f, -4.8f), new Vector3(0f, 0f, -90f));
             P(t, "Winch", FlatBox(0.6f, 0.5f, 0.6f, 0.4f), yellow, new Vector3(0f, 1.25f, -2.6f));
             P(t, "Buoy", NpcMesh.Flat(NpcMesh.Sphere(6, 8), "cat_buoy"), W("#EE7F2D"), new Vector3(0f, 3.3f, -5.0f));
-            AddSolid(go, new Vector3(4.8f, 2.4f, 10f), new Vector3(0f, 0.6f, 0f));
+            // round 3 (GDD §19): the old box ended at 1.8 m (the cabin reaches 2.55 m) – now both hulls, the deck, the
+            // cabin and the winch; between the hulls under the deck stays open water
+            AddSolid(go, new Vector3(1.3f, 1.5f, 10f), new Vector3(-1.7f, -0.1f, 0f));
+            AddSolid(go, new Vector3(1.3f, 1.5f, 10f), new Vector3(1.7f, -0.1f, 0f));
+            AddSolid(go, new Vector3(4.6f, 0.3f, 7.5f), new Vector3(0f, 0.82f, -0.5f));
+            AddSolid(go, new Vector3(2.8f, 1.6f, 3.2f), new Vector3(0f, 1.75f, 0.8f));
+            AddSolid(go, new Vector3(0.6f, 0.5f, 0.6f), new Vector3(0f, 1.22f, -2.6f));
             return go;
         }
 
@@ -268,6 +281,8 @@ namespace Sealebrities
             // wave-pattern stripe (L.8 palette)
             P(t, "Stripe", FlatBox(0.78f, 0.08f, 3.0f, 0.4f), sail, new Vector3(0f, 0.22f, 0.4f));
             for (int i = 0; i < paddlers; i++) Paddler(t, new Vector3(0f, 0.35f, 1.6f - i * 1.6f), i);
+            // round 3 (GDD §19): the canoe hull is solid (it had no collider)
+            AddSolid(go, new Vector3(0.75f, 0.8f, 6.2f), new Vector3(0f, -0.05f, 0f));
             return go;
         }
 
@@ -359,6 +374,7 @@ namespace Sealebrities
             var bc = go.AddComponent<BoxCollider>();
             bc.size = size;
             bc.center = center;
+            PropSolid.Count++;
         }
     }
 }

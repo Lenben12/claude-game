@@ -1,0 +1,362 @@
+[
+  {
+    "question": "1/40 – Was soll Testversion 6 vor allem bringen?",
+    "header": "Prio TV6",
+    "options": [
+      { "label": "Feinschliff nach eurem Test (Empfohlen)", "description": "Erst alles glätten, was euch in Testversion 5 auffällt: Bugs, Balance und Steuerung." },
+      { "label": "Neues Gebiet + Story-Kapitel", "description": "Ein neuer Tauchplatz mit eigenen Tieren und mehr über Gus' verschollene Doku." },
+      { "label": "Early-Access-Vorbereitung", "description": "Steam-Seite, Trailer, Steam-Erfolge, Controller und Einstellungen fertig machen." }
+    ]
+  },
+  {
+    "question": "2/40 – Das Einsiedler-Lager ist versteckt. Wie schnell sollen neue Spieler es finden?",
+    "header": "Lager-Fund",
+    "options": [
+      { "label": "Nach 1–2 Tagen per Hinweis (Empfohlen)", "description": "Rauchsäule und ein Tipp von Horst führen hin. Wer selbst sucht, findet es früher." },
+      { "label": "Sofort auf der Karte", "description": "Das Lager ist von Anfang an markiert. Weniger Geheimnis, mehr Story." },
+      { "label": "Nur durch eigenes Suchen", "description": "Keine Hinweise. Manche Spieler finden es vielleicht nie." }
+    ]
+  },
+  {
+    "question": "3/40 – Wie misstrauisch sollen die Einsiedler beim ersten Besuch sein?",
+    "header": "Laune",
+    "options": [
+      { "label": "Mürrisch, nicht feindselig (Empfohlen)", "description": "Sie scheuchen dich weg, greifen aber erst an, wenn du sie ärgerst." },
+      { "label": "Teils feindselig wie jetzt", "description": "Wer das Lager betritt, riskiert bei manchen direkt eine Prügelei." },
+      { "label": "Neugierig und freundlich", "description": "Sie freuen sich über Besuch. Die Laune ist eher Bonus als Hürde." }
+    ]
+  },
+  {
+    "question": "4/40 – Das Gesten-Rad ist offen, solange G gedrückt ist. Passt das?",
+    "header": "Gesten-Rad",
+    "options": [
+      { "label": "Halten wie jetzt (Empfohlen)", "description": "G halten, Zeichen mit der Maus wählen, loslassen. Schnell und ohne Extra-Klick." },
+      { "label": "Einmal drücken = offen", "description": "G öffnet das Rad, ein Klick wählt, Esc schließt. Entspannter, aber langsamer." },
+      { "label": "Beides einstellbar", "description": "In den Einstellungen wählt jeder selbst: halten oder umschalten." }
+    ]
+  },
+  {
+    "question": "5/40 – Wie oft sollen Prügeleien mit den Einsiedlern vorkommen?",
+    "header": "Prügelei",
+    "options": [
+      { "label": "Selten, nur bei Ärger (Empfohlen)", "description": "Nur bei schlechter Laune oder wenn du sie provozierst. Dann aber richtig lustig." },
+      { "label": "Ab und zu als Mutprobe", "description": "Manchmal fordert dich ein Einsiedler zum Stockkampf heraus. Ein Sieg bringt Respekt." },
+      { "label": "Oft, als Teil des Lagers", "description": "Das Lager ist ein Kampfplatz. Wer gewinnt, steigt im Ansehen." }
+    ]
+  },
+  {
+    "question": "6/40 – Was soll das Lager bieten, wenn man alle Handwerke gelernt hat?",
+    "header": "Lager spät",
+    "options": [
+      { "label": "Tägliche Tauschangebote (Empfohlen)", "description": "Jeden Tag andere Waren gegen Schätze, z. B. Speerspitzen, Köder oder Rezepte." },
+      { "label": "Ein Schlafplatz im Lager", "description": "Du darfst dort übernachten und eine Kiste nutzen. Ein zweites Zuhause." },
+      { "label": "Feste am Feuer zum Filmen", "description": "Einmal pro Woche ein Fest der Einsiedler, das viele Aufrufe bringt." }
+    ]
+  },
+  {
+    "question": "7/40 – Big Mo, das Urzeit-Monster: Wie gefährlich soll es sein?",
+    "header": "Big Mo",
+    "options": [
+      { "label": "Spannend, selten ein Biss (Empfohlen)", "description": "Beim ersten Mal nur ein naher Vorbeizug, danach ab und zu ein Biss. Nie tödlich." },
+      { "label": "Echter Boss-Kampf", "description": "Man muss es mehrmals mit der Harpune treffen, um den Schlund erkunden zu können." },
+      { "label": "Nur zum Filmen", "description": "Ein riesiges, friedliches Tier. Der Nervenkitzel kommt nur vom Anblick." }
+    ]
+  },
+  {
+    "question": "8/40 – Welche neue Gefahr soll es unter Wasser als Nächstes geben?",
+    "header": "Gefahr",
+    "options": [
+      { "label": "Riesenkrake im Wrack (Empfohlen)", "description": "Ein Tentakel greift aus dem Dunkel nach dir. Mit Lampe und Speer abwehren." },
+      { "label": "Feuerkorallen", "description": "Berühren kostet Puste. Man muss vorsichtig zwischen den Korallen schwimmen." },
+      { "label": "Sogstellen", "description": "Starke Strömungen ziehen dich in die Tiefe. Mit besseren Flossen entkommt man." }
+    ]
+  },
+  {
+    "question": "9/40 – Speerfischen bringt rohen Fisch. Wie viel soll es sich lohnen?",
+    "header": "Speerfisch",
+    "options": [
+      { "label": "Für Essen, kaum Geld (Empfohlen)", "description": "Der Fang macht satt und lässt sich bei den Einsiedlern tauschen, bringt aber wenig Geld." },
+      { "label": "Wie Angeln, mit Verkauf", "description": "Speerfang lässt sich im Fischmarkt verkaufen, etwas billiger als geangelter Fisch." },
+      { "label": "Sehr wertvoll, aber riskant", "description": "Speerfang zahlt gut, lockt aber durch Blut öfter Haie an." }
+    ]
+  },
+  {
+    "question": "10/40 – Schatztruhen: Was passiert, wenn alle geöffnet sind?",
+    "header": "Truhen",
+    "options": [
+      { "label": "Neue Truhen nach Stürmen (Empfohlen)", "description": "Nach einem Sturm spült das Meer ein paar neue Truhen an andere Stellen." },
+      { "label": "Jede Truhe nur einmal", "description": "Wenn alle gefunden sind, ist Schluss. Dafür sind sie etwas wertvoller." },
+      { "label": "Jeden Tag eine neue", "description": "Eine zufällige Truhe pro Tag irgendwo im Meer. Es gibt immer etwas zu suchen." }
+    ]
+  },
+  {
+    "question": "11/40 – Wie viele Meme-Fundstücke soll es geben?",
+    "header": "Memes",
+    "options": [
+      { "label": "Mehr, auch an neuen Orten (Empfohlen)", "description": "Etwa 20–25, verteilt auf alle Tauchplätze. Jede Fundstelle ein kleiner Gag." },
+      { "label": "So lassen, 10 reichen", "description": "Die 10 Kuriositäten bleiben besonders und selten." },
+      { "label": "Wechselnde Memes", "description": "Jeden Tag tauchen 2–3 Memes an zufälligen Stellen auf." }
+    ]
+  },
+  {
+    "question": "12/40 – Sollen die kleinen Wracks Räume bekommen, in die man hineinschwimmt?",
+    "header": "Wracks",
+    "options": [
+      { "label": "Ja, je Wrack ein Raum (Empfohlen)", "description": "Wie beim Fischkutter: ein Raum zum Reinschwimmen mit Truhe oder Hinweis." },
+      { "label": "Nein, nur von außen", "description": "Die Wracks bleiben Kulisse mit einer Truhe daneben." },
+      { "label": "Lieber ein großes Wrack", "description": "Ein neues großes Schiff mit Gängen, Dunkelheit und Schätzen." }
+    ]
+  },
+  {
+    "question": "13/40 – Was soll man auf der Vulkaninsel an Land machen können?",
+    "header": "Vulkan",
+    "options": [
+      { "label": "Zum Krater + Fossilien (Empfohlen)", "description": "Ein Kletterweg zum glühenden Krater, Fossilien zum Fotografieren und ein Geheimnis." },
+      { "label": "Nur Kulisse, Inhalt im Meer", "description": "Die Insel ist zum Anschauen da. Das Spannende liegt unter Wasser." },
+      { "label": "Lava-Gefahr und Beben", "description": "Ab und zu grollt der Vulkan. Dann muss man schnell zurück zum Boot." }
+    ]
+  },
+  {
+    "question": "14/40 – Soll man Essen und Trinkwasser auf dem Boot lagern können?",
+    "header": "Bootvorrat",
+    "options": [
+      { "label": "Ja, Vorratskiste an Bord (Empfohlen)", "description": "Eine Kiste für Essen und Wasser auf dem Boot. Längere Ausflüge ohne Rückfahrt." },
+      { "label": "Nein, alles im Rucksack", "description": "Was du mitnimmst, trägst du selbst." },
+      { "label": "Nur als Boots-Upgrade", "description": "Die Vorratskiste kann man im Chopper-Shop kaufen." }
+    ]
+  },
+  {
+    "question": "15/40 – Sollen mehr Rezepte dazukommen?",
+    "header": "Rezepte",
+    "options": [
+      { "label": "Ja, 6–8 von den Einsiedlern (Empfohlen)", "description": "Jeder Einsiedler kennt ein Gericht mit Bonus, z. B. mehr Luft oder schneller schwimmen." },
+      { "label": "Nur ein paar einfache", "description": "Fisch, Obst, Kokos – Kochen bleibt eine Nebensache." },
+      { "label": "Großes Koch-System", "description": "Viele Zutaten, ein Kochtopf und Rezepte, die man selbst ausprobiert und entdeckt." }
+    ]
+  },
+  {
+    "question": "16/40 – Der Wasserfilter braucht 45 Minuten pro Flasche. Soll man ihn verbessern können?",
+    "header": "Filter",
+    "options": [
+      { "label": "Ja, größerer Filter (Empfohlen)", "description": "Ein Upgrade im Shop filtert 3 Flaschen auf einmal." },
+      { "label": "Nein, so lassen", "description": "Ein Filter, eine Flasche. Planen gehört dazu." },
+      { "label": "Regenwasser sammeln", "description": "Bei Regen füllen sich Fässer an der Hütte von selbst." }
+    ]
+  },
+  {
+    "question": "17/40 – Welche Unterwasser-Ausrüstung soll als Nächstes kommen?",
+    "header": "Ausrüstung",
+    "options": [
+      { "label": "Hai-Abwehrstab (Empfohlen)", "description": "Ein kurzer Stab, der Haie mit einem Stromstoß verscheucht. Kein Fang möglich." },
+      { "label": "Kescher für Speisefische", "description": "Kleine Fische mit dem Netz fangen statt mit dem Speer." },
+      { "label": "Leuchtstab als Lockmittel", "description": "Lockt nachts seltene Tiere an – aber auch Raubfische." }
+    ]
+  },
+  {
+    "question": "18/40 – Haupt- oder Zweithand stellt man per Rechtsklick im Rucksack ein. Passt das?",
+    "header": "Hände",
+    "options": [
+      { "label": "Ja, so lassen (Empfohlen)", "description": "Rechtsklick auf einen Platz wechselt die Hand. Ziehen auf ein Hand-Feld hält sofort." },
+      { "label": "Feste Plätze je Hand", "description": "Plätze 1–4 Haupthand, 5–8 Zweithand. Einfacher, aber weniger frei." },
+      { "label": "Automatisch", "description": "Das Spiel entscheidet: Waffen rechts, Lampe links, die Kamera dort, wo Platz ist." }
+    ]
+  },
+  {
+    "question": "19/40 – Soll das Spiel zeigen, wo man eine Tierart schon gefunden hat?",
+    "header": "Fundorte",
+    "options": [
+      { "label": "Ja, im Sealog-Eintrag (Empfohlen)", "description": "Jede Art zeigt einen Kreis auf einer kleinen Karte. Die Seekarte bleibt aufgeräumt." },
+      { "label": "Ja, auf der Seekarte", "description": "Jede gefilmte Art erscheint als kleines Symbol auf der Karte im Handy." },
+      { "label": "Nein", "description": "Wo welche Tiere leben, findet man selbst heraus." }
+    ]
+  },
+  {
+    "question": "20/40 – Koop-Pins: Soll man sehen, wer einen Pin gesetzt hat?",
+    "header": "Pins",
+    "options": [
+      { "label": "Farbe je Spieler (Empfohlen)", "description": "Jeder Spieler hat eine eigene Pin-Farbe. Man sieht auf einen Blick, wer was markiert hat." },
+      { "label": "Mit Namen", "description": "Neben jedem Pin steht der Name des Spielers." },
+      { "label": "Alle gleich wie jetzt", "description": "Pins gehören der ganzen Crew. Wer ihn gesetzt hat, ist egal." }
+    ]
+  },
+  {
+    "question": "21/40 – Der Beifahrer auf der Bank kann filmen und die Karte ansehen. Was soll noch gehen?",
+    "header": "Beifahrer",
+    "options": [
+      { "label": "Angeln während der Fahrt (Empfohlen)", "description": "Von der Bank die Angel auswerfen und hinter dem Boot herziehen (Schleppangeln)." },
+      { "label": "Nichts weiter", "description": "Filmen und Karte reichen. Die Bank ist zum Ausruhen da." },
+      { "label": "Wegpunkte für den Fahrer", "description": "Der Beifahrer setzt Ziele, die der Fahrer groß im Bild sieht." }
+    ]
+  },
+  {
+    "question": "22/40 – FinTube-Studio: Was fehlt euch am meisten?",
+    "header": "Studio",
+    "options": [
+      { "label": "Musik und Sticker (Empfohlen)", "description": "Hintergrundmusik und lustige Sticker fürs Video wählen. Das ändert die Kommentare." },
+      { "label": "Vorschaubild gestalten", "description": "Text, Pfeile und Gesichter aufs Vorschaubild setzen. Mehr Klicks." },
+      { "label": "Nichts, das reicht", "description": "Clips sortieren, Titel, Statistik und Kommentare sind genug." }
+    ]
+  },
+  {
+    "question": "23/40 – Sollen Zuschauer in den Kommentaren Wünsche äußern, aus denen Aufträge werden?",
+    "header": "Wünsche",
+    "options": [
+      { "label": "Ja, ab und zu (Empfohlen)", "description": "Ein beliebter Kommentar wird ein Bonus-Auftrag, z. B. „Filmt einen Hai bei Nacht!“" },
+      { "label": "Nein, nur zum Lesen", "description": "Kommentare bleiben Unterhaltung ohne Folgen." },
+      { "label": "Nur live im Stream", "description": "Wünsche kommen nur im Live-Chat und müssen sofort erfüllt werden." }
+    ]
+  },
+  {
+    "question": "24/40 – Der neue Ladebildschirm zeigt Tipps und Fakten. Wie lange soll er bleiben?",
+    "header": "Laden",
+    "options": [
+      { "label": "So kurz wie möglich (Empfohlen)", "description": "Sobald alles geladen ist, geht es los. Neue Fakten gibt es beim nächsten Laden." },
+      { "label": "Warten auf Tastendruck", "description": "Am Ende wartet der Bildschirm, bis man eine Taste drückt." },
+      { "label": "Fakten im Handy sammeln", "description": "Gelesene Meeres-Fakten landen zusätzlich in einer Handy-App." }
+    ]
+  },
+  {
+    "question": "25/40 – Wie soll das Spiel speichern, jetzt wo es 4 Spielstände gibt?",
+    "header": "Speichern",
+    "options": [
+      { "label": "Morgens + beim Beenden (Empfohlen)", "description": "Automatisch beim Aufwachen und beim Verlassen. Kein Fortschritt geht verloren." },
+      { "label": "Nur beim Schlafen", "description": "Wie in vielen Survival-Spielen: Wer schläft, speichert." },
+      { "label": "Zusätzlich per Knopf", "description": "Ein „Jetzt speichern“-Knopf im Pausenmenü, wann immer man will." }
+    ]
+  },
+  {
+    "question": "26/40 – Sollen Koop-Gäste etwas aus der Welt des Hosts in ihre eigene Welt mitnehmen?",
+    "header": "Gast-Stand",
+    "options": [
+      { "label": "Nein, alles bleibt dort (Empfohlen)", "description": "Rucksack und Fortschritt gehören zur Welt des Hosts, wie bei Spielständen üblich." },
+      { "label": "Nur Kosmetik", "description": "Hüte und Anzüge, die der Gast freischaltet, hat er auch in seiner eigenen Welt." },
+      { "label": "Ein Teil des Geldes", "description": "Ein kleiner Anteil des verdienten Geldes landet in der eigenen Welt." }
+    ]
+  },
+  {
+    "question": "27/40 – Erfolge zählen je Welt. Wie sollen sie später auf Steam freigeschaltet werden?",
+    "header": "Erfolge",
+    "options": [
+      { "label": "Einmal fürs Konto (Empfohlen)", "description": "Auf Steam ist ein Erfolg frei, sobald man ihn in irgendeiner Welt schafft." },
+      { "label": "Erst ab „Normal“", "description": "Erfolge auf „Entspannt“ zählen nur im Spiel, nicht auf Steam." },
+      { "label": "Erst mit eigener Steam-Seite", "description": "Bis das Spiel eine Steam-Seite hat, bleiben Erfolge nur im Spiel." }
+    ]
+  },
+  {
+    "question": "28/40 – Hütte einrichten: Wie soll es weitergehen?",
+    "header": "Hütte",
+    "options": [
+      { "label": "Mehr Deko als Belohnung (Empfohlen)", "description": "Neue Teile für Erfolge, Sammel-Sets und Geschenke der Einsiedler, nicht nur zum Kaufen." },
+      { "label": "Draußen schmücken", "description": "Veranda, Garten und Steg mit Lampen, Fahnen und Pflanzen gestalten." },
+      { "label": "So lassen", "description": "Die festen Varianten reichen. Lieber mehr Zeit ins Meer stecken." }
+    ]
+  },
+  {
+    "question": "29/40 – Horst lebt jetzt in seiner Hängematte am Strand. Wie oft soll man ihn treffen?",
+    "header": "Horst",
+    "options": [
+      { "label": "Täglich kurz (Empfohlen)", "description": "Er ist leicht zu finden und hat jeden Tag einen neuen Spruch oder Tipp." },
+      { "label": "Nur bei Story-Momenten", "description": "Horst taucht nur auf, wenn es etwas Wichtiges gibt." },
+      { "label": "Er besucht dich auch", "description": "Ab und zu paddelt er im Kanu zum Boot und kommentiert, was du tust." }
+    ]
+  },
+  {
+    "question": "30/40 – Die Rivalen sabotieren dich. Wie soll man sich wehren können?",
+    "header": "Rivalen",
+    "options": [
+      { "label": "Mit besseren Videos (Empfohlen)", "description": "Wer bessere Clips hochlädt, holt Follower zurück und bringt die Brüder zur Weißglut." },
+      { "label": "Mit Gegen-Sabotage", "description": "Man kann ihren Stream stören oder ihre Boje verstecken. Kostet aber Ansehen." },
+      { "label": "Gar nicht", "description": "Sabotage ist ein Hindernis wie das Wetter. Man plant drumherum." }
+    ]
+  },
+  {
+    "question": "31/40 – Gus' verschollene Doku: Wann soll man das versunkene TV-Studio finden?",
+    "header": "TV-Studio",
+    "options": [
+      { "label": "Ab ca. 100.000 Followern (Empfohlen)", "description": "In der zweiten Spielhälfte, mit Hinweisen aus Logbuch, Lager und Flaschenpost." },
+      { "label": "Kurz vor dem Finale", "description": "Das Studio ist der letzte große Schritt vor der Million." },
+      { "label": "Früh, als Story-Start", "description": "In der ersten Woche findet man den Eingang, aber noch nicht das Innere." }
+    ]
+  },
+  {
+    "question": "32/40 – Sollen Licht und Lagerfeuer nachts an Land mehr Bedeutung bekommen?",
+    "header": "Nacht",
+    "options": [
+      { "label": "Ja, Feuer erholt (Empfohlen)", "description": "Am Lagerfeuer erholt man sich schneller, im Dunkeln wird man langsam müde." },
+      { "label": "Nein, nur Stimmung", "description": "Licht ist schön, hat aber keine Folgen im Spiel." },
+      { "label": "Krabben klauen im Dunkeln", "description": "Ohne Licht holen sich Landkrabben nachts Obst und Fisch aus der Hütte." }
+    ]
+  },
+  {
+    "question": "33/40 – Soll beim Angeln ab und zu etwas anderes als Fisch am Haken hängen?",
+    "header": "Angeln",
+    "options": [
+      { "label": "Ja, selten Kurioses (Empfohlen)", "description": "Ab und zu hängt ein Stiefel, eine Flaschenpost oder eine Meme-Figur am Haken." },
+      { "label": "Nein, nur Fische", "description": "Angeln bleibt reines Fischen." },
+      { "label": "Oft, mit eigener Sammlung", "description": "Eine eigene Sammel-Seite nur für Angel-Fundstücke." }
+    ]
+  },
+  {
+    "question": "34/40 – Sollen manche Gegner im Koop leichter zu besiegen sein?",
+    "header": "Koop-Kampf",
+    "options": [
+      { "label": "Ja, zu zweit leichter (Empfohlen)", "description": "Zu zweit vertreibt man Big Mo und Haie schneller. Allein geht es auch, nur knapper." },
+      { "label": "Nein, alles gleich", "description": "Koop macht es lustiger, ändert aber nichts an den Kämpfen." },
+      { "label": "Eigene Koop-Monster", "description": "Ein extra Monster, das man nur mit mindestens zwei Spielern schafft." }
+    ]
+  },
+  {
+    "question": "35/40 – Was soll passieren, wenn die Puste bei einem Kampf auf 0 fällt?",
+    "header": "K.-o.",
+    "options": [
+      { "label": "Kleine Strafe (Empfohlen)", "description": "Ein Clip oder ein roher Fisch geht verloren. Ärgerlich, aber nicht schlimm." },
+      { "label": "Keine Strafe", "description": "Man taumelt kurz und macht weiter. Nur der Stream-Hype sinkt." },
+      { "label": "Aufwachen in der Hütte", "description": "Wie bei leerer Luft: Man wacht zu Hause auf, der Tag geht weiter." }
+    ]
+  },
+  {
+    "question": "36/40 – Was soll bei den Figuren als Nächstes kommen?",
+    "header": "Figuren",
+    "options": [
+      { "label": "Kleidung für an Land (Empfohlen)", "description": "Shorts, Hemden und Badelatschen für die Insel. Den Neoprenanzug gibt es nur zum Tauchen." },
+      { "label": "Mehr Gesichtsausdrücke", "description": "Figuren lachen, erschrecken und staunen sichtbar, auch im Koop." },
+      { "label": "So lassen", "description": "Die neuen Figuren reichen. Lieber Zeit in Tiere und Meer stecken." }
+    ]
+  },
+  {
+    "question": "37/40 – Sollen Musik und Geräusche als Nächstes überarbeitet werden?",
+    "header": "Sound",
+    "options": [
+      { "label": "Ja, Musik je Ort (Empfohlen)", "description": "Lager, Vulkan, Wrack und offenes Meer bekommen eigene Stücke und Geräusche." },
+      { "label": "Nur Tiere und Kämpfe", "description": "Haie, Big Mo und Prügeleien klingen besser, die Musik bleibt." },
+      { "label": "Erst später", "description": "Sound kommt erst nach mehr Inhalt dran." }
+    ]
+  },
+  {
+    "question": "38/40 – Sollen die Kuriositäten (Memes) für 100 % im Sealog zählen?",
+    "header": "Sealog 100%",
+    "options": [
+      { "label": "Nein, nur echte Tiere zählen (Empfohlen)", "description": "Kuriositäten sind ein Bonus. Die goldene Kamera gibt es für die Tiere." },
+      { "label": "Ja, alles zählt", "description": "Wer 100 % will, muss auch alle Memes finden." },
+      { "label": "Eigene Meme-Trophäe", "description": "Alle Kuriositäten gefunden = ein goldenes Meme-Abzeichen in der Hütte." }
+    ]
+  },
+  {
+    "question": "39/40 – Wie sollen wir euch die nächste Testversion geben?",
+    "header": "Lieferung",
+    "options": [
+      { "label": "Zip + Anleitung wie jetzt (Empfohlen)", "description": "Ein Ordner und eine Zip auf dem Desktop, mit Anleitung für den Koop." },
+      { "label": "Private Beta über Steam", "description": "Sobald es eine Steam-Seite gibt: Updates kommen automatisch über Steam." },
+      { "label": "Mit Installer", "description": "Ein Setup mit Startmenü-Eintrag und Desktop-Symbol." }
+    ]
+  },
+  {
+    "question": "40/40 – Wie viele Fragen wollt ihr nach eurem nächsten Test?",
+    "header": "Fragen",
+    "options": [
+      { "label": "Wieder etwa 40 (Empfohlen)", "description": "Rund 40 Klick-Fragen zu Details, wie in dieser Runde." },
+      { "label": "Weniger, nur 15–20", "description": "Nur die wichtigsten Entscheidungen. Den Rest entscheiden wir." },
+      { "label": "Mehr, gern 100", "description": "Alles im Detail abstimmen, auch kleine Dinge." }
+    ]
+  }
+]

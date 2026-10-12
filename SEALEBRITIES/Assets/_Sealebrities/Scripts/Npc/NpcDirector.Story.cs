@@ -120,7 +120,7 @@ namespace Sealebrities
                     wanda.FacePoint = NearestDiverPos(wanda.Position);
                     if (AnyoneNear(wanda.Position, 9f) || (proT > 6f && AnyoneNear(wanda.Position, 28f)))
                     {
-                        wanda.PlayGesture(NpcGesture.Wave);
+                        wanda.PlayGesture(NpcGesture.Nod);
                         bool started = Talk(wanda, "pro.p1", () =>
                         {
                             pro = Pro.PadHorstRun;
@@ -151,7 +151,7 @@ namespace Sealebrities
                     if (horst != null && AnyoneNear(horst.Position, 9f))
                     {
                         horst.FacePoint = NearestDiverPos(horst.Position);
-                        horst.PlayGesture(NpcGesture.Wave);
+                        horst.PlayGesture(NpcGesture.Nod);
                         proStage = 2;
                         pro = Pro.Final;
                         if (!Talk(horst, "pro.p2", BeginLetter)) BeginLetter();
@@ -254,7 +254,10 @@ namespace Sealebrities
         float beat9Chase;
         int beatPlaying = -1;
 
-        static readonly string[] BeatSpot = { "horst_porch", "horst_dockend", "horst_dockend", "horst_dockmid", "horst_helipad", "horst_dockend", "horst_dockend", "horst_dockmid", "horst_campfire" };
+        /// Round 3 (GDD §20 Q10 „nicht am Steg – da nervt er“): Horst explains the dock tasks from the beach beside the
+        /// dock's landward end, never on the planks.
+        static readonly string[] BeatSpot = { "horst_porch", "horst_dockside", "horst_dockside", "horst_dockside", "horst_helipad", "horst_dockside", "horst_dockside", "horst_dockside", "horst_campfire" };
+        float horstWakeUntil;
 
         bool TutorialRunning => S != null && S.questIndex < TutorialQuests.Finished;
 
@@ -271,7 +274,6 @@ namespace Sealebrities
             if (prologueActive) return;
             var s = S;
             if (s == null) return;
-            if (EscortActive) return;            // P2: Horst follows the escorting player (Quests part)
             if (gagState >= 60) { ThinkFallGag(horst); return; }
 
             // tutorial done → Horst's lure hat (A.3; core's cosmetic rule "tutorial" unlocks hat 10 and notifies)
@@ -284,10 +286,16 @@ namespace Sealebrities
             {
                 // first appearance this session (loaded game / prologue skipped): start where he belongs right now
                 string first = TutorialRunning ? BeatSpot[Mathf.Clamp(s.questIndex, 0, BeatSpot.Length - 1)]
-                    : Between(h, 7f, 19f) ? "horst_bench" : Between(h, 19f, 22f) ? "horst_campfire" : "horst_tent";
+                    : Between(h, 19f, 22f) ? "horst_campfire" : "horst_bench";
                 horst.Place(QuestSpots.Get(first), 90f);
             }
-            if (IsTalking(horst) || horst.HasOffer) { horst.Stop(); horst.FacePoint = NearestDiverPos(horst.Position); return; }
+            if (IsTalking(horst) || horst.HasOffer)
+            {
+                horst.Stop();
+                if (horst.Motion == NpcMotion.Lie) { horst.Place(QuestSpots.Get("horst_home"), 90f); horst.Motion = NpcMotion.Idle; }
+                horst.FacePoint = NearestDiverPos(horst.Position);
+                return;
+            }
 
             // ---- tutorial: walk ahead to the place of the current task, deliver the beat
             if (TutorialRunning)
@@ -348,8 +356,30 @@ namespace Sealebrities
                 }
             }
 
-            // ---- daily schedule: bench at the dock 07–19, campfire 19–22, tent at night
-            if (Between(h, 7f, 19f))
+            // ---- daily schedule (round 3, Q10): his corner on the beach – bench 07–12 and 15–19, siesta in the hammock
+            //      12–15, campfire 19–22, asleep in the hammock at night. Never on the dock.
+            bool awake = Time.time < horstWakeUntil;
+            bool hammock = !awake && (Between(h, 12f, 15f) || !Between(h, 7f, 22f));
+            if (hammock && QuestSpots.IsRegistered("horst_hammock") && SleepSpot("horst_hammock", out Vector3 lieAt, out float lieYaw))
+            {
+                if (horst.Motion != NpcMotion.Lie || NpcUtil.FlatDist(horst.Position, lieAt) > 0.4f)
+                {
+                    Vector3 home = QuestSpots.Get("horst_home");
+                    if (NpcUtil.FlatDist(horst.Position, home) > 1.2f && NpcUtil.FlatDist(horst.Position, lieAt) > 1.2f)
+                    {
+                        if (!horst.Moving || NpcUtil.FlatDist(horst.Destination, home) > 0.5f) horst.GoTo(home, 2.0f);
+                        return;
+                    }
+                    horst.Stop();
+                    horst.PlaceExact(lieAt, lieYaw);
+                    horst.Motion = NpcMotion.Lie;
+                    horst.FacePoint = null;
+                }
+                ThinkGags(horst);
+                return;
+            }
+            if (horst.Motion == NpcMotion.Lie) { horst.Place(QuestSpots.Get("horst_home"), 90f); horst.Motion = NpcMotion.Idle; }
+            if (Between(h, 7f, 19f) || awake)
             {
                 Vector3 bench = QuestSpots.Get("horst_bench");
                 if (NpcUtil.FlatDist(horst.Position, bench) > 0.8f)
@@ -359,28 +389,31 @@ namespace Sealebrities
                 else if (!horst.Moving)
                 {
                     horst.Motion = gagState == 5 ? NpcMotion.Doze : NpcMotion.Sit;
-                    horst.FacePoint = WorldLayout.DockEnd;
+                    horst.FacePoint = PointFromYaw(horst.Position, PropHorst.BenchYaw);
                 }
             }
-            else if (Between(h, 19f, 22f))
+            else
             {
                 Vector3 fire = QuestSpots.Get("horst_campfire");
                 if (NpcUtil.FlatDist(horst.Position, fire) > 1f) { if (!horst.Moving) horst.GoTo(fire, 2.0f); }
                 else horst.Motion = NpcMotion.Idle;
             }
-            else
-            {
-                Vector3 tent = QuestSpots.Get("horst_tent");
-                if (NpcUtil.FlatDist(horst.Position, tent) > 1f) { if (!horst.Moving) horst.GoTo(tent, 2.0f); }
-                else { horst.SetPresent(false); return; }
-            }
             ThinkGags(horst);
+        }
+
+        /// E on Horst asleep in his hammock: he wakes up (and stays up for a minute).
+        void WakeHorst(NpcActor horst)
+        {
+            horstWakeUntil = Time.time + 75f;
+            horst.Place(QuestSpots.Get("horst_home"), 90f);
+            horst.Motion = NpcMotion.Idle;
+            horst.PlayGesture(NpcGesture.Flail);
         }
 
         void PlayBeat(NpcActor horst, int n)
         {
             beatPlaying = n;
-            horst.PlayGesture(n == 9 ? NpcGesture.TaDa : NpcGesture.Wave);
+            horst.PlayGesture(n == 9 ? NpcGesture.TaDa : NpcGesture.Nod);
             if (!Talk(horst, "horst.b" + n, () => { StoryFlags.Set(NpcKeys.Beat(n)); beatPlaying = -1; })) beatPlaying = -1;
             else
             {
@@ -440,8 +473,12 @@ namespace Sealebrities
             gagTimer = (tut ? 35f : 12f) + NpcUtil.Hash01(NpcUtil.Day, (int)(Time.time * 10f)) * (tut ? 25f : 13f);
             if (tut && S != null && !StoryFlags.Has(NpcKeys.Beat(BeatFor(S.questIndex)))) return;
             int day = NpcUtil.Day;
-            bool atDock = Between(Hour, 7f, 19f) && !TutorialRunning;
-            if (atDock && lastFallDay != day && NpcUtil.Hash01(day, (int)Time.time, 6) < 0.05f) { StartFall(horst); return; }
+            // round 3: in the hammock the only gag is falling out of it (once a day at most); no dock gags any more
+            if (horst.Motion == NpcMotion.Lie)
+            {
+                if (lastFallDay != day && NpcUtil.Hash01(day, (int)Time.time, 6) < 0.12f) StartFall(horst);
+                return;
+            }
             int g;
             int tries = 0;
             do { g = 1 + (int)(NpcUtil.Hash01(day, (int)(Time.time * 7f), tries) * 5f); tries++; } while (g == lastGag && tries < 6);
@@ -485,13 +522,12 @@ namespace Sealebrities
             }
         }
 
-        // ---- gag 6: steps backward off the dock, splash, climbs the ladder: „Geplant.“ (achievement)
+        // ---- gag 6 (round 3): turns over in the hammock – and falls out. „Geplant.“ (achievement)
         void StartFall(NpcActor horst)
         {
             lastFallDay = NpcUtil.Day;
             gagState = 60;
             gagT = 0f;
-            horst.GoTo(QuestSpots.Get("horst_dockedge"), 2.2f);
         }
 
         void ThinkFallGag(NpcActor horst)
@@ -500,33 +536,28 @@ namespace Sealebrities
             switch (gagState)
             {
                 case 60:
-                    if (!horst.Moving || gagT > 30f)
-                    {
-                        horst.FacePoint = QuestSpots.Get("horst_dockend") + new Vector3(0f, 0f, 3f);
-                        horst.PlayGesture(NpcGesture.Fall);
-                        Talk(horst, "horst.gag.whoa");
-                        gagState = 61;
-                        gagT = 0f;
-                    }
+                    horst.PlayGesture(NpcGesture.Flail);
+                    Talk(horst, "horst.gag.whoa");
+                    gagState = 61;
+                    gagT = 0f;
                     break;
                 case 61:
-                    if (gagT >= 1.0f)
+                    if (gagT >= 0.8f)
                     {
-                        Vector3 w = QuestSpots.Get("horst_fallwater");
-                        horst.Place(new Vector3(w.x, w.y, w.z), horst.Yaw);
-                        horst.Motion = NpcMotion.Swim;
+                        // thud – in the sand next to the hammock
+                        horst.Place(QuestSpots.Get("horst_home"), horst.Yaw);
+                        horst.Motion = NpcMotion.Dazed;
                         gagState = 62;
                         gagT = 0f;
                     }
                     break;
                 case 62:
-                    if (gagT >= 4.5f)
+                    if (gagT >= 3.2f)
                     {
-                        Vector3 top = PropInfo.DockLadderTop != Vector3.zero ? PropInfo.DockLadderTop : QuestSpots.Get("horst_dockend");
-                        horst.Place(top, horst.Yaw + 180f);
                         horst.Motion = NpcMotion.Idle;
                         horst.PlayGesture(NpcGesture.TaDa);
                         Talk(horst, "horst.gag.planned");
+                        horstWakeUntil = Time.time + 90f;
                         if (AnyoneNear(horst.Position, 20f))
                         {
                             Achievements.Unlock("horst_overboard");

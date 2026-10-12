@@ -94,17 +94,13 @@ namespace Sealebrities
         /// Puts the rod into the player's hands via the hotbar (two-handed: the other hand is emptied by Hands).
         public static void TakeRod()
         {
-            if (Hands.Find(HoldItem.FishingRod, out Hand hand, out int slot))
+            if (Hands.Find(HoldItem.FishingRod, out int slot))
             {
-                if (Hands.ActiveSlot(hand) != slot) Hands.Select(hand, slot);
+                if (Hands.ActiveSlot(Hands.SlotHand(slot)) != slot) Hands.Select(slot);
                 return;
             }
-            int free = -1;
-            for (int i = 0; i < Hands.SlotsPerHand; i++)
-                if (Hands.SlotItem(Hand.Right, i) == HoldItem.None) { free = i; break; }
-            if (free < 0) free = Hands.SlotsPerHand - 1;
-            Hands.Assign(Hand.Right, free, HoldItem.FishingRod);
-            Hands.Select(Hand.Right, free);
+            // not on the hotbar: hold it right away (takes the first free slot)
+            Hands.Hold(ItemIds.FishingRod, Hand.Right);
         }
 
         // ------------------------------------------------------------------ visuals

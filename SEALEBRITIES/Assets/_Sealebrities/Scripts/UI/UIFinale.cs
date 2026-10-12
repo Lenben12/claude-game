@@ -126,7 +126,7 @@ namespace Sealebrities
             var row2 = UIKit.Row();
             row2.style.marginTop = 8f;
             row2.style.alignSelf = Align.Stretch;
-            row2.Add(UIWidgets.IconStat(UIGlyphs.Book, UIPalette.Turquoise, Journal.DiscoveredCount + "/" + SpeciesDatabase.All.Count, UIPalette.Ink, 24f));
+            row2.Add(UIWidgets.IconStat(UIGlyphs.Book, UIPalette.Turquoise, Journal.DiscoveredCount + "/" + SpeciesDatabase.Count, UIPalette.Ink, 24f));
             row2.Add(UIKit.HSpacer(8f));
             row2.Add(UIWidgets.IconStat(UIGlyphs.Coin, UIPalette.Sun, UIKit.Compact(s.money) + " $", UIPalette.Ink, 24f));
             panel.Add(row2);

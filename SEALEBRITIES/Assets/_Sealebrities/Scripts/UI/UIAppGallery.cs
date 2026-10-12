@@ -64,8 +64,16 @@ namespace Sealebrities
             head.style.marginBottom = 12f;
             head.Add(PhoneKit.Stat(UIGlyphs.Image, UIPalette.Rgb(0x8E6CD9), photos.Count.ToString()));
             head.Add(UIKit.HSpacer(10f));
-            var folder = PhoneKit.IconButton(UIGlyphs.Upload, Loc.Tr("Ordner", "Folder"), global::Sealebrities.Gallery.OpenFolder, UIBtnKind.Secondary, PhoneKit.Small);
-            head.Add(folder);
+            // round 3: the photos live inside the game – „Alle exportieren“ copies them to the PC's Pictures folder
+            if (photos.Count > 0)
+            {
+                var all = PhoneKit.IconButton(UIGlyphs.Upload, Loc.Tr("Alle exportieren", "Export all"), () =>
+                {
+                    int n = global::Sealebrities.Gallery.ExportAll();
+                    ExportToast(n, null);
+                }, UIBtnKind.Secondary, PhoneKit.Small);
+                head.Add(all);
+            }
             body.Add(head);
 
             if (photos.Count == 0)
@@ -190,6 +198,14 @@ namespace Sealebrities
 
             if (!confirmDelete)
             {
+                // round 3: EXPORT copies the picture to Pictures/SEALEBRITIES (the game keeps its own copy)
+                var exp = PhoneKit.IconButton(UIGlyphs.Upload, Loc.Tr("Exportieren", "Export"), () =>
+                {
+                    string path = global::Sealebrities.Gallery.Export(p);
+                    ExportToast(path != null ? 1 : 0, path);
+                }, UIBtnKind.Primary, PhoneKit.Body);
+                exp.style.marginTop = 6f;
+                body.Add(exp);
                 var del = PhoneKit.IconButton(UIGlyphs.Trash, Loc.Tr("Löschen", "Delete"), () => { confirmDelete = true; Phone.Refresh(true); }, UIBtnKind.Danger, PhoneKit.Body);
                 del.style.marginTop = 6f;
                 body.Add(del);
@@ -220,6 +236,18 @@ namespace Sealebrities
                 row.Add(yes);
                 body.Add(row);
             }
+        }
+
+        static void ExportToast(int n, string path)
+        {
+            if (n <= 0)
+            {
+                UIAudio.Nope();
+                GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Export fehlgeschlagen", "Export failed"));
+                return;
+            }
+            UIAudio.Pop();
+            GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Exportiert: Bilder/SEALEBRITIES", "Exported: Pictures/SEALEBRITIES"), n > 1 ? n.ToString() : null);
         }
 
         public override void Tick(float dt)

@@ -153,9 +153,9 @@ namespace Sealebrities
         // ---------------------------------------------------------------- L.6 secret clues (Collection app)
         static readonly string[,] Clues =
         {
-            { "cave_grotto", null }, { "waterfall", "juno.clue.falls" }, { "lighthouse_top", "pearl.clue.top" }, { "radio_tower", null },
-            { "ravine_piggy", "lio.clue.ravine" }, { "wreck_cabin", null }, { "kelp_carving", "pearl.clue.kelp" }, { "wreck_hammock", "gus.hammock.2" },
-            { "blue_buoy", "toni.clue.buoy" }, { "trench_tv", "gus.m100000.3" }, { "lighthouse_cellar", "pearl.clue.cellar" }, { "village_loft", "pearl.clue.loft" },
+            { "cave_grotto", null }, { "waterfall", "hm.clue.falls" }, { "lighthouse_top", "horst.clue.top" }, { "radio_tower", null },
+            { "ravine_piggy", "horst.clue.ravine" }, { "wreck_cabin", null }, { "kelp_carving", "horst.clue.kelp" }, { "wreck_hammock", "gus.hammock.2" },
+            { "blue_buoy", "toni.clue.buoy" }, { "trench_tv", "gus.m100000.3" }, { "lighthouse_cellar", "horst.clue.cellar" }, { "village_loft", "hm.clue.loft" },
             { "fog_archive", "toni.clue.archive" },
         };
 

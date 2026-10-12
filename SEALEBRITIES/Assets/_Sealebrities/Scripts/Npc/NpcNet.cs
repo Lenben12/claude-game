@@ -19,6 +19,8 @@ namespace Sealebrities
         public const byte MsgState = 176, MsgLine = 177, MsgEvent = 178;
         public const string CommandKey = "Npc";
         public const byte EvLetter = 1, EvDropCarry = 2, EvGullSteal = 3, EvConversation = 4, EvNotify = 5, EvPickCarry = 6;
+        /// Round 3: a hermit's stick hits this player (a = npc id, b = damage); an item for this player's backpack (a = item, b = n).
+        public const byte EvHurt = 7, EvGive = 8;
 
         static readonly SyncWriter w = new SyncWriter(512);
         static readonly CultureInfo Inv = CultureInfo.InvariantCulture;

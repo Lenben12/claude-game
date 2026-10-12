@@ -319,7 +319,9 @@ namespace Sealebrities
         }
 
         /// Places one colony. Returns false when it would come too close to the surface.
-        public static bool Colony(PropBatch big, PropBatch small, System.Random rng, ReefColony kind, int color, Vector3 pos, Vector3 normal, float size, float maxTopY)
+        /// cols != null: hard colonies ≥ 0.5 m get a rounded static collider (PropSolid; soft puffs, encrusting pads and
+        /// flat mushrooms stay passable).
+        public static bool Colony(PropBatch big, PropBatch small, System.Random rng, ReefColony kind, int color, Vector3 pos, Vector3 normal, float size, float maxTopY, Transform cols = null)
         {
             var model = PropReefKit.Get(kind, color, rng);
             if (model == null) return false;
@@ -337,11 +339,29 @@ namespace Sealebrities
             // < 0.7 m: the detail batch (culled beyond 30 m – the water hides it from ≈ 19 m anyway)
             var batch = s * baseSize < 0.7f && small != null ? small : big;
             batch.Add(model, Matrix4x4.TRS(pos - normal * 0.03f, rot, Vector3.one * s));
+            if (cols != null && s * baseSize >= 0.5f) ColonyCollider(cols, kind, pos - normal * 0.03f, model.radius * s, model.height * s);
             return true;
         }
 
+        /// Round 3 (GDD §19): the solid part of a colony (no rng – placement stays identical).
+        static void ColonyCollider(Transform cols, ReefColony kind, Vector3 p, float r, float h)
+        {
+            switch (kind)
+            {
+                case ReefColony.SoftPuff:
+                case ReefColony.Encrust:
+                case ReefColony.Mushroom:
+                    return;
+                case ReefColony.Table: PropSolid.CoralTable(cols, p, r, h); return;
+                case ReefColony.Branching: PropSolid.CoralLump(cols, p, r, h, 0.72f); return;
+                case ReefColony.Staghorn: PropSolid.CoralLump(cols, p, r, h, 0.68f); return;
+                case ReefColony.Pillar: PropSolid.CoralLump(cols, p, r, h, 1f); return;
+                default: PropSolid.CoralLump(cols, p, r, h, 0.95f); return;
+            }
+        }
+
         /// One of the classic kit models (sponge, fan, whip, anemone) at a size.
-        static bool Classic(PropBatch big, PropBatch small, System.Random rng, PropCoralType type, Vector3 pos, Vector3 normal, float size, float maxTopY)
+        static bool Classic(PropBatch big, PropBatch small, System.Random rng, PropCoralType type, Vector3 pos, Vector3 normal, float size, float maxTopY, Transform cols = null)
         {
             var list = PropCoralKit.Of(type);
             if (list.Count == 0) return false;
@@ -359,6 +379,7 @@ namespace Sealebrities
             Quaternion rot = PropUtil.OnGround(normal.normalized, follow, PropUtil.Range(rng, 0f, 360f));
             var batch = s * baseSize < 0.5f && small != null ? small : big;
             batch.Add(model, Matrix4x4.TRS(pos - normal * 0.03f, rot, Vector3.one * s));
+            if (cols != null) PropReef.ClassicCollider(cols, type, pos - normal * 0.03f, rot, model.radius * s, model.height * s);
             return true;
         }
 
@@ -400,25 +421,30 @@ namespace Sealebrities
             {
                 Vector3 rp = hp + new Vector3(-gapDir.x, 0f, -gapDir.z) * (radius * 0.35f);
                 rp.y = G(rp.x, rp.z) - rockS * 0.25f;
-                PropRocks.Build(big.B(rng.NextDouble() < 0.6 ? PropMats.ReefRock : PropMats.ReefRockDark, rp), rp,
-                    new Vector3(rockS * 1.6f, rockS * 0.8f, rockS * 1.2f), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), rng.Next(), 1, 0.18f);
+                // same draw order as before (material, yaw, seed) – the collider is the convex hull of this very rock
+                var rockMat = rng.NextDouble() < 0.6 ? PropMats.ReefRock : PropMats.ReefRockDark;
+                Vector3 rsc = new Vector3(rockS * 1.6f, rockS * 0.8f, rockS * 1.2f);
+                Quaternion rq = Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f);
+                int rseed = rng.Next();
+                PropRocks.Build(big.B(rockMat, rp), rp, rsc, rq, rseed, 1, 0.18f);
+                if (cols != null) PropSolid.Rock(cols, rp, rsc, rq, rseed, 1, 0.18f, true, "ReefRock");
                 PropInfo.AddHabitat(rp + Vector3.up * 0.2f, rockS * 1.2f, HabitatKind.Crevice, rc.zone);
             }
             bool heroTable = false, heroBrain = false, fan = false, anemone = false, grass = false;
             if (rc.rocky)
             {
                 // kelp rocky reef: a big barrel sponge or a rock with sponges as the hero
-                Classic(big, small, rng, PropCoralType.Sponge, hp, Vector3.up, PropUtil.Range(rng, 1.0f, 1.5f), rc.maxTopY);
+                Classic(big, small, rng, PropCoralType.Sponge, hp, Vector3.up, PropUtil.Range(rng, 1.0f, 1.5f), rc.maxTopY, cols);
             }
             else
             {
                 int hk = rng.Next(100);
                 if (rc.fanBias > 0f && rng.NextDouble() < rc.fanBias) hk = 95;
                 Vector3 hn = PropGround.Normal(hx, hz, 0.8f);
-                if (hk < 35) { heroTable = Colony(big, small, rng, ReefColony.Table, Pick(pal, rng), hp, hn, PropUtil.Range(rng, 1.2f, 1.8f), rc.maxTopY); }
-                else if (hk < 70) { heroBrain = Colony(big, small, rng, ReefColony.Brain, Pick(pal, rng), hp, hn, PropUtil.Range(rng, 1.2f, 1.7f), rc.maxTopY); }
-                else if (hk < 88) Classic(big, small, rng, PropCoralType.Sponge, hp, hn, PropUtil.Range(rng, 1.1f, 1.5f), rc.maxTopY);
-                else { fan = Classic(big, small, rng, PropCoralType.Fan, hp, hn, PropUtil.Range(rng, 1.2f, 1.7f), rc.maxTopY); }
+                if (hk < 35) { heroTable = Colony(big, small, rng, ReefColony.Table, Pick(pal, rng), hp, hn, PropUtil.Range(rng, 1.2f, 1.8f), rc.maxTopY, cols); }
+                else if (hk < 70) { heroBrain = Colony(big, small, rng, ReefColony.Brain, Pick(pal, rng), hp, hn, PropUtil.Range(rng, 1.2f, 1.7f), rc.maxTopY, cols); }
+                else if (hk < 88) Classic(big, small, rng, PropCoralType.Sponge, hp, hn, PropUtil.Range(rng, 1.1f, 1.5f), rc.maxTopY, cols);
+                else { fan = Classic(big, small, rng, PropCoralType.Fan, hp, hn, PropUtil.Range(rng, 1.2f, 1.7f), rc.maxTopY, cols); }
             }
             if (heroTable) PropInfo.AddHabitat(hp + Vector3.up * 0.25f, 1.2f, HabitatKind.Overhang, rc.zone);
             if (heroBrain && index % 3 == 0) PropInfo.AddHabitat(hp + Vector3.up * 0.9f, 2.5f, HabitatKind.Cleaning, rc.zone);
@@ -435,15 +461,15 @@ namespace Sealebrities
                 Vector3 n = PropGround.Normal(x, z, 0.8f);
                 if (rc.rocky)
                 {
-                    if (rng.NextDouble() < 0.5) Classic(big, small, rng, PropCoralType.Sponge, p, n, PropUtil.Range(rng, 0.6f, 1.0f), rc.maxTopY);
-                    else Colony(big, small, rng, ReefColony.Encrust, Pick(pal, rng), p, n, PropUtil.Range(rng, 0.7f, 1.0f), rc.maxTopY);
+                    if (rng.NextDouble() < 0.5) Classic(big, small, rng, PropCoralType.Sponge, p, n, PropUtil.Range(rng, 0.6f, 1.0f), rc.maxTopY, cols);
+                    else Colony(big, small, rng, ReefColony.Encrust, Pick(pal, rng), p, n, PropUtil.Range(rng, 0.7f, 1.0f), rc.maxTopY, cols);
                     continue;
                 }
                 int t = rng.Next(100);
                 ReefColony kind = t < 30 ? ReefColony.Branching : t < 50 ? ReefColony.Brain : t < 68 ? ReefColony.Staghorn : t < 84 ? ReefColony.Pillar : ReefColony.Table;
                 // playtest round 2: a little bigger (0.6–1.0 → 0.75–1.25 m) – the patches read as sand with dots
-                if (t >= 92) { fan |= Classic(big, small, rng, PropCoralType.Fan, p, n, PropUtil.Range(rng, 0.8f, 1.2f), rc.maxTopY); continue; }
-                Colony(big, small, rng, kind, Pick(pal, rng), p, n, PropUtil.Range(rng, 0.75f, 1.25f), rc.maxTopY);
+                if (t >= 92) { fan |= Classic(big, small, rng, PropCoralType.Fan, p, n, PropUtil.Range(rng, 0.8f, 1.2f), rc.maxTopY, cols); continue; }
+                Colony(big, small, rng, kind, Pick(pal, rng), p, n, PropUtil.Range(rng, 0.75f, 1.25f), rc.maxTopY, cols);
             }
 
             // ---- small colonies to 1 per 2 m² (≥ 6, ≤ 40)
@@ -460,8 +486,8 @@ namespace Sealebrities
                 if (rc.rocky)
                 {
                     int rt = rng.Next(100);
-                    if (rt < 40) Colony(big, small, rng, ReefColony.Encrust, Pick(pal, rng), p, n, PropUtil.Range(rng, 0.3f, 0.5f), rc.maxTopY);
-                    else if (rt < 70) Classic(big, small, rng, PropCoralType.Sponge, p, n, PropUtil.Range(rng, 0.3f, 0.5f), rc.maxTopY);
+                    if (rt < 40) Colony(big, small, rng, ReefColony.Encrust, Pick(pal, rng), p, n, PropUtil.Range(rng, 0.3f, 0.5f), rc.maxTopY, cols);
+                    else if (rt < 70) Classic(big, small, rng, PropCoralType.Sponge, p, n, PropUtil.Range(rng, 0.3f, 0.5f), rc.maxTopY, cols);
                     else if (rt < 85) Classic(big, small, rng, PropCoralType.Anemone, p, n, 0.35f, rc.maxTopY);
                     else Classic(big, small, rng, PropCoralType.Whip, p, n, PropUtil.Range(rng, 0.5f, 0.9f), rc.maxTopY);
                     continue;
@@ -470,7 +496,7 @@ namespace Sealebrities
                 if (rc.fanBias > 0f && st > 80) { fan |= Classic(big, small, rng, PropCoralType.Fan, p, n, PropUtil.Range(rng, 0.45f, 0.7f), rc.maxTopY); continue; }
                 ReefColony kind = st < 28 ? ReefColony.Mushroom : st < 50 ? ReefColony.SmallBrain : st < 72 ? ReefColony.Branching : st < 90 ? ReefColony.SoftPuff : ReefColony.Pillar;
                 // small colonies 0.3–0.5 → 0.38–0.65 m (they were confetti-sized dots on the sand)
-                Colony(big, small, rng, kind, Pick(pal, rng), p, n, PropUtil.Range(rng, 0.38f, 0.65f), rc.maxTopY);
+                Colony(big, small, rng, kind, Pick(pal, rng), p, n, PropUtil.Range(rng, 0.38f, 0.65f), rc.maxTopY, cols);
             }
 
             // ---- anemone with a clownfish home (1 per 2 patches)
@@ -508,7 +534,7 @@ namespace Sealebrities
         }
 
         /// A coral garden on a bommie peak (top + flanks), registers a cleaning station on every third.
-        public static void BommieGarden(PropBatch big, PropBatch small, System.Random rng, Vector3 peak, int index, Recipe rc, ValidFn valid)
+        public static void BommieGarden(PropBatch big, PropBatch small, System.Random rng, Vector3 peak, int index, Recipe rc, ValidFn valid, Transform cols = null)
         {
             var pal = PaletteFor(index + 7, rng);
             int n = 8 + rng.Next(6);
@@ -522,14 +548,14 @@ namespace Sealebrities
                 bool flank = nrm.y < 0.8f;
                 if (rc.rocky)
                 {
-                    if (k % 3 == 0) Classic(big, small, rng, PropCoralType.Sponge, p, nrm, PropUtil.Range(rng, 0.4f, 0.8f), rc.maxTopY);
-                    else Colony(big, small, rng, ReefColony.Encrust, Pick(pal, rng), p, nrm, PropUtil.Range(rng, 0.4f, 0.8f), rc.maxTopY);
+                    if (k % 3 == 0) Classic(big, small, rng, PropCoralType.Sponge, p, nrm, PropUtil.Range(rng, 0.4f, 0.8f), rc.maxTopY, cols);
+                    else Colony(big, small, rng, ReefColony.Encrust, Pick(pal, rng), p, nrm, PropUtil.Range(rng, 0.4f, 0.8f), rc.maxTopY, cols);
                     continue;
                 }
-                if (flank && k % 4 == 0) { Classic(big, small, rng, PropCoralType.Fan, p, nrm, PropUtil.Range(rng, 0.6f, 1.0f), rc.maxTopY); continue; }
+                if (flank && k % 4 == 0) { Classic(big, small, rng, PropCoralType.Fan, p, nrm, PropUtil.Range(rng, 0.6f, 1.0f), rc.maxTopY, cols); continue; }
                 ReefColony kind = k == 0 ? ReefColony.Brain : (k % 5 == 1 ? ReefColony.Table : (k % 3 == 0 ? ReefColony.Branching : (k % 3 == 1 ? ReefColony.Mushroom : ReefColony.Pillar)));
                 float size = kind == ReefColony.Brain || kind == ReefColony.Table ? PropUtil.Range(rng, 0.9f, 1.4f) : kind == ReefColony.Mushroom ? 0.35f : PropUtil.Range(rng, 0.5f, 0.9f);
-                Colony(big, small, rng, kind, Pick(pal, rng), p, nrm, size, rc.maxTopY);
+                Colony(big, small, rng, kind, Pick(pal, rng), p, nrm, size, rc.maxTopY, cols);
             }
             PropInfo.AddHabitat(peak + Vector3.up * 0.8f, 3f, index % 3 == 0 ? HabitatKind.Cleaning : HabitatKind.Crevice, rc.zone);
             if (index % 4 == 2) PropInfo.AddHabitat(peak + Vector3.up * 0.4f, 2.2f, HabitatKind.Overhang, rc.zone);
@@ -609,7 +635,7 @@ namespace Sealebrities
             var spacing = new PropExclusion(12f);
             for (int i = 0; i < peaks.Count; i++)
             {
-                BommieGarden(big, small, rng, peaks[i], i, rc, Valid);
+                BommieGarden(big, small, rng, peaks[i], i, rc, Valid, cols);
                 spacing.Add(peaks[i].x, peaks[i].z, 5f);
                 HouseReefDiscs.Add(new Vector3(peaks[i].x, peaks[i].z, 3.4f));
                 if (PropRun.Due()) yield return null;
@@ -714,7 +740,11 @@ namespace Sealebrities
                 float s = Mathf.Min(PropUtil.Range(rng, 0.25f, 0.8f), -1.5f - g);
                 if (s < 0.2f) continue;
                 Vector3 p = new Vector3(x, g - s * 0.2f, z);
-                PropRocks.Build(small.B(PropMats.ReefRock, p), p, new Vector3(s * 1.3f, s * 0.7f, s), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), rng.Next(), 0);
+                Vector3 lsc = new Vector3(s * 1.3f, s * 0.7f, s);
+                Quaternion lq = Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f);
+                int lseed = rng.Next();
+                PropRocks.Build(small.B(PropMats.ReefRock, p), p, lsc, lq, lseed, 0);
+                if (s >= 0.35f) PropSolid.Rock(cols, p, lsc, lq, lseed, 0, 0.14f, true, "ReefRock");
             }
             Clams(decor, rng, c, site.radius, 7, 3f, 8f, keepOut, "house_reef");
 
@@ -862,6 +892,8 @@ namespace Sealebrities
             var rng = new System.Random(7140);
             var big = new PropBatch(60f);
             var small = new PropBatch(60f);
+            var cols = new GameObject("Colliders").transform;
+            cols.SetParent(decor, false);
             var keepOut = new PropExclusion(16f);
             keepOut.AddLine(WorldLayout.DockStart, WorldLayout.DockEnd + new Vector3(8f, 0f, 0f), 8f);
             keepOut.Add(WorldLayout.BoatSpawn.x, WorldLayout.BoatSpawn.z, 12f);
@@ -887,7 +919,7 @@ namespace Sealebrities
                 if (-g < 0.9f) continue;
                 if (house != null && new Vector2(x - house.center.x, z - house.center.z).magnitude < house.radius) continue;
                 float pr = Mathf.Clamp(sp.radius, 3f, 6f);
-                Patch(big, small, rng, new Vector3(x, g, z), pr, placed, rc, Valid);
+                Patch(big, small, rng, new Vector3(x, g, z), pr, placed, rc, Valid, cols);
                 PropInfo.SetSpot("lagoon_patch_" + placed, new Vector3(x, g, z));
                 placed++;
                 if (PropRun.Due()) yield return null;
@@ -906,7 +938,7 @@ namespace Sealebrities
                 if (!Valid(x, z, out float g) || -g < 1.2f || headSpacing.Blocked(x, z)) continue;
                 if (house != null && new Vector2(x - house.center.x, z - house.center.z).magnitude < house.radius) continue;
                 float pr = PropUtil.Range(rng, 1.8f, 3.4f);
-                Patch(big, small, rng, new Vector3(x, g, z), pr, placed + heads, rc, Valid);
+                Patch(big, small, rng, new Vector3(x, g, z), pr, placed + heads, rc, Valid, cols);
                 headSpacing.Add(x, z, pr + 5f);
                 heads++;
                 if (PropRun.Due()) yield return null;
@@ -931,6 +963,8 @@ namespace Sealebrities
             var small = new PropBatch(60f);
             var rc = new Recipe { zone = id, perM2 = 0.5f, rocky = rocky, maxTopY = -0.8f, anemones = true };
             var used = new PropExclusion(16f);
+            var cols = new GameObject("Colliders").transform;
+            cols.SetParent(decor, false);
             bool Valid(float x, float z, out float g)
             {
                 g = G(x, z);
@@ -949,7 +983,7 @@ namespace Sealebrities
                     if (d < 2.2f || d > 5.5f) continue;
                     if (used.Blocked(x, z)) break;
                     float pr = PropUtil.Range(rng, 2.6f, 4.5f);
-                    Patch(big, small, rng, new Vector3(x, -d, z), pr, placed, rc, Valid);
+                    Patch(big, small, rng, new Vector3(x, -d, z), pr, placed, rc, Valid, cols);
                     used.Add(x, z, pr + 6f);
                     placed++;
                     break;
@@ -984,7 +1018,7 @@ namespace Sealebrities
             var spacing = new PropExclusion(12f);
             for (int i = 0; i < peaks.Count; i++)
             {
-                BommieGarden(big, small, rng, peaks[i], i, rc, Valid);
+                BommieGarden(big, small, rng, peaks[i], i, rc, Valid, cols);
                 spacing.Add(peaks[i].x, peaks[i].z, 4.5f);
             }
             int patches = 0, attempts = 0;

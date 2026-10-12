@@ -87,9 +87,11 @@ namespace Sealebrities
             if (FindLand(new Vector3(hut.x + 18f, 0f, hut.z - 9f), 0.3f, 8f, excl, out var sp, 6f))
             {
                 Quaternion r = Quaternion.Euler(0f, 30f, 0f) * Quaternion.Euler(-74f, 0f, 0f);
-                Vector3 c = sp + Vector3.up * 0.8f;
+                // round 3: the tail really stands in the sand – ground under the tail, tail buried 0.28 m (it floated on
+                // the sloped beach: the centre was measured, the tail sits 0.28 m to the side and 0.96 m lower)
+                Vector3 c = StuckBoardCenter(sp, r, 0.28f);
                 Surfboard(batch, c, r, PropMats.Surfboard);
-                PropCol.Box(cols, c, new Vector3(0.6f, 0.1f, 2.1f), r);
+                PropCol.Box(cols, c, new Vector3(0.6f, 0.1f, 2.1f), r, "Surfboard");
                 excl.Add(sp.x, sp.z, 1.2f);
             }
 
@@ -125,6 +127,7 @@ namespace Sealebrities
                 FuelCan(batch, fc, 20f, PropMats.DrumRed);
                 FuelCan(batch, fc + new Vector3(0.3f, 0f, 0.35f), -15f, PropMats.DrumRed);
                 FuelCan(batch, fc + new Vector3(-0.35f, 0f, 0.25f), 75f, PropMats.DrumYellow);
+                PropCol.Box(cols, new Vector3(fc.x, G(fc.x, fc.z) + 0.25f, fc.z + 0.2f), new Vector3(1.0f, 0.5f, 0.85f), Quaternion.identity, "FuelCans");   // round 3
                 excl.Add(fc.x, fc.z, 1.5f);
             }
             if (FindLand(new Vector3(hut.x + 9.5f, 0f, hut.z - 5.6f), 0.2f, 20f, excl, out var fc2, 4f))
@@ -141,6 +144,7 @@ namespace Sealebrities
                 float len = PropUtil.Range(rng, 1.6f, 3.4f);
                 Vector3 axis = r * Vector3.up;
                 batch.B(PropMats.Driftwood).Cylinder(lp + Vector3.up * 0.12f - axis * len * 0.5f, r, 0.17f, 0.12f, len, 6, true, true);
+                PropCol.Capsule(cols, lp + Vector3.up * 0.12f, 0.15f, len, r, "Driftwood");   // round 3: solid log
                 excl.Add(lp.x, lp.z, 1.5f);
             }
 
@@ -206,6 +210,24 @@ namespace Sealebrities
             Quaternion r = Quaternion.Euler(0f, yaw, 0f);
             for (int i = 0; i < 4; i++)
                 batch.B(i % 2 == 0 ? PropMats.CushionB : PropMats.White).Box(p + r * new Vector3(0f, 0.015f, -0.6f + i * 0.4f), new Vector3(0.8f, 0.02f, 0.4f), r);
+        }
+
+        /// Centre for a surfboard stuck upright in the ground with rotation r (board length = local z, tail at z −1):
+        /// the tail point is `bury` metres below the ground under the tail AND under the board's foot print on the
+        /// downhill side, so it never floats on a slope. `ground` = a point near the board (only x/z are used).
+        public static Vector3 StuckBoardCenter(Vector3 ground, Quaternion r, float bury)
+        {
+            Vector3 tail = r * new Vector3(0f, 0f, -1f);           // tail relative to the centre
+            Vector3 c = new Vector3(ground.x, 0f, ground.z);
+            float gy = float.MaxValue;
+            // lowest ground under the lower 0.4 m of the board (tail and the two rails beside it)
+            for (int k = 0; k < 3; k++)
+            {
+                Vector3 off = r * new Vector3(k == 0 ? 0f : (k == 1 ? -0.22f : 0.22f), 0f, k == 0 ? -1f : -0.6f);
+                gy = Mathf.Min(gy, G(c.x + off.x, c.z + off.z));
+            }
+            c.y = gy - bury - tail.y;
+            return c;
         }
 
         /// Low-poly surfboard: a flat pointed outline with thickness, a white center stripe and a dark fin.
@@ -405,6 +427,14 @@ namespace Sealebrities
             var bc = go.AddComponent<BoxCollider>();
             bc.isTrigger = true;
             bc.size = new Vector3(1.4f, 0.9f, 1.4f);
+            // round 3 (GDD §19): the grate on its two stones is solid (it was only the trigger). Child of the grill, so
+            // the interaction ray resolves to the grill even when it hits the solid box (the trigger encloses it anyway).
+            var solid = new GameObject("GrillSolid");
+            solid.transform.SetParent(go.transform, false);
+            solid.transform.position = p + Vector3.up * 0.24f;
+            var sbc = solid.AddComponent<BoxCollider>();
+            sbc.size = new Vector3(0.98f, 0.48f, 0.7f);
+            PropSolid.Count++;
             var g = go.AddComponent<PropGrill>();
             g.smoke = PropFX.GrillSmoke(root, p + Vector3.up * 0.55f);
             g.glow = embers;

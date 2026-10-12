@@ -173,6 +173,7 @@ namespace Sealebrities
             for (int i = 0; i < 2; i++)
                 batch.W(PropMats.DarkMetal, h).Box(W(2.75f, 1.35f, 0.4f - i * 0.5f), new Vector3(0.07f, 2.6f, 0.28f), r * Quaternion.Euler(0f, 0f, 8f + i * 4f));
             batch.W(PropMats.Flat(PropPal.LighthouseRed), h).Box(W(-2.3f, 0.45f, 0.7f), new Vector3(0.7f, 0.7f, 0.5f), r);
+            PropCol.Box(cols, W(-2.3f, 0.4f, 0.75f), new Vector3(0.72f, 0.8f, 0.62f), r, "ToolCart");   // round 3: solid cart
             for (int i = 0; i < 3; i++) batch.W(PropMats.DarkMetal, h).Box(W(-2.3f, 0.3f + i * 0.2f, 0.95f), new Vector3(0.6f, 0.02f, 0.02f), r);
             PropKit.Barrel(batch, cols, W(2.4f, 0f, -2.2f), PropMats.DrumYellow);
             // Wanda's hammock across the back corner (her siesta spot) – also the W1 quest's drum delivery point

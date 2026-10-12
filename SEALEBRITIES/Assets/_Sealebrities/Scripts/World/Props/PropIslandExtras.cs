@@ -254,6 +254,16 @@ namespace Sealebrities
             Vector3 r0 = camp + q * new Vector3(0f, 2.05f, -1.25f), r1 = camp + q * new Vector3(0f, 1.45f, 1.15f);
             batch.W(PropMats.Thatch, camp).Box((r0 + r1) * 0.5f, new Vector3(3.6f, 0.12f, (r1 - r0).magnitude + 0.4f), Quaternion.LookRotation(r1 - r0) * Quaternion.Euler(0f, 0f, 0f));
             PropCol.Box(cols, camp + q * new Vector3(0f, 1.0f, -1.25f), new Vector3(3.4f, 2.0f, 0.2f), q, "ToniHutBack");
+            // round 3 (GDD §19): the rest of the lean-to is solid too – both front posts, the side beams at head height
+            // and the thatch roof (the open front stays the way in)
+            for (int s = -1; s <= 1; s += 2)
+            {
+                Vector3 f0 = camp + q * new Vector3(s * 1.6f, 0f, 1.0f);
+                f0.y = PropGround.H(f0.x, f0.z);
+                PropSolid.Segment(cols, f0 - Vector3.up * 0.1f, f0 + Vector3.up * 1.35f, 0.09f, "ToniHutPost");
+                PropSolid.Segment(cols, f0 + Vector3.up * 1.4f, camp + q * new Vector3(s * 1.6f, 2.0f, -1.2f), 0.08f, "ToniHutBeam");
+            }
+            PropSolid.Box(cols, (r0 + r1) * 0.5f, new Vector3(3.6f, 0.16f, (r1 - r0).magnitude + 0.4f), Quaternion.LookRotation(r1 - r0), "ToniHutRoof");
             // hammock + tape reels on strings + the wok satellite dish
             Vector3 ha = camp + q * new Vector3(-1.5f, 1.3f, 0.6f), hb = camp + q * new Vector3(1.5f, 1.3f, -0.4f);
             PropKit.Hammock(batch, cols, ha, hb, 1, false);
@@ -269,6 +279,7 @@ namespace Sealebrities
             wok.y = PropGround.H(wok.x, wok.z);
             batch.W(PropMats.DarkMetal, wok).Rod(wok, wok + Vector3.up * 1.6f, 0.04f, 0.03f, 5);
             batch.W(PropMats.Metal, wok).Cylinder(wok + Vector3.up * 1.6f, Quaternion.Euler(-35f, yaw + 30f, 0f), 0.45f, 0.12f, 0.2f, 8, true, false);
+            PropSolid.Segment(cols, wok, wok + Vector3.up * 1.55f, 0.06f, "WokPole");   // round 3
             PropKit.FirePit(batch, root, camp + q * new Vector3(0.2f, 0f, 2.4f) + Vector3.up * (PropGround.H((camp + q * new Vector3(0.2f, 0f, 2.4f)).x, (camp + q * new Vector3(0.2f, 0f, 2.4f)).z) - camp.y), 77, false);
             PropKit.Log(batch, cols, camp + q * new Vector3(-1.0f, 0.2f, 3.0f), yaw + 80f, 1.8f, 0.17f, PropMats.Driftwood);
             PropInfo.SetSpot("toni_fog_camp", camp + q * new Vector3(0.6f, 0f, 1.4f), yaw);

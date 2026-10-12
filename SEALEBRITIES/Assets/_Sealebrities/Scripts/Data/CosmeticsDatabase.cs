@@ -29,12 +29,23 @@ namespace Sealebrities
     public static class CosmeticsDatabase
     {
         public const string Suit = "Suit", Cuff = "Cuff", Pattern = "Pattern", Hat = "Hat", Skin = "Skin", Mouth = "Mouth",
-            Eyes = "Eyes", Brows = "Brows", Mask = "Mask", Fins = "Fins", BoatFlag = "BoatFlag", HandProp = "HandProp";
+            Eyes = "Eyes", Brows = "Brows", Mask = "Mask", Fins = "Fins", BoatFlag = "BoatFlag", HandProp = "HandProp",
+            // round 3 (GDD §19 „mehr Optionen“)
+            BodyBuild = "Build", Height = "Height", Hair = "Hair", HairColor = "HairColor", Beard = "Beard", Nose = "Nose", Accessory = "Accessory";
 
         public static readonly Color[] SuitColors =
         {
             Hex("#EE7F2D"), Hex("#3FB8C4"), Hex("#E0607E"), Hex("#F2C94C"), Hex("#8E6CD9"), Hex("#6E9445"),
             Hex("#4F7FAE"), Hex("#EDE6DA"), Hex("#C94F3D"), Hex("#2F8F6E"), Hex("#F29BBE"), Hex("#3A3F5C"),
+            // round 3
+            Hex("#B05A8A"), Hex("#E8A23A"), Hex("#7FC4AE"), Hex("#5C4E9E"), Hex("#A8B04A"), Hex("#2B2533"),
+        };
+
+        /// Round 3 hair colours (index = DiverLook.hairColor).
+        public static readonly Color[] HairColors =
+        {
+            Hex("#4A3326"), Hex("#2A2220"), Hex("#7A5236"), Hex("#8E3B2A"), Hex("#D0702E"), Hex("#E3C27A"),
+            Hex("#EDE3C8"), Hex("#9A9AA0"), Hex("#3FA9A0"), Hex("#E86FA0"),
         };
 
         /// Index 0 = "Auto" (alpha 0 → suit lightened 55 %).
@@ -48,29 +59,41 @@ namespace Sealebrities
         public static readonly Color[] SkinTones =
         {
             Hex("#E8C08A"), Hex("#D6A574"), Hex("#A8724A"), Hex("#6B4636"), Hex("#F0D2B4"), Hex("#4A2F28"),
+            // round 3
+            Hex("#E3B98F"), Hex("#BC8055"), Hex("#87563C"), Hex("#F2C6A8"),
         };
 
         /// Mask frames – index 0 = default #1E1B2B, 6 = Gold (all 13 secrets).
         public static readonly Color[] MaskColors =
         {
             Hex("#1E1B2B"), Hex("#EE7F2D"), Hex("#3FB8C4"), Hex("#F2C94C"), Hex("#E0607E"), Hex("#EDE6DA"), Hex("#E8C65A"),
+            // round 3
+            Hex("#8E6CD9"), Hex("#6E9445"), Hex("#C94F3D"),
         };
 
         /// Fin colours – index 0 = default #2B2533, 4 = Gold (Gus mission M1).
         public static readonly Color[] FinColors =
         {
             Hex("#2B2533"), Hex("#F2C94C"), Hex("#3FB8C4"), Hex("#E0607E"), Hex("#E8C65A"),
+            // round 3
+            Hex("#EE7F2D"), Hex("#8E6CD9"), Hex("#EDE6DA"),
         };
 
-        public const int HatCount = 15, PatternCount = 8, EyesCount = 5, BrowsCount = 4, MouthCount = 5;
+        public const int HatCount = 20, PatternCount = 12, EyesCount = 6, BrowsCount = 6, MouthCount = 5;
+        /// Round 3 body / face options (DiverLook.build, hair, beard, nose, accessory; height has 5 steps −2 … +2).
+        public const int BuildCount = 4, HeightCount = 5, HairCount = 9, BeardCount = 6, NoseCount = 5, AccessoryCount = 8;
+        /// The hair style index that means "bald" (the last one).
+        public const int HairBald = HairCount - 1;
 
         public static readonly List<CosmeticDef> All = Build();
 
         static List<CosmeticDef> Build()
         {
             var l = new List<CosmeticDef>();
-            string[] suitDe = { "Orange", "Türkis", "Koralle", "Sonnengelb", "Lila", "Seetang", "Ozeanblau", "Sand", "Rost", "Smaragd", "Bonbonrosa", "Mitternacht" };
-            string[] suitEn = { "Orange", "Teal", "Coral", "Sun Yellow", "Purple", "Kelp", "Ocean Blue", "Sand", "Rust", "Emerald", "Candy Pink", "Midnight" };
+            string[] suitDe = { "Orange", "Türkis", "Koralle", "Sonnengelb", "Lila", "Seetang", "Ozeanblau", "Sand", "Rost", "Smaragd", "Bonbonrosa", "Mitternacht",
+                                "Beere", "Mango", "Meerschaum", "Indigo", "Limette", "Schwarz" };
+            string[] suitEn = { "Orange", "Teal", "Coral", "Sun Yellow", "Purple", "Kelp", "Ocean Blue", "Sand", "Rust", "Emerald", "Candy Pink", "Midnight",
+                                "Berry", "Mango", "Seafoam", "Indigo", "Lime", "Black" };
             for (int i = 0; i < SuitColors.Length; i++) l.Add(Col(Suit, i, suitDe[i], suitEn[i], SuitColors[i]));
 
             l.Add(Col(Cuff, 0, "Auto", "Auto", CuffColors[0]));
@@ -84,6 +107,10 @@ namespace Sealebrities
             l.Add(Opt(Pattern, 5, "Wellen", "Waves"));
             l.Add(Locked(Pattern, 6, "Gold", "Gold", "Alle 14 Fundstücke", "All 14 treasures", "treasures_all"));
             l.Add(Locked(Pattern, 7, "Leuchtturm", "Lighthouse", "Gus' Auftrag „Das Leuchtfeuer“", "Gus's job “The Beacon”", "mission:M3"));
+            l.Add(Opt(Pattern, 8, "Tarnung", "Camo"));
+            l.Add(Opt(Pattern, 9, "Zickzack", "Zigzag"));
+            l.Add(Opt(Pattern, 10, "Sterne", "Stars"));
+            l.Add(Opt(Pattern, 11, "Zweifarbig", "Two-tone"));
 
             l.Add(Opt(Hat, 0, "Ohne", "None"));
             l.Add(Opt(Hat, 1, "Fischerhut", "Bucket Hat"));
@@ -98,12 +125,43 @@ namespace Sealebrities
             l.Add(Locked(Hat, 10, "Horsts Köderhut", "Horst's Lure Hat", "Tutorial geschafft", "Finish the tutorial", "tutorial"));
             l.Add(Locked(Hat, 11, "Möwennest „Günther“", "Seagull Nest “Günther”", "Erfolg „Horst im Hafenbecken“", "Achievement “Horst Overboard”", "achievement:horst_overboard"));
             l.Add(Locked(Hat, 12, "Krone", "Crown", "1.000.000 Follower", "1,000,000 followers", "followers:1000000"));
-            l.Add(Locked(Hat, 13, "Perles Strohhut", "Pearl's Straw Hat", "Perles Auftrag „Kartenabend“", "Pearl's quest “Card Night”", "quest:P2"));
-            l.Add(Locked(Hat, 14, "Papierkrone", "Paper Crown", "Lios Auftrag „Ein echter Hai!“", "Lio's quest “A Real Shark!”", "quest:L2"));
+            l.Add(Locked(Hat, 13, "Wurzels Strohhut", "Root's Straw Hat", "Wurzels Auftrag „Ziegen-Yoga“", "Root's job “Goat Yoga”", "quest:P2"));
+            l.Add(Locked(Hat, 14, "Bordkarten-Krone", "Boarding Pass Crown", "Wandas Auftrag „Ein echter Hai!“", "Wanda's job “A Real Shark!”", "quest:L2"));
+            l.Add(Opt(Hat, 15, "Mütze", "Beanie"));
+            l.Add(Opt(Hat, 16, "Basecap", "Baseball Cap"));
+            l.Add(Opt(Hat, 17, "Stirnband", "Headband"));
+            l.Add(Opt(Hat, 18, "Kopftuch", "Head Scarf"));
+            l.Add(Opt(Hat, 19, "Sonnenschild", "Sun Visor"));
 
-            string[] skinDe = { "Hell", "Honig", "Karamell", "Kakao", "Porzellan", "Espresso" };
-            string[] skinEn = { "Light", "Honey", "Caramel", "Cocoa", "Porcelain", "Espresso" };
+            string[] skinDe = { "Hell", "Honig", "Karamell", "Kakao", "Porzellan", "Espresso", "Sand", "Bernstein", "Kastanie", "Rosé" };
+            string[] skinEn = { "Light", "Honey", "Caramel", "Cocoa", "Porcelain", "Espresso", "Sand", "Amber", "Chestnut", "Rosy" };
             for (int i = 0; i < SkinTones.Length; i++) l.Add(Col(Skin, i, skinDe[i], skinEn[i], SkinTones[i]));
+
+            // round 3: body, hair, beard, nose, accessories (all free)
+            l.Add(Opt(BodyBuild, 0, "Normal", "Regular"));
+            l.Add(Opt(BodyBuild, 1, "Schlank", "Slim"));
+            l.Add(Opt(BodyBuild, 2, "Kräftig", "Sturdy"));
+            l.Add(Opt(BodyBuild, 3, "Breite Schultern", "Broad"));
+            l.Add(Opt(Height, 0, "Sehr klein", "Very short"));
+            l.Add(Opt(Height, 1, "Klein", "Short"));
+            l.Add(Opt(Height, 2, "Mittel", "Medium"));
+            l.Add(Opt(Height, 3, "Groß", "Tall"));
+            l.Add(Opt(Height, 4, "Sehr groß", "Very tall"));
+            string[] hairDe = { "Kurz", "Stachelig", "Locken", "Zopf", "Dutt", "Lang", "Seitenscheitel", "Wuschelkopf", "Glatze" };
+            string[] hairEn = { "Short", "Spiky", "Curls", "Ponytail", "Bun", "Long", "Side Part", "Shaggy", "Bald" };
+            for (int i = 0; i < HairCount; i++) l.Add(Opt(Hair, i, hairDe[i], hairEn[i]));
+            string[] hcDe = { "Braun", "Schwarz", "Hellbraun", "Kupfer", "Rot", "Blond", "Platin", "Grau", "Türkis", "Pink" };
+            string[] hcEn = { "Brown", "Black", "Light Brown", "Copper", "Ginger", "Blond", "Platinum", "Grey", "Teal", "Pink" };
+            for (int i = 0; i < HairColors.Length; i++) l.Add(Col(HairColor, i, hcDe[i], hcEn[i], HairColors[i]));
+            string[] beardDe = { "Ohne", "Schnurrbart", "Ziegenbart", "Vollbart", "Kapitänsbart", "Stoppeln" };
+            string[] beardEn = { "None", "Moustache", "Goatee", "Full Beard", "Captain's Beard", "Stubble" };
+            for (int i = 0; i < BeardCount; i++) l.Add(Opt(Beard, i, beardDe[i], beardEn[i]));
+            string[] noseDe = { "Knopf", "Knolle", "Lang", "Spitz", "Stups" };
+            string[] noseEn = { "Button", "Round", "Long", "Pointy", "Snub" };
+            for (int i = 0; i < NoseCount; i++) l.Add(Opt(Nose, i, noseDe[i], noseEn[i]));
+            string[] accDe = { "Ohne", "Muschelkette", "Halstuch", "Ohrringe", "Blume", "Taucheruhr", "Sommersprossen", "Pflaster" };
+            string[] accEn = { "None", "Shell Necklace", "Neckerchief", "Earrings", "Flower", "Dive Watch", "Freckles", "Plaster" };
+            for (int i = 0; i < AccessoryCount; i++) l.Add(Opt(Accessory, i, accDe[i], accEn[i]));
 
             l.Add(Opt(Mouth, 0, "Lächeln", "Smile"));
             l.Add(Opt(Mouth, 1, "Offen", "Open"));
@@ -116,11 +174,15 @@ namespace Sealebrities
             l.Add(Opt(Eyes, 2, "Schielend", "Cross-eyed"));
             l.Add(Locked(Eyes, 3, "Sternchen", "Stars", "Sealog zu 100 %", "Sealog 100 %", "sealog_full"));
             l.Add(Locked(Eyes, 4, "Herzchen", "Hearts", "Gerald an 5 verschiedenen Tagen filmen", "Film Gerald on 5 different days", "gerald_days:5"));
+            l.Add(Opt(Eyes, 5, "Wimpern", "Lashes"));
 
-            l.Add(Opt(Brows, 0, "Keine", "None"));
+            // round 3: 0 is now the natural default brow (a readable face); "none" moved to the end
+            l.Add(Opt(Brows, 0, "Natürlich", "Natural"));
             l.Add(Opt(Brows, 1, "Buschig", "Bushy"));
             l.Add(Opt(Brows, 2, "Grimmig", "Grumpy"));
             l.Add(Opt(Brows, 3, "Überrascht", "Surprised"));
+            l.Add(Opt(Brows, 4, "Dünn", "Thin"));
+            l.Add(Opt(Brows, 5, "Keine", "None"));
 
             string[] maskDe = { "Klassik", "Orange", "Türkis", "Gelb", "Koralle", "Sand" };
             string[] maskEn = { "Classic", "Orange", "Teal", "Yellow", "Coral", "Sand" };
@@ -128,6 +190,9 @@ namespace Sealebrities
             var goldMask = Locked(Mask, 6, "Gold", "Gold", "Alle 13 Geheimnisse", "All 13 secrets", "secrets_all");
             goldMask.color = MaskColors[6];
             l.Add(goldMask);
+            l.Add(Col(Mask, 7, "Lila", "Purple", MaskColors[7]));
+            l.Add(Col(Mask, 8, "Seetang", "Kelp", MaskColors[8]));
+            l.Add(Col(Mask, 9, "Rot", "Red", MaskColors[9]));
 
             l.Add(Col(Fins, 0, "Klassik", "Classic", FinColors[0]));
             l.Add(Col(Fins, 1, "Quietschgelb", "Squeaky Yellow", FinColors[1]));
@@ -136,10 +201,13 @@ namespace Sealebrities
             var goldFins = Locked(Fins, 4, "Gold", "Gold", "Gus' Auftrag „Die Glücksflosse“", "Gus's job “The Lucky Fin”", "mission:M1");
             goldFins.color = FinColors[4];
             l.Add(goldFins);
+            l.Add(Col(Fins, 5, "Orange", "Orange", FinColors[5]));
+            l.Add(Col(Fins, 6, "Lila", "Purple", FinColors[6]));
+            l.Add(Col(Fins, 7, "Weiß", "White", FinColors[7]));
 
             l.Add(Opt(BoatFlag, 0, "Keine", "None"));
-            l.Add(Locked(BoatFlag, 1, "Wellen", "Waves", "Miras Auftrag „Gus' altes Paddel“", "Mira's quest “Gus's Old Paddle”", "quest:M2"));
-            l.Add(Locked(BoatFlag, 2, "Altriff", "Oldreef", "Miras Auftrag „Das erste Paddeln“", "Mira's quest “First Paddle”", "quest:M3"));
+            l.Add(Locked(BoatFlag, 1, "Wellen", "Waves", "Horsts Auftrag „Gus' altes Paddel“", "Horst's job “Gus's Old Paddle”", "quest:M2"));
+            l.Add(Locked(BoatFlag, 2, "Kanu-Wimpel", "Canoe Pennant", "Harpos Auftrag „Das Kanu-Rennen“", "Harpo's job “The Canoe Race”", "quest:M3"));
 
             l.Add(Opt(HandProp, 0, "Keins", "None"));
             l.Add(Locked(HandProp, 1, "Goldener Selfie-Stick", "Golden Selfie Stick", "Behalte ihn (Chad & Brad)", "Keep it (Chad & Brad)", "quest:B1"));

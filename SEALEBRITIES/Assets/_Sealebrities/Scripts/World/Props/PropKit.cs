@@ -20,9 +20,16 @@ namespace Sealebrities
             post.Cylinder(ground - Vector3.up * 0.35f, Quaternion.Euler(0f, 0f, 2f), 0.05f, 0.045f, height + 0.35f, 6, false, true);
             if (w > 0.9f)
             {
-                // wide boards get two posts
-                post.Cylinder(ground + r * new Vector3(-w * 0.42f, -0.35f, -0.03f), Quaternion.identity, 0.045f, 0.04f, height + 0.3f, 6, false, true);
-                post.Cylinder(ground + r * new Vector3(w * 0.42f, -0.35f, -0.03f), Quaternion.identity, 0.045f, 0.04f, height + 0.3f, 6, false, true);
+                // wide boards get two posts – round 3: each post stands on ITS ground (on a slope the downhill post used to
+                // hang in the air, the uphill one stuck through the board's top)
+                float topY = ground.y + height - 0.05f;
+                for (int s = -1; s <= 1; s += 2)
+                {
+                    Vector3 pb = ground + r * new Vector3(s * w * 0.42f, 0f, -0.03f);
+                    float gy = G(pb.x, pb.z) - 0.35f;
+                    float len = Mathf.Max(0.3f, topY - gy);
+                    post.Cylinder(new Vector3(pb.x, gy, pb.z), Quaternion.identity, 0.045f, 0.04f, len, 6, false, true);
+                }
             }
             Vector3 c = ground + Vector3.up * height + r * new Vector3(0f, 0f, 0.05f);
             Board(b, c, r, w, boardH, text, board, ink);
@@ -508,7 +515,8 @@ namespace Sealebrities
             Vector3 stand = mid + lat * 1.0f;
             stand.y = G(stand.x, stand.z);
             float yaw = Mathf.Atan2(dir.x, dir.z) * Mathf.Rad2Deg;
-            int idx = PropBed.Register(id, mid + Vector3.up * 0.3f - dir * 0.8f, yaw, stand, yaw + 90f, SleepSpotInfo.Hammock);
+            // round 3: the exact cloth curve (Hammock: sag = min(0.7, 0.22 · length)), head at hook a
+            int idx = PropBed.RegisterHammock(id, a, c, Mathf.Min(0.7f, (c - a).magnitude * 0.22f), stand, yaw + 90f);
             var go = new GameObject("HammockBed_" + id);
             go.transform.SetParent(parent, false);
             go.transform.SetPositionAndRotation(mid, Quaternion.LookRotation(dir));
@@ -547,7 +555,10 @@ namespace Sealebrities
                 Quaternion q = Quaternion.Euler(PropUtil.Range(rng, -8f, 8f), PropUtil.Range(rng, 0f, 360f), 0f);
                 int sd = rng.Next();
                 PropRocks.BuildSplit(b, p, p, sc, q, sd, s > 0.4f ? 1 : 0, 0.15f, main ?? (i % 2 == 0 ? PropMats.Rock : PropMats.RockMid), PropMats.Moss, PropMats.Crevice);
+                // round 3 (GDD §19): every rock you would bump into (≥ 0.35) is solid (was s > 0.6); small ones as a convex
+                // hull of the same detail the renderer uses
                 if (cols != null && s > 0.6f) PropCol.Mesh(cols, PropRocks.ColliderMesh(sc, sd, 1, 0.15f), p, q, Vector3.one, "Rock");
+                else if (cols != null && s >= 0.35f) PropSolid.Rock(cols, p, sc, q, sd, s > 0.4f ? 1 : 0, 0.15f, false, "Rock");
             }
         }
 
@@ -644,6 +655,15 @@ namespace Sealebrities
             var band = new PropMeshBuilder();
             band.Cylinder(new Vector3(0f, -0.05f * scale, 0f), Quaternion.identity, 0.43f * scale, 0.43f * scale, 0.1f * scale, 8);
             PropUtil.MeshObject(go.transform, "Band", band.ToMesh("MooringBand"), PropMats.White, Vector3.zero, Quaternion.identity);
+            // round 3 (GDD §19): solid ball on a kinematic body (PropBuoy moves the root with the waves); boat-pass layer
+            // so the boat never snags on a buoy in the lanes (PropSolid)
+            PropSolid.Kinematic(go);
+            var solid = new GameObject("BuoySolid");
+            solid.transform.SetParent(go.transform, false);
+            solid.layer = PropSolid.BoatPassLayer;
+            var sph = solid.AddComponent<SphereCollider>();
+            sph.radius = 0.44f * scale;
+            PropSolid.Count++;
             var bu = go.AddComponent<PropBuoy>();
             bu.x = pos.x;
             bu.z = pos.z;

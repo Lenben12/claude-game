@@ -243,7 +243,7 @@ namespace Sealebrities
         static readonly string[] PageDe =
         {
             // ---- chapter 1 „Rostbucht“
-            "Tag 1 auf Rostbucht. Hütte für drei Kokosnüsse gekauft. Zwei waren hohl. Die Altriffer lachen heute noch.",
+            "Tag 1 auf Rostbucht. Hütte für drei Kokosnüsse gekauft – von den Leuten im Dschungel. Zwei waren hohl. Sie lachen heute noch. Lautlos.",
             "Mein erstes Video: 4 Aufrufe. Drei davon war ich. Der vierte war Horst.",
             "Gerald die Schildkröte hat mir heute zugewinkt. Glaube ich. Horst sagt, das war ein Krampf.",
             "Die Bottom-Brüder parken schon wieder ihre Yacht über meinem Riff. Ich hab Fischbrötchen in ihren Whirlpool geworfen.",
@@ -255,14 +255,14 @@ namespace Sealebrities
             "Basislager neben der Schlucht aufgebaut. Toni, unser Tonmann, nimmt alles auf. Sogar mein Schnarchen.",
             "Probelauf. Ganz unten im Graben hat mich etwas angeschaut. Ein Auge. Nur ein riesiges Auge.",
             "Wanda hat die Bänder abgeholt. Sie fliegt wie eine Möwe mit Schluckauf.",
-            "Morgen ist die Live-Sendung. Perle sagt, ihr Gezeitenkalender meint: schlechte Nacht. Ich sage: Quote!",
+            "Morgen ist die Live-Sendung. Die Dschungelleute klopfen auf ihr Gezeitenbrett und schütteln den Kopf: schlechte Nacht. Ich sage: Quote!",
             // ---- chapter 3 „Die Augennacht“
-            "Live-Sendung: erst Rauschen, dann Stille. Die Ketten sind weg. Das Studio auch. Das Meer war hell. Von unten.",
+            "Live-Sendung: erst Rauschen, dann Stille. Die Ketten sind weg. Das Studio auch. Das Meer war hell. Von unten. Im Dschungel spricht seitdem keiner mehr.",
             "Keiner glaubt mir das mit dem Auge. Kanal Tiefsee hat die Doku gestrichen. Und Toni ist verschwunden.",
             "Blitz im Funkturm. Oder etwas anderes. Seitdem knistert das alte Funkgerät da oben. Ich frage lieber nicht.",
             "Ich habe die Bänder versteckt. Wer sie findet, erzählt die Geschichte zu Ende.",
             "Die Leuchtturm-Linse ist gesprungen. Drei Scherben: ganz oben, in der Grotte, beim Funkturm. Fragt nicht.",
-            "Notgroschen ins Sparschwein, Sparschwein in die Schlucht. Da sucht keiner. Außer Lio. Lio sucht überall.",
+            "Notgroschen ins Sparschwein, Sparschwein in die Schlucht. Da sucht keiner. Außer Horst. Horst sucht überall.",
             // ---- chapter 4 „Das Auge wartet“
             "Kapitänskajüte der MS Clickbait. Käpt'n Kurt hatte einen Dreispitz. Und keinen Humor.",
             "Den Kajütenschlüssel gab der Käpt'n immer den Muränen im Laderaum. Die rücken ihn nur im Dunkeln raus.",
@@ -274,7 +274,7 @@ namespace Sealebrities
 
         static readonly string[] PageEn =
         {
-            "Day 1 on Rust Cove. Bought the hut for three coconuts. Two were hollow. The Oldreefers are still laughing.",
+            "Day 1 on Rust Cove. Bought the hut for three coconuts – from the jungle folk. Two were hollow. They are still laughing. Silently.",
             "My first video: 4 views. Three of them were me. The fourth was Horst.",
             "Gerald the turtle waved at me today. I think. Horst says it was a cramp.",
             "The Bottom brothers parked their yacht over my reef again. I threw fish rolls into their hot tub.",
@@ -285,13 +285,13 @@ namespace Sealebrities
             "Set up base camp by the ravine. Tony, our sound guy, records everything. Even my snoring.",
             "Test run. Deep down in the trench something looked at me. An eye. Just one giant eye.",
             "Wanda picked up the tapes. She flies like a seagull with hiccups.",
-            "Tomorrow is the live broadcast. Pearl says her tide calendar means: bad night. I say: ratings!",
-            "Live broadcast: first static, then silence. The chains are gone. So is the studio. The sea was bright. From below.",
+            "Tomorrow is the live broadcast. The jungle folk tap their tide board and shake their heads: bad night. I say: ratings!",
+            "Live broadcast: first static, then silence. The chains are gone. So is the studio. The sea was bright. From below. Nobody in the jungle has spoken since.",
             "Nobody believes me about the eye. Deep Sea TV cancelled the documentary. And Tony vanished.",
             "Lightning hit the radio tower. Or something else. Since then the old radio up there crackles. I'd rather not ask.",
             "I hid the tapes. Whoever finds them gets to finish the story.",
             "The lighthouse lens cracked. Three shards: at the very top, in the grotto, at the radio tower. Don't ask.",
-            "Emergency cash into the piggy bank, piggy bank into the ravine. Nobody looks there. Except Lio. Lio looks everywhere.",
+            "Emergency cash into the piggy bank, piggy bank into the ravine. Nobody looks there. Except Horst. Horst looks everywhere.",
             "Captain's cabin of the MS Clickbait. Captain Kurt had a tricorn. And no sense of humour.",
             "The captain always gave the cabin key to the morays in the hold. They only hand it over in the dark.",
             "On the kelp island Horst and I carved our names into a tree. 1989. He misspelled his.",
@@ -359,7 +359,7 @@ namespace Sealebrities
             new Named { key = "lighthouse_cellar", nameDe = "Gus' Keller", nameEn = "Gus's cellar",
                 textDe = "Sendepläne von 1987, eine Seekarte mit einem Kreuz im Graben und ein Zettel: „Folge dem Strahl.“", textEn = "Broadcast plans from 1987, a chart with a cross in the trench and a note: \"Follow the beam.\"" },
             new Named { key = "village_loft", nameDe = "Gus' Schuldscheine", nameEn = "Gus's IOUs",
-                textDe = "Eine Zigarrenkiste voller Schuldscheine an Großmutter Perle. Summe: 412 Fischbrötchen.", textEn = "A cigar box full of IOUs to Grandma Pearl. Total: 412 fish rolls." },
+                textDe = "Eine Zigarrenkiste voller Schuldscheine von Gus an Horst. Summe: 412 Fischbrötchen. Angespült in der Truhe der Einsiedler.", textEn = "A cigar box full of IOUs from Gus to Horst. Total: 412 fish rolls. Washed up in the hermits' chest." },
             new Named { key = "fog_archive", nameDe = "Tonis Tonarchiv", nameEn = "Tony's sound archive",
                 textDe = "Kassetten in einer Luftblase: „Singende Fische, Vol. 1–40“ – und eine: „Das Auge. NICHT abspielen.“", textEn = "Tapes in an air pocket: \"Singing Fish, Vol. 1–40\" – and one: \"The Eye. DO NOT PLAY.\"" },
         };
@@ -465,6 +465,9 @@ namespace Sealebrities
             if (!CanInteract()) return;
             string name = kind == CollectibleKind.Treasure || kind == CollectibleKind.Secret ? PropLore.NameFor(id, kind) : null;
             if (!Collectibles.Collect(id, kind, name)) return;
+            // round 3: the finder's own copy goes into the backpack's collection pouch (secrets stay where they are)
+            string item = ItemDatabase.ForCollectible(kind);
+            if (item != null) Backpack.Add(item, 1, false);
             if (money > 0 && GameManager.I != null)
             {
                 GameManager.I.AddMoney(money);

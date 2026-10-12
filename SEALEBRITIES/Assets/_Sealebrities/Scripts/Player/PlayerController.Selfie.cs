@@ -59,13 +59,13 @@ namespace Sealebrities
             if (!initialized || menuMode || seated || IsBusy) return false;
             if (!Hands.IsHeld(HoldItem.Camera))
             {
-                if (!Hands.Owns(HoldItem.Camera) || !Hands.Find(HoldItem.Camera, out Hand h, out int slot))
+                if (!Hands.Owns(HoldItem.Camera) || !Hands.Find(HoldItem.Camera, out int slot))
                 {
                     if (noCameraLine == null || Loc.Current != selfieLineLang) { selfieLineLang = Loc.Current; noCameraLine = Loc.Tr("Kamera auf die Hotbar legen", "Put the camera on your hotbar"); }
                     GameEvents.RaiseNotify(NotifyKind.Warning, noCameraLine);
                     return false;
                 }
-                Hands.Select(h, slot);
+                Hands.Select(slot);
                 if (!Hands.IsHeld(HoldItem.Camera)) return false;
             }
             if (crouching && CanStandUp()) SetCrouch(false);
@@ -160,6 +160,8 @@ namespace Sealebrities
         {
             if (!selfie || camT == null || head == null) return;
             Vector3 eye = head.position;
+            // round 3: aim at the face of the human-proportioned diver (eyes at 1.715 m × the height option)
+            if (selfieModel != null) eye = transform.position + Vector3.up * (1.69f * (1f + Mathf.Clamp(Settings.Data.height, -2, 2) * 0.04f));
             Quaternion dirQ = Quaternion.Euler(0f, yaw + selfieYaw, 0f) * Quaternion.Euler(-selfiePitch, 0f, 0f);
             Vector3 dir = dirQ * Vector3.forward;
             // keep the lens out of walls, planks and hulls
@@ -216,17 +218,8 @@ namespace Sealebrities
             go.SetActive(false);
         }
 
-        static int LookHash(DiverLook l)
-        {
-            unchecked
-            {
-                int h = l.suit.GetHashCode();
-                h = h * 31 + l.cuff.GetHashCode(); h = h * 31 + l.hat; h = h * 31 + l.face; h = h * 31 + l.pattern; h = h * 31 + l.eyes;
-                h = h * 31 + l.brows; h = h * 31 + l.skin; h = h * 31 + l.mouth; h = h * 31 + l.mask.GetHashCode(); h = h * 31 + l.fins.GetHashCode();
-                h = h * 31 + (l.snorkel ? 1 : 0); h = h * 31 + l.tankTier; h = h * 31 + l.finTier; h = h * 31 + l.sponsor;
-                return h;
-            }
-        }
+        /// Everything visible incl. the round-3 body / hair / beard / nose / accessory fields.
+        static int LookHash(DiverLook l) => NetLookCodec.Hash(l);
 
         void DestroySelfieModel()
         {

@@ -6,7 +6,8 @@ namespace Sealebrities
     /// Camcorder viewfinder (K.2 "just keep recording"): drawn from ViewfinderInfo (published by the Filming module):
     ///  - small corner brackets around every detected animal (max 8), colour = size tier; a species not yet in the
     ///    Sealog gets a pulsing yellow bracket with „?“;
-    ///  - top-left „● REC 0:42 · 🐟 3“ (animals in frame), top-right tape + battery, bottom-left zoom + date stamp;
+    ///  - round 3 (GDD §20 Q40 minimal): top-left „● REC 0:42“ + one small icon per species in frame („?“ for new ones),
+    ///    bottom-left the zoom level; the tape shows up top-right only when it runs low (no battery / date stamp);
     ///  - the Sealog frame (central 40 %, thin white corners) turns green with „Foto fürs Sealog!“ (+ „NEU!“) when a
     ///    valid photo subject is inside;
     ///  - one icon + 1–2 words hint (ShotHint): „Keine Tiere“, „Licht!“, „Näher“, „Neue Art!“.
@@ -37,6 +38,28 @@ namespace Sealebrities
         readonly Bracket[] brackets = new Bracket[ViewfinderInfo.MaxBrackets];
         public readonly UISelfieFrame Selfie;
 
+        // round 3 (GDD §20 Q40 „Minimal: REC, Zoom + kleine Symbole erkannter Tiere“): one small icon per species in frame
+        const int SpeciesIcons = 6;
+        readonly VisualElement speciesRow;
+        readonly VisualElement[] speciesBox = new VisualElement[SpeciesIcons];
+        readonly Label[] speciesQ = new Label[SpeciesIcons];
+        readonly SpeciesDef[] speciesShown = new SpeciesDef[SpeciesIcons];
+        readonly bool[] speciesKnownShown = new bool[SpeciesIcons];
+        readonly Label speciesMore;
+        int speciesMoreKey = -1;
+        bool tapeShown;
+
+        /// Tests: species icons currently shown in the camera HUD.
+        public int SpeciesIconCount
+        {
+            get
+            {
+                int n = 0;
+                for (int i = 0; i < SpeciesIcons; i++) if (speciesShown[i] != null) n++;
+                return n;
+            }
+        }
+
         bool shown, smallShown, wasRecording, sealogOn;
         float recSeconds, blink;
         int recSec = -1, tapeSec = -1, zoomKey = -1, stampKey = -1, batteryKey = -1, smallSec = -1, countKey = -1, hintKey = -1, smallCount = -1;
@@ -63,11 +86,12 @@ namespace Sealebrities
             frame.style.left = Length.Percent(4f); frame.style.right = Length.Percent(4f);
             frame.style.top = Length.Percent(5f); frame.style.bottom = Length.Percent(5f);
             root.Add(frame);
-            AddCorner(frame, true, true, W, 64f, 5f); AddCorner(frame, false, true, W, 64f, 5f);
-            AddCorner(frame, true, false, W, 64f, 5f); AddCorner(frame, false, false, W, 64f, 5f);
+            // round 3 (Q40): a thinner, quieter camcorder frame
+            AddCorner(frame, true, true, W, 46f, 3f); AddCorner(frame, false, true, W, 46f, 3f);
+            AddCorner(frame, true, false, W, 46f, 3f); AddCorner(frame, false, false, W, 46f, 3f);
 
-            // top-left: ● REC 0:42 · 🐟 3 – right of the dive HUD block (air ring, depth, site), which it covered
-            // when it sat in the corner (playtest round 2)
+            // top-left: ● REC 0:42 + one small icon per species in frame („?“ for new ones) – right of the dive HUD
+            // block (air ring, depth), which it covered when it sat in the corner (playtest round 2)
             var recRow = UIKit.Row();
             UIKit.Abs(recRow, 210f, 22f, null, null);
             recDot = UIKit.Dot(UIPalette.Danger, 18f);
@@ -78,13 +102,39 @@ namespace Sealebrities
             recRow.Add(recLabel);
             recFish = new UIHudGlyph(UIGlyphs.Fish, Color.white, 28f);
             recFish.style.marginLeft = 16f;
+            recFish.style.display = DisplayStyle.None;
             recRow.Add(recFish);
             recCount = Mono("0", 28f);
             recCount.style.marginLeft = 6f;
+            recCount.style.display = DisplayStyle.None;
             recRow.Add(recCount);
+            speciesRow = UIKit.Row();
+            speciesRow.style.marginLeft = 18f;
+            for (int i = 0; i < SpeciesIcons; i++)
+            {
+                var b = UIKit.Box();
+                UIKit.Size(b, 42f, 42f);
+                UIKit.Radius(b, 21f);
+                b.style.backgroundColor = new Color(0.05f, 0.08f, 0.14f, 0.35f);
+                UIKit.Border(b, 2f, new Color(1f, 1f, 1f, 0.85f));
+                if (i > 0) b.style.marginLeft = 6f;
+                b.style.display = DisplayStyle.None;
+                var q = UIKit.HudText("?", 20f, NewColor);
+                q.style.position = Position.Absolute;
+                q.style.right = -4f; q.style.top = -10f;
+                q.style.display = DisplayStyle.None;
+                b.Add(q);
+                speciesBox[i] = b;
+                speciesQ[i] = q;
+                speciesRow.Add(b);
+            }
+            speciesMore = Mono("", 22f);
+            speciesMore.style.marginLeft = 8f;
+            speciesRow.Add(speciesMore);
+            recRow.Add(speciesRow);
             frame.Add(recRow);
 
-            // top-right: tape + battery
+            // top-right: the tape left – only when it runs low (minimal HUD); the battery stays hidden
             var tr = UIKit.Row();
             UIKit.Abs(tr, null, 22f, 28f, null);
             tapeLabel = Mono("", 22f);
@@ -106,10 +156,12 @@ namespace Sealebrities
             UIKit.Size(nub, 4f, 8f);
             nub.style.backgroundColor = W;
             battery.Add(nub);
+            battery.style.display = DisplayStyle.None;
             tr.Add(battery);
             frame.Add(tr);
+            tapeLabel.style.display = DisplayStyle.None;
 
-            // bottom-left: zoom + date stamp
+            // bottom-left: the zoom level (round 3: no zoom bar, no date stamp – minimal)
             var bl = UIKit.Col();
             UIKit.Abs(bl, 28f, null, null, 22f);
             zoomLabel = Mono("x1.0", 26f);
@@ -117,9 +169,11 @@ namespace Sealebrities
             zoomBar = new UIBar(5f, W, new Color(1f, 1f, 1f, 0.28f));
             zoomBar.style.width = 140f;
             zoomBar.style.marginTop = 6f;
+            zoomBar.style.display = DisplayStyle.None;
             bl.Add(zoomBar);
             stampLabel = Mono("", 19f);
             stampLabel.style.marginTop = 12f;
+            stampLabel.style.display = DisplayStyle.None;
             bl.Add(stampLabel);
             frame.Add(bl);
 
@@ -368,12 +422,15 @@ namespace Sealebrities
             float left = Mathf.Max(0f, cam.TapeSecondsLeft);
             if (float.IsNaN(left)) left = 0f;
             int ts = Mathf.CeilToInt(left);
+            bool low = left / total < 0.15f;
+            if (low != tapeShown) { tapeShown = low; UIKit.Show(tapeLabel, low); }
             if (ts != tapeSec)
             {
                 tapeSec = ts;
                 tapeLabel.text = Loc.Tr("BAND ", "TAPE ") + UIKit.Clock(ts);
-                tapeLabel.style.color = left / total < 0.15f ? UIPalette.Danger : new Color(1f, 1f, 1f, 0.95f);
+                tapeLabel.style.color = low ? UIPalette.Danger : new Color(1f, 1f, 1f, 0.95f);
             }
+            TickSpeciesIcons();
             int bk = Mathf.CeilToInt(left / total * 4f);
             if (bk != batteryKey)
             {
@@ -407,6 +464,33 @@ namespace Sealebrities
 
             TickSealog(blinkOn);
             TickHint(cam);
+        }
+
+        // ------------------------------------------------------------------ species icons (Q40)
+        void TickSpeciesIcons()
+        {
+            int n = Mathf.Clamp(ViewfinderInfo.DetectedSpeciesCount, 0, ViewfinderInfo.MaxBrackets);
+            for (int i = 0; i < SpeciesIcons; i++)
+            {
+                var sp = i < n ? ViewfinderInfo.DetectedSpecies[i] : null;
+                bool known = sp != null && ViewfinderInfo.DetectedKnown[i];
+                if (sp == speciesShown[i] && known == speciesKnownShown[i]) continue;
+                speciesShown[i] = sp;
+                speciesKnownShown[i] = known;
+                var b = speciesBox[i];
+                if (sp == null) { b.style.display = DisplayStyle.None; continue; }
+                b.style.display = DisplayStyle.Flex;
+                // unknown species: grey silhouette + „?“ (the name stays secret until the Sealog photo)
+                UIKit.Image(b, known ? UICreatureIcons.Get(sp) : (UICreatureIcons.Silhouette(sp) ?? UICreatureIcons.Get(sp)));
+                speciesQ[i].style.display = known ? DisplayStyle.None : DisplayStyle.Flex;
+                UIKit.BorderColor(b, known ? new Color(1f, 1f, 1f, 0.85f) : NewColor);
+            }
+            int more = Mathf.Max(0, n - SpeciesIcons);
+            if (more != speciesMoreKey)
+            {
+                speciesMoreKey = more;
+                speciesMore.text = more > 0 ? "+" + more : "";
+            }
         }
 
         // ------------------------------------------------------------------ brackets
@@ -456,6 +540,7 @@ namespace Sealebrities
         // ------------------------------------------------------------------ Sealog frame
         void SetSealog(SpeciesDef s)
         {
+            if (s != null && !s.InSealog) s = null;   // round 3 (Q23): decoration animals are no Sealog subject
             bool on = s != null;
             if (on != sealogOn || s != sealogSubject)
             {
@@ -520,7 +605,7 @@ namespace Sealebrities
             if (target != legacyTarget)
             {
                 legacyTarget = target;
-                legacyLabel.text = target != null ? (Journal.IsDiscovered(target.id) ? target.Name : "???") : "";
+                legacyLabel.text = target != null ? (FilmKnown.IsKnown(target) ? target.Name : "???") : "";
             }
         }
     }

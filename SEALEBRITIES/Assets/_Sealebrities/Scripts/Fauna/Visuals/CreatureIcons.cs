@@ -18,8 +18,13 @@ namespace Sealebrities
         static readonly Vector3 Stage = new Vector3(0f, -5000f, 0f);
         static readonly Dictionary<string, Texture2D> Cache = new Dictionary<string, Texture2D>();
 
+        /// Round 3: species whose look is not a CreatureFactory model (the curiosities / memes – a throne, a gaming PC,
+        /// a crab rave …) provide their own model here (any renderers; root at the origin, about 1 m long). Null = the
+        /// normal creature model.
+        public static Func<SpeciesDef, GameObject> CustomModel;
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { Cache.Clear(); }
+        static void ResetStatics() { Cache.Clear(); CustomModel = null; }
 
         public static Texture2D Get(SpeciesDef s)
         {
@@ -29,7 +34,7 @@ namespace Sealebrities
             Texture2D tex = null;
             try { tex = RenderGpu(s); }
             catch (Exception e) { Debug.LogWarning("Sealebrities: icon render failed for " + s.id + ", using fallback (" + e.Message + ")"); tex = null; }
-            if (tex == null)
+            if (tex == null && !s.meme)
             {
                 try { tex = RenderCpu(s); }
                 catch (Exception e) { Debug.LogWarning("Sealebrities: icon fallback failed for " + s.id + " (" + e.Message + ")"); tex = null; }
@@ -89,7 +94,13 @@ namespace Sealebrities
             var disabled = new List<Light>();
             try
             {
-                model = CreatureFactory.Build(s);
+                GameObject custom = null;
+                if (CustomModel != null)
+                {
+                    try { custom = CustomModel(s); }
+                    catch (Exception e) { Debug.LogWarning("Sealebrities: custom icon model failed for " + s.id + ": " + e.Message); custom = null; }
+                }
+                model = custom != null ? custom : CreatureFactory.Build(s);
                 model.name = "SB_IconModel_" + s.id;
                 var mt = model.transform;
                 mt.SetPositionAndRotation(Stage, Quaternion.identity);
@@ -100,22 +111,38 @@ namespace Sealebrities
                 Pose(s, rig);
 
                 // CPU-skin the (posed) model into a static mesh: no dependency on skinning update timing
-                var smr = model.GetComponentInChildren<SkinnedMeshRenderer>();
-                if (smr == null) return null;
-                baked = new Mesh { name = "SB_IconBake" };
-                smr.BakeMesh(baked);
-                smr.enabled = false;
+                Material[] shotMats;
+                Vector3 shotPos;
+                Quaternion shotRot;
+                if (custom != null)
+                {
+                    baked = BakeAll(model, out shotMats);
+                    if (baked == null) return null;
+                    shotPos = Stage;
+                    shotRot = Quaternion.identity;
+                }
+                else
+                {
+                    var smr = model.GetComponentInChildren<SkinnedMeshRenderer>();
+                    if (smr == null) return null;
+                    baked = new Mesh { name = "SB_IconBake" };
+                    smr.BakeMesh(baked);
+                    smr.enabled = false;
+                    shotMats = smr.sharedMaterials;
+                    shotPos = smr.transform.position;
+                    shotRot = smr.transform.rotation;
+                }
                 shot = new GameObject("SB_IconMesh");
                 shot.layer = Layer;
-                shot.transform.SetPositionAndRotation(smr.transform.position, smr.transform.rotation);
+                shot.transform.SetPositionAndRotation(shotPos, shotRot);
                 shot.AddComponent<MeshFilter>().sharedMesh = baked;
                 var mr = shot.AddComponent<MeshRenderer>();
-                mr.sharedMaterials = smr.sharedMaterials;
+                mr.sharedMaterials = shotMats;
                 mr.shadowCastingMode = ShadowCastingMode.Off;
                 mr.lightProbeUsage = LightProbeUsage.Off;
                 mr.reflectionProbeUsage = ReflectionProbeUsage.Off;
                 Fit(baked.vertices, fwd, up, out Vector3 right, out Vector3 up2, out Vector3 center, out float half, out float depth);
-                center += smr.transform.position - Stage;
+                center += shotPos - Stage;
 
                 const float fov = 20f;
                 float dist = half / Mathf.Tan(fov * 0.5f * Mathf.Deg2Rad) * 1.12f + depth * 0.5f;
@@ -188,6 +215,61 @@ namespace Sealebrities
                 Kill(model); Kill(shot); Kill(camGo); Kill(key); Kill(fill); Kill(rim);
                 if (big != null) Object.DestroyImmediate(big);
                 if (baked != null) Object.DestroyImmediate(baked);
+            }
+        }
+
+        /// Round 3: every renderer of a custom (meme) model baked into one static mesh in model-root space (one
+        /// submesh per renderer material). The model's own renderers are switched off.
+        static Mesh BakeAll(GameObject model, out Material[] materials)
+        {
+            materials = null;
+            var rs = model.GetComponentsInChildren<Renderer>(true);
+            var cis = new List<CombineInstance>();
+            var mats = new List<Material>();
+            var temps = new List<Mesh>();
+            Matrix4x4 toRoot = model.transform.worldToLocalMatrix;
+            int verts = 0;
+            try
+            {
+                for (int i = 0; i < rs.Length; i++)
+                {
+                    var r = rs[i];
+                    if (r == null || !r.enabled || !r.gameObject.activeInHierarchy) continue;
+                    Mesh m = null;
+                    Matrix4x4 mtx;
+                    if (r is SkinnedMeshRenderer sk)
+                    {
+                        m = new Mesh { name = "SB_IconPart" };
+                        sk.BakeMesh(m, true);
+                        temps.Add(m);
+                        mtx = toRoot * Matrix4x4.TRS(sk.transform.position, sk.transform.rotation, Vector3.one);
+                    }
+                    else
+                    {
+                        var mf = r.GetComponent<MeshFilter>();
+                        if (mf == null || mf.sharedMesh == null || !mf.sharedMesh.isReadable) continue;
+                        m = mf.sharedMesh;
+                        mtx = toRoot * r.transform.localToWorldMatrix;
+                    }
+                    var sm = r.sharedMaterials;
+                    for (int k = 0; k < m.subMeshCount; k++)
+                    {
+                        cis.Add(new CombineInstance { mesh = m, subMeshIndex = k, transform = mtx });
+                        mats.Add(sm.Length > 0 ? sm[Mathf.Min(k, sm.Length - 1)] : null);
+                    }
+                    verts += m.vertexCount;
+                    r.enabled = false;
+                }
+                if (cis.Count == 0) return null;
+                var outMesh = new Mesh { name = "SB_IconBake" };
+                if (verts > 65000) outMesh.indexFormat = IndexFormat.UInt32;
+                outMesh.CombineMeshes(cis.ToArray(), false, true);
+                materials = mats.ToArray();
+                return outMesh;
+            }
+            finally
+            {
+                for (int i = 0; i < temps.Count; i++) if (temps[i] != null) Object.DestroyImmediate(temps[i]);
             }
         }
 

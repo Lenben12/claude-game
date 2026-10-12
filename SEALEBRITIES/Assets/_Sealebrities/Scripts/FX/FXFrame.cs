@@ -136,7 +136,11 @@ namespace Sealebrities
         public const float NightFogBoost = 0.5f;
 
         public static float UnderwaterFogDensity(float depth, float night01) =>
-            Interp(KDepth, KValue, Mathf.Max(0f, depth)) * (1f + NightFogBoost * Clamp01(night01));
+            Interp(KDepth, KValue, Mathf.Max(0f, depth)) * (1f + NightFogBoost * Clamp01(night01)) * Mathf.Clamp(WeatherFogMul, 0.6f, 1.6f);
+
+        /// Round 3 (GDD §20 Q48, set every frame by the fauna module's FaunaWeather): the day's weather stirs the water
+        /// up (> 1 = murkier: showers 1.3) or clears it (sunny 0.9). 1 = unchanged.
+        public static float WeatherFogMul = 1f;
 
         /// Exponential (not squared) haze above water: 8 % at 50 m, 21 % at 150 m, 62 % at 600 m by day.
         public static float SkyFogDensity(float night01) => 0.0016f + 0.0006f * Clamp01(night01);

@@ -78,7 +78,6 @@ namespace Sealebrities
         static Action<bool, ulong, string> joinDone;
         static readonly Dictionary<ulong, string> friendLobbies = new Dictionary<ulong, string>();
         static readonly Dictionary<ulong, float> friendLobbySeen = new Dictionary<ulong, float>();
-        static readonly HashSet<ulong> invited = new HashSet<ulong>();
         static readonly List<ulong> tmpIds = new List<ulong>();
 
 #if SB_STEAM
@@ -95,7 +94,7 @@ namespace Sealebrities
             CurrentLobby = 0; IsOwner = false; Creating = false;
             installed = false; presenceSet = false; pendingJoin = 0; pendingReadySince = -1f; createStarted = 0f; joinToken = 0;
             createDone = null; joinDone = null;
-            friendLobbies.Clear(); friendLobbySeen.Clear(); invited.Clear(); tmpIds.Clear();
+            friendLobbies.Clear(); friendLobbySeen.Clear(); tmpIds.Clear();
 #if SB_STEAM
             cbLobbyJoin = null; cbPresenceJoin = null; cbLobbyData = null; crCreate = null;
 #endif
@@ -215,11 +214,12 @@ namespace Sealebrities
 #endif
 
         /// "Freunde einladen": Steam's invite dialog for the current lobby (only ever called from a player's click).
-        /// Returns false when there is no lobby; OverlayEnabled tells whether the dialog can actually appear.
+        /// Returns false when there is no lobby or this PC is not the lobby owner (GDD §19b: only the host invites);
+        /// OverlayEnabled tells whether the dialog can actually appear.
         public static bool OpenInviteDialog()
         {
 #if SB_STEAM
-            if (!SteamService.Initialized || CurrentLobby == 0) return false;
+            if (!SteamService.Initialized || CurrentLobby == 0 || !IsOwner) return false;
             try
             {
                 SteamFriends.ActivateGameOverlayInviteDialog(new CSteamID(CurrentLobby));
@@ -235,24 +235,19 @@ namespace Sealebrities
 #endif
         }
 
-        /// Sends one Steam lobby invite to a friend (only ever called from a player's click in the invite list).
+        /// Sends one Steam lobby invite to a friend (only ever called from a player's click in the invite list). The
+        /// same friend can be invited again and again (GDD §19b) – nothing is remembered, nothing blocks. Only the lobby
+        /// owner (the host) invites.
         public static bool InviteFriend(ulong friend)
         {
 #if SB_STEAM
-            if (!SteamService.Initialized || CurrentLobby == 0 || friend == 0) return false;
-            try
-            {
-                bool ok = SteamMatchmaking.InviteUserToLobby(new CSteamID(CurrentLobby), new CSteamID(friend));
-                if (ok) invited.Add(friend);
-                return ok;
-            }
+            if (!SteamService.Initialized || CurrentLobby == 0 || friend == 0 || !IsOwner) return false;
+            try { return SteamMatchmaking.InviteUserToLobby(new CSteamID(CurrentLobby), new CSteamID(friend)); }
             catch (Exception) { return false; }
 #else
             return false;
 #endif
         }
-
-        public static bool WasInvited(ulong friend) => invited.Contains(friend);
 
         /// Online friends for the in-game invite list: same game first, then by name. Allocates – call on demand only.
         public static void OnlineFriends(List<FriendEntry> into, int max = 40)
@@ -307,7 +302,8 @@ namespace Sealebrities
                 if (IsOwner) SteamMatchmaking.SetLobbyData(new CSteamID(CurrentLobby), KeyCount, count);
                 string lobby = CurrentLobby.ToString(CultureInfo.InvariantCulture);
                 SteamFriends.SetRichPresence("status", Loc.Tr($"Taucht mit Freunden ({n}/{Net.MaxPlayers})", $"Diving with friends ({n}/{Net.MaxPlayers})"));
-                SteamFriends.SetRichPresence("connect", ConnectToken + " " + lobby);
+                // GDD §19b: only the host (creator of the world) lets friends in – „Spiel beitreten“ only on the host
+                SteamFriends.SetRichPresence("connect", IsOwner ? ConnectToken + " " + lobby : "");
                 SteamFriends.SetRichPresence("steam_player_group", lobby);
                 SteamFriends.SetRichPresence("steam_player_group_size", count);
                 presenceSet = true;
@@ -343,7 +339,6 @@ namespace Sealebrities
             }
             CurrentLobby = 0;
             IsOwner = false;
-            invited.Clear();
             ClearPresence();
         }
 

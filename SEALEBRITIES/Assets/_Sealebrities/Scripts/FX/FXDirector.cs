@@ -174,6 +174,13 @@ namespace Sealebrities
                 try { graphics.TickFarClip(f.cam, f.underwater && f.under01 >= 0.5f, FXVisibility.Meters); }
                 catch (Exception e) { Debug.LogWarning("Sealebrities FX: far clip failed: " + e.Message); graphics = null; }
             }
+            // round 3: layers registered as "under the surface" are culled at ~22 m while the camera is above the sea
+            // (the same test as the ocean's material switch: the camera against the wave surface)
+            if (f.cam != null)
+            {
+                try { FXSurfaceCull.Tick(f.cam, f.camPos.y < Waves.HeightAt(f.camPos.x, f.camPos.z)); }
+                catch (Exception e) { Debug.LogWarning("Sealebrities FX: surface cull failed: " + e.Message); }
+            }
             if (caustics != null)
             {
                 try { caustics.Tick(f); }

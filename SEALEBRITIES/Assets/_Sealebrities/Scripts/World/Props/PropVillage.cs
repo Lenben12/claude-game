@@ -45,6 +45,23 @@ namespace Sealebrities
             batch = new PropBatch(0f);
             var rng = new System.Random(8484);
 
+            if (!BuildHouses)
+            {
+                // round 3 (GDD §19 "Die Dorf-Häuser entfernen"): no village any more – only the old wooden jetty (second
+                // boat landing, the diving helmet lies beside it) and a few canoes / a net rack on the open south beach.
+                // The villagers' work spots fall back to QuestSpots' computed beach positions; the goats and chickens live
+                // in the hermit camp now (PropCamp). The NPC step relocates / repurposes the villagers.
+                BeachRemnants(rng);
+                if (PropRun.Due()) yield return null;
+                Jetty();
+                Spots();
+                excl.AddLine(L(6f, -10f), L(6f, -30f), 3f);
+                excl.Add(V.x + 2f, V.z - 18f, 4f);
+                batch.Flush(root, "SouthBeachMesh", ShadowCastingMode.On, 600f);
+                batch = null;
+                yield break;
+            }
+
             MeetingHouse();
             if (PropRun.Due()) yield return null;
             BoatShed();
@@ -72,6 +89,22 @@ namespace Sealebrities
 
             batch.Flush(root, "VillageMesh", ShadowCastingMode.On, 600f);
             batch = null;
+        }
+
+        /// Round 3: false = the village houses are gone (GDD §19). The old builders stay for reference / a later return.
+        public const bool BuildHouses = false;
+
+        /// Round 3: what is left of the village beach – two canoes pulled up on the sand and a net rack by the jetty.
+        static void BeachRemnants(System.Random rng)
+        {
+            PropKit.NetRack(batch, cols, L(-6f, -12.5f), 8f, 2.6f);
+            for (int i = 0; i < 2; i++)
+            {
+                Vector3 cp = L(-1f + i * 4.2f, -17.5f);
+                if (cp.y < 0.2f) continue;
+                PropKit.Canoe(batch, Matrix4x4.TRS(cp + Vector3.up * 0.15f, Quaternion.Euler(0f, 12f - i * 24f, 0f), Vector3.one), i == 0 ? OrangeC : Teal, PropMats.Wood3);
+                PropCol.Box(cols, cp + Vector3.up * 0.3f, new Vector3(0.8f, 0.6f, 5.2f), Quaternion.Euler(0f, 12f - i * 24f, 0f), "Canoe");
+            }
         }
 
         // ------------------------------------------------------------------ building blocks
@@ -156,6 +189,9 @@ namespace Sealebrities
         static void Posts(Vector3 top, float bottomY, float r = 0.12f)
         {
             batch.W(WoodDark, top).Cylinder(new Vector3(top.x, bottomY, top.z), Quaternion.identity, r, r * 0.9f, top.y - bottomY, 6, false, true);
+            // round 3: piles are solid (swimmers bump into them under the jetty)
+            float len = top.y - bottomY;
+            if (len > 0.5f && cols != null) PropCol.Capsule(cols, new Vector3(top.x, (top.y + bottomY) * 0.5f, top.z), r + 0.02f, len, Quaternion.identity, "Pile");
         }
 
         // ------------------------------------------------------------------ meeting house + tide calendar

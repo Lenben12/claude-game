@@ -4,24 +4,40 @@ using UnityEngine;
 
 namespace Sealebrities
 {
-    /// Achievements for everyone present (F.6). Data only this round (Steam later).
-    /// Unlock on the host → GameState.achievements + every connected player's PlayerRecord; each machine shows the
-    /// notification and keeps its own list (Settings.Data.achievements – J.3 called it achievements.json).
+    /// Achievements for everyone present (F.6). Data only this round (Steam later – Steam achievements are NOT used).
+    /// Round 3 step 6b (GDD §19b „Erfolge je Welt“): achievements belong to the WORLD (save slot), not to the PC or the
+    /// account: the truth is GameState.achievements of the world being played (the host's save; guests see the host's
+    /// list through the snapshot). The old per-PC list (Settings.Data.achievements) is no longer read or written.
+    /// Unlock on the host → GameState.achievements + every connected player's PlayerRecord (in the host's save);
+    /// each machine shows the notification once per world – remembered in its own PlayerRecord (PlayerRecords.Local).
     /// Clients forward CoreCommands.AchievementKey; they learn about unlocks from the host's snapshot (ApplyHostSnapshot
     /// diff) or the Net module's Achievement message (95) – both end in ApplyLocal, which is idempotent.
     public static class Achievements
     {
         static GameState S => GameManager.I != null ? GameManager.I.State : null;
-        /// Automated test runs never write the player's settings: their unlocks live here only.
-        static readonly HashSet<string> sessionOnly = new HashSet<string>();
 
+        /// Unlocked in the world being played (main menu: false).
         public static bool IsUnlocked(string id)
         {
             if (string.IsNullOrEmpty(id)) return false;
             var s = S;
-            if (s != null && s.achievements.Contains(id)) return true;
-            return Settings.Data.achievements.Contains(id) || sessionOnly.Contains(id);
+            return s != null && s.achievements != null && s.achievements.Contains(id);
         }
+
+        /// Unlocked / total in the world being played (save-slot cards read the same from the file).
+        public static int UnlockedCount
+        {
+            get
+            {
+                var s = S;
+                if (s == null || s.achievements == null) return 0;
+                int n = 0;
+                for (int i = 0; i < s.achievements.Count; i++) if (AchievementDatabase.Get(s.achievements[i]) != null) n++;
+                return n;
+            }
+        }
+
+        public static int Total => AchievementDatabase.All.Count;
 
         /// Unlocks an achievement for the channel and everybody present. Returns true when it was new (host/offline).
         public static bool Unlock(string id)
@@ -34,7 +50,7 @@ namespace Sealebrities
                 if (!s.achievements.Contains(id)) Net.Command(NetCommand.Custom, CoreCommands.AchievementKey, id);
                 return false;
             }
-            if (s.achievements.Contains(id)) { ApplyLocal(id); return false; }
+            if (s.achievements.Contains(id)) return false;   // already unlocked in this world
             s.achievements.Add(id);
             // every connected crew member's record (F.6)
             var players = Net.Players;
@@ -45,26 +61,34 @@ namespace Sealebrities
                 var rec = PlayerRecords.Find(p.key);
                 if (rec != null && !rec.achievements.Contains(id)) rec.achievements.Add(id);
             }
-            var local = PlayerRecords.Local;
-            if (local != null && !local.achievements.Contains(id)) local.achievements.Add(id);
-            ApplyLocal(id);
+            ApplyLocal(id);   // the host's own record + the notification
             Cosmetics.CheckRules();
             return true;
         }
 
-        /// Shows + remembers an achievement on THIS machine (idempotent). Net calls it for message 95.
+        /// Shows an achievement on THIS machine once per world and remembers it in the local player's record
+        /// (idempotent). Net calls it for message 95; the snapshot diff ends here too.
         public static void ApplyLocal(string id)
         {
             var def = AchievementDatabase.Get(id);
             if (def == null) return;
-            var list = Settings.Data.achievements;
-            if (list.Contains(id) || sessionOnly.Contains(id)) return;
-            if (GameManager.AutomatedRun) sessionOnly.Add(id);
-            else { list.Add(id); Settings.MarkDirty(); }
             var local = PlayerRecords.Local;
-            if (local != null && !local.achievements.Contains(id)) local.achievements.Add(id);
+            if (local == null || local.achievements.Contains(id)) return;
+            local.achievements.Add(id);
             GameEvents.RaiseAchievementUnlocked(def);
             GameEvents.RaiseNotify(NotifyKind.Achievement, Loc.Tr("Erfolg: ", "Achievement: ") + def.Name);
+        }
+
+        /// Adds achievements to the local record WITHOUT a notification (a guest's record from the host on joining).
+        public static void RememberSilently(List<string> ids)
+        {
+            var local = PlayerRecords.Local;
+            if (local == null || ids == null) return;
+            for (int i = 0; i < ids.Count; i++)
+            {
+                string id = ids[i];
+                if (!string.IsNullOrEmpty(id) && !local.achievements.Contains(id)) local.achievements.Add(id);
+            }
         }
 
         // ---------------------------------------------------------------- automatic hooks (data only)
@@ -133,6 +157,6 @@ namespace Sealebrities
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { hooked = false; sessionOnly.Clear(); }
+        static void ResetStatics() { hooked = false; }
     }
 }

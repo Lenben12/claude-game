@@ -15,16 +15,18 @@ namespace Sealebrities
         float timer, closeTime, hideDepth, hopT;
         Vector3 target, fleeDir;
         float sideSign = 1f;
-        bool ghost, hermit, flat, coconut;
+        bool ghost, hermit, flat, coconut, horseshoe;
         float walkSpeed, fleeSpeed;
 
         public override void Reset()
         {
             string v = c.species.variant ?? "";
-            ghost = v == "ghost"; hermit = v == "hermit"; flat = v == "flat"; coconut = v == "coconut";
+            ghost = v == "ghost"; hermit = v == "hermit"; flat = v == "flat"; coconut = v == "coconut"; horseshoe = v == "horseshoe";
             c.home = c.pos;
             walkSpeed = Mathf.Max(0.04f, c.cruise) * (hermit ? 1f : 1.6f);
-            fleeSpeed = ghost ? Mathf.Clamp(c.lengthM * 22f, 0.9f, 2.4f) : flat ? Mathf.Clamp(c.lengthM * 14f, 0.6f, 1.4f) : Mathf.Max(walkSpeed * 3f, 0.12f);
+            // round 3 (Q21): a fleeing crab really scuttles (it crept 0.3 m away before)
+            fleeSpeed = ghost ? Mathf.Clamp(c.lengthM * 22f, 0.9f, 2.4f) : flat ? Mathf.Clamp(c.lengthM * 14f, 0.6f, 1.4f)
+                      : hermit ? Mathf.Max(walkSpeed * 3f, 0.12f) : Mathf.Max(walkSpeed * 3f, Mathf.Clamp(c.lengthM * 10f, 0.9f, 1.6f));
             st = Random.value < 0.5f ? St.Pause : St.Walk;
             timer = Random.Range(1f, 4f);
             closeTime = 0f;
@@ -86,6 +88,15 @@ namespace Sealebrities
                 {
                     st = St.Threat;
                     timer = 2.5f;
+                }
+                else if (!coconut && !horseshoe && threat < 2.4f + c.lengthM * 2f)
+                {
+                    // round 3 (Q21/Q22): every other crab (red land crabs …) scuttles off sideways too
+                    fleeDir = FaunaNav.FlatDir(c.pos - FaunaContext.PlayerRootPos);
+                    if (fleeDir == Vector3.zero) fleeDir = c.Transform.right;
+                    st = St.Flee;
+                    timer = 1.4f;
+                    hopT = 0f;
                 }
             }
 

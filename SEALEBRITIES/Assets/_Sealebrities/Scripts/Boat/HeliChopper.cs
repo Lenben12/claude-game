@@ -154,7 +154,32 @@ namespace Sealebrities
             hook.SetParent(root, false);
             hook.localPosition = new Vector3(0f, -0.95f, 0.2f);
             parts.hook = hook;
+            BuildColliders(root);
             return parts;
+        }
+
+        /// Round 3 (GDD §19): a parked chopper is solid – fuselage capsule, engine housing, tail boom + fins, skids and
+        /// struts (root-local, they follow the chopper). The main rotor turns 3.1 m above the ground – out of reach,
+        /// no collider. No physics queries run on the chopper and the crates have no rigidbodies, so nothing is pushed.
+        static void BuildColliders(Transform root)
+        {
+            var cols = new GameObject("Colliders").transform;
+            cols.SetParent(root, false);
+            PropSolid.LocalSegment(cols, new Vector3(0f, 0.15f, -0.55f), new Vector3(0f, 0.08f, 1.95f), 1.02f, "Fuselage");
+            PropSolid.LocalSegment(cols, new Vector3(0f, 0.45f, -1.2f), new Vector3(0f, 0.6f, -2.5f), 0.5f, "FuselageTail");
+            PropSolid.LocalBox(cols, new Vector3(0f, 1.2f, -0.7f), new Vector3(1.0f, 0.5f, 2.0f), Quaternion.identity, "Engine");
+            PropSolid.LocalSegment(cols, new Vector3(0f, 1.3f, 0.1f), new Vector3(0f, 1.72f, 0.1f), 0.12f, "Mast");
+            PropSolid.LocalSegment(cols, new Vector3(0f, 0.62f, -2.5f), new Vector3(0f, 0.85f, -7.0f), 0.24f, "TailBoom");
+            PropSolid.LocalBox(cols, new Vector3(0f, 1.35f, -7.05f), new Vector3(0.1f, 1.1f, 0.8f), Quaternion.Euler(-20f, 0f, 0f), "TailFin");
+            PropSolid.LocalBox(cols, new Vector3(0f, 0.82f, -5.9f), new Vector3(1.9f, 0.1f, 0.45f), Quaternion.identity, "Stabilizer");
+            for (int side = -1; side <= 1; side += 2)
+            {
+                float x = side * 0.95f;
+                PropSolid.LocalSegment(cols, new Vector3(x, -1.35f, -1.6f), new Vector3(x, -1.35f, 1.7f), 0.07f, "Skid");
+                PropSolid.LocalSegment(cols, new Vector3(x, -1.35f, 1.7f), new Vector3(x, -1.12f, 2.05f), 0.07f, "SkidTip");
+                PropSolid.LocalSegment(cols, new Vector3(side * 0.45f, -0.75f, 0.9f), new Vector3(x, -1.35f, 0.9f), 0.06f, "Strut");
+                PropSolid.LocalSegment(cols, new Vector3(side * 0.45f, -0.75f, -0.8f), new Vector3(x, -1.35f, -0.8f), 0.06f, "Strut");
+            }
         }
     }
 

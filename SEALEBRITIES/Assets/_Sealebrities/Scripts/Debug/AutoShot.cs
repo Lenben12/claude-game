@@ -91,6 +91,10 @@ namespace Sealebrities
             if (GameObject.Find("MenuCrew") == null) Note("WARNING: no menu crew on the dock (PlayerMenuCamera)");
             yield return Capture("01_menu");
 
+            // round 3 step 6b (save slots + invites, in the main menu – sandbox, never the player's slots): r3slot_*
+            yield return Guard(ShotsRound3Slots(), "round-3 save slot shots");
+            EndSlotShots();
+
             // start a game with test gear and a partly filled journal
             yield return Guard(StartGame(), "start game");
 
@@ -115,6 +119,19 @@ namespace Sealebrities
             CheckSliderGuards();
             // round 2 (Design_Runde2 J.6 + the third player message): r2_*.png
             yield return Guard(ShotsRound2(), "round-2 shots");
+            // round 3 step 2 (player + characters): r3_*.png
+            yield return Guard(ShotsRound3Player(), "round-3 player shots");
+            // round 3 step 3 (world): r3w_* island / camp / volcano, r3s_* sky + water, r3h_* hut interior
+            yield return Guard(ShotsRound3World(), "round-3 world shots");
+            yield return Guard(ShotsRound3Islands(), "round-3 island shots");
+            yield return Guard(ShotsRound3Sky(), "round-3 sky shots");
+            yield return Guard(ShotsRound3Hut(), "round-3 hut shots");
+            // round 3 step 4 (fauna + sea content): r3f_*
+            yield return Guard(ShotsRound3Fauna(), "round-3 fauna shots");
+            // round 3 step 5 (NPCs + hermit camp): r3n_*
+            yield return Guard(ShotsRound3Npc(), "round-3 npc shots");
+            // round 3 step 6 (phone, UI, boat): r3u_*
+            yield return Guard(ShotsRound3UI(), "round-3 ui shots");
 
             Finish(saved >= 12 ? 0 : 1);
         }
@@ -632,7 +649,7 @@ namespace Sealebrities
         void Hold(HoldItem item)
         {
             if (Hands.IsHeld(item)) return;
-            if (Hands.Find(item, out Hand h, out int slot)) Hands.Select(h, slot);
+            if (Hands.Find(item, out Hand h, out int slot)) Hands.Select(slot);
             if (!Hands.IsHeld(item)) Note("WARNING: could not take " + item + " into a hand");
         }
 

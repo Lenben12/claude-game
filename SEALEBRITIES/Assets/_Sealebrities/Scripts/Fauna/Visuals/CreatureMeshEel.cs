@@ -78,6 +78,17 @@ namespace Sealebrities
                 return;
             }
 
+            if (v == "frilled")
+            {
+                // round 3 (volcano): the frilled shark's ruffled gill collar – two flat frill rings behind the head
+                for (int k = 0; k < 3; k++)
+                {
+                    float tf = 0.1f + k * 0.022f;
+                    CreatureMeshParts.Ellipsoid(b, CreatureMeshSlot.Fin, body.Center(tf), Vector3.forward, Vector3.up,
+                        body.HalfW(tf) * 1.45f, body.HalfTop(tf) * 1.35f, 0.006f, 3, 10, new Vector2(0.1f, 0.2f), new Vector2(0.5f, 0.6f), chain.ByAnchor);
+                }
+            }
+
             // tubular nostrils at the snout tip
             for (int side = -1; side <= 1; side += 2)
             {

@@ -297,7 +297,7 @@ namespace Sealebrities
                     DangerClose = true;
                     DangerSpecies = sp;
                 }
-                float score = Mathf.Max(1, sp.baseValue) * Progression.SizeMultiplier(tier) * (Journal.IsDiscovered(sp.id) ? 1f : 1.5f);
+                float score = Mathf.Max(1, sp.baseValue) * Progression.SizeMultiplier(tier) * (FilmKnown.IsKnown(sp) ? 1f : 1.5f);
                 InsertTop(c, score);
             }
 
@@ -310,7 +310,7 @@ namespace Sealebrities
                 Best = c.Species;
                 BestTier = c.Tier;
                 BestCm = c.SizeCm;
-                BestIsNew = Best != null && !Journal.IsDiscovered(Best.id);
+                BestIsNew = Best != null && !FilmKnown.IsKnown(Best);
                 break;
             }
 

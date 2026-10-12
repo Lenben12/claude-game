@@ -244,34 +244,34 @@ namespace Sealebrities
             FaunaContext.UnregisterRemote(transform);
         }
 
-        // ------------------------------------------------------------------ lying on a sleep spot (L.9)
-        /// Puppet geometry while lying (DiverPuppet: pivot 0.95 m dropped 0.55 m and pitched −86°, head toward −forward):
-        /// the eyes end up ~0.67 m behind the root, the back ~0.12 m above it.
-        const float LieEyeBack = 0.67f, LieBackAboveRoot = 0.12f, LieSnapRange = 3f;
+        // ------------------------------------------------------------------ lying on a sleep spot (L.9 + round 3)
+        /// Round 3: the sender's root itself lies on the spot (pelvis contact point, PlayerController); the nearest spot
+        /// within LieSnapRange gives the exact pose (DiverPuppet.LiePose – also when the stream is a little off).
+        const float LieSnapRange = 3f;
 
-        /// Nearest PropInfo.SleepSpots entry within LieSnapRange of the sender's root (it pressed E there – no protocol
-        /// change needed). Returns the root position / yaw that lays the puppet on it, head at the spot's head end.
-        static bool SnapToSleepSpot(Vector3 root, out Vector3 pos, out float yaw)
+        /// Nearest PropInfo.SleepSpots entry to the sender's root. Returns the root position / yaw that lays the puppet
+        /// IN the bed / hammock (pelvis on the surface, head at the pillow end) and the torso / leg inclines.
+        static bool SnapToSleepSpot(Vector3 root, out Vector3 pos, out float yaw, out float headRise, out float feetRise, out bool hammock)
         {
             pos = root;
             yaw = 0f;
+            headRise = 0f;
+            feetRise = 0f;
+            hammock = false;
             var spots = PropInfo.SleepSpots;
             int best = -1;
             float bestD = LieSnapRange * LieSnapRange;
             for (int i = 0; i < spots.Count; i++)
             {
-                Vector3 d = spots[i].lie - root;
+                var sp = spots[i];
+                DiverPuppet.LiePose(sp, out Vector3 r, out _, out _, out _, out _);
+                Vector3 d = r - root;
                 d.y *= 0.5f;
                 float dd = d.sqrMagnitude;
                 if (dd < bestD) { bestD = dd; best = i; }
             }
             if (best < 0) return false;
-            var s = spots[best];
-            yaw = s.yaw;
-            Vector3 fwd = Quaternion.Euler(0f, s.yaw, 0f) * Vector3.forward;
-            // the spot's `lie` is the first-person eye just above the cloth / mattress
-            float surface = s.lie.y - (s.kind == SleepSpotInfo.Hammock ? 0.27f : 0.09f);
-            pos = new Vector3(s.lie.x, surface - LieBackAboveRoot, s.lie.z) + fwd * LieEyeBack;
+            DiverPuppet.LiePose(spots[best], out pos, out yaw, out headRise, out feetRise, out hammock);
             return true;
         }
 
@@ -332,10 +332,11 @@ namespace Sealebrities
             }
             // lying on a co-op sleep spot (L.9): the sender's root stays where it pressed E (only its camera lies down) –
             // snap the puppet onto the nearest bed / hammock / bunk so it rests on the mattress instead of the floor
-            if (Motion == MotionState.Lie && !onBoat && SnapToSleepSpot(pos, out Vector3 liePos, out float lieYaw))
+            if (Motion == MotionState.Lie && !onBoat && SnapToSleepSpot(pos, out Vector3 liePos, out float lieYaw, out float lieHead, out float lieFeet, out bool lieHammock))
             {
                 pos = liePos;
                 yaw = lieYaw;
+                if (motionPuppet is DiverPuppet dp && dp != null) dp.SetLiePose(lieHead, lieFeet, lieHammock);
             }
 
             transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, yaw, 0f));

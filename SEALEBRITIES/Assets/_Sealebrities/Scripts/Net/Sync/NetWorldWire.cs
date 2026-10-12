@@ -36,6 +36,9 @@ namespace Sealebrities
         public const byte SleepState = 100;      // reliable host → all: lying, total, last player who lay down (L.9)
         public const byte FaunaEvent = 101;      // reliable host → all: animal event start / end (K.3)
         public const byte CarryState = 102;      // reliable any → host → all: carried quest item / salvage id (K.3, L.7)
+        /// Round 3 (fauna, registered by FaunaThreat itself): reliable host → one client: a shark / the monster bit you
+        /// (damage, attacker position, air seconds, clip loss) or the danger music cue on / off.
+        public const byte FaunaCombat = 103;
         // voice
         public const byte VoiceFrame = 128;      // unreliable: originId, seq, flags, 40 ms µ-law @ 16 kHz
     }

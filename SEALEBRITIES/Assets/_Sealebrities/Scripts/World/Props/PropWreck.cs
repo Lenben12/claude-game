@@ -170,14 +170,20 @@ namespace Sealebrities
             Vector3 fb = new Vector3(0f, 12.4f, -31.6f);
             SB(PropMats.Funnel).Cylinder(fb, fr, 1.4f, 1.2f, 4.2f, 8, false, false, 1f, 1f, 0f, false, 22.5f);
             SB(PropMats.HoleDark).Cylinder(fb + fr * new Vector3(0f, 4.2f, 0f), fr, 1.2f, 1.15f, 0.8f, 8, false, true, 1f, 1f, 0f, false, 22.5f);
+            // round 3 (GDD §19): funnel, masts, crane, deck gear, railings and the propeller join the wreck's collider mesh
+            colB.Cylinder(fb, fr, 1.4f, 1.15f, 5.0f, 8, true, true, 1f, 1f, 0f, false, 22.5f);
             var rust = SB(PropMats.Rust);
             rust.Rod(new Vector3(0f, 14.9f, -27f), new Vector3(0f, 19.2f, -27f), 0.16f, 0.1f, 6);
             rust.Box(new Vector3(0f, 18.6f, -27f), new Vector3(2.6f, 0.16f, 0.3f));
+            colB.Rod(new Vector3(0f, 14.9f, -27f), new Vector3(0f, 19.2f, -27f), 0.16f, 0.1f, 6, true);
+            colB.Box(new Vector3(0f, 18.6f, -27f), new Vector3(2.6f, 0.16f, 0.3f));
 
-            // foremast with stays
+            // foremast with stays (the thin stays stay passable)
             float fz = 25f, fdeck = DeckY(fz);
             rust.Rod(new Vector3(0f, fdeck, fz), new Vector3(0f, fdeck + 12f, fz), 0.3f, 0.18f, 6, true);
             rust.Rod(new Vector3(-3.2f, fdeck + 9f, fz), new Vector3(3.2f, fdeck + 9f, fz), 0.12f, 0.12f, 4, true);
+            colB.Rod(new Vector3(0f, fdeck - 0.3f, fz), new Vector3(0f, fdeck + 12f, fz), 0.3f, 0.18f, 6, true);
+            colB.Rod(new Vector3(-3.2f, fdeck + 9f, fz), new Vector3(3.2f, fdeck + 9f, fz), 0.12f, 0.12f, 4, true);
             rust.Rod(new Vector3(0f, fdeck + 11.8f, fz), new Vector3(0f, DeckY(33f) + 0.2f, 33f), 0.05f, 0.05f, 3);
             rust.Rod(new Vector3(0f, fdeck + 11.5f, fz), new Vector3(HalfBeam(20f) - 0.2f, DeckY(20f), 20f), 0.05f, 0.05f, 3);
             rust.Rod(new Vector3(0f, fdeck + 11.5f, fz), new Vector3(-HalfBeam(20f) + 0.2f, DeckY(20f), 20f), 0.05f, 0.05f, 3);
@@ -186,11 +192,13 @@ namespace Sealebrities
             var crane = SB(PropMats.Crane);
             float cz = 6f, cdeck = DeckY(cz);
             crane.Cylinder(new Vector3(2.4f, cdeck - 0.2f, cz), Quaternion.identity, 0.85f, 0.75f, 2.8f, 8, false, true);
+            colB.Cylinder(new Vector3(2.4f, cdeck - 0.4f, cz), Quaternion.identity, 0.85f, 0.75f, 3.0f, 8, true, true);
             BoxCol(crane, colB, new Vector3(2.4f, cdeck + 3.5f, cz), new Vector3(2f, 1.8f, 2.2f));
             Vector3 boomA = new Vector3(2.0f, cdeck + 3.7f, cz + 0.6f);
             Vector3 boomDir = new Vector3(-0.35f, 0.5f, 0.79f).normalized;
             Vector3 boomB = boomA + boomDir * 15f;
             crane.Rod(boomA, boomB, 0.34f, 0.2f, 6, true);
+            colB.Rod(boomA, boomB, 0.34f, 0.2f, 6, true);
             rust.Rod(boomB, boomB - Vector3.up * 6.5f, 0.05f, 0.05f, 3);
             rust.Torus(boomB - Vector3.up * 6.8f, Quaternion.FromToRotation(Vector3.up, Vector3.right), 0.3f, 0.09f, 6, 3);
 
@@ -212,6 +220,7 @@ namespace Sealebrities
                 {
                     Vector3 bp = DeckPoint(z, sx > 0 ? 0.08f : 0.92f);
                     dm.Cylinder(bp, Quaternion.identity, 0.2f, 0.2f, 0.45f, 6, false, true);
+                    colB.Cylinder(bp - Vector3.up * 0.1f, Quaternion.identity, 0.2f, 0.2f, 0.55f, 6, false, true);
                 }
             }
             for (int i = 0; i < 4; i++)
@@ -219,9 +228,11 @@ namespace Sealebrities
                 Vector3 vp = DeckPoint(-19f + i * 11f, i % 2 == 0 ? 0.2f : 0.8f);
                 SB(PropMats.Superstructure).Cylinder(vp, Quaternion.identity, 0.24f, 0.24f, 1.2f, 6);
                 dm.Cylinder(vp + Vector3.up * 1.2f, Quaternion.Euler(0f, 0f, 90f), 0.3f, 0.3f, 0.12f, 6, true, true);
+                colB.Cylinder(vp - Vector3.up * 0.1f, Quaternion.identity, 0.26f, 0.26f, 1.65f, 6, false, true);
             }
             Vector3 wp = DeckPoint(30f, 0.5f);
             dm.Cylinder(wp + new Vector3(-1.2f, 0.5f, 0f), Quaternion.Euler(0f, 0f, -90f), 0.5f, 0.5f, 2.4f, 8, true, true);
+            colB.Cylinder(wp + new Vector3(-1.2f, 0.5f, 0f), Quaternion.Euler(0f, 0f, -90f), 0.5f, 0.5f, 2.4f, 8, true, true);
 
             // railings along both deck edges (some posts missing)
             for (int sx = -1; sx <= 1; sx += 2)
@@ -232,8 +243,8 @@ namespace Sealebrities
                 {
                     Vector3 e = DeckPoint(z, sx > 0 ? 0.01f : 0.99f) - new Vector3(sx * 0.12f, 0f, 0f);
                     Vector3 top = e + Vector3.up * 1.1f;
-                    if (rng.NextDouble() > 0.15) rust.Box(e + Vector3.up * 0.55f, new Vector3(0.08f, 1.1f, 0.08f));
-                    if (has && rng.NextDouble() > 0.08) rust.Beam(prev, top, 0.08f, 0.08f);
+                    if (rng.NextDouble() > 0.15) { rust.Box(e + Vector3.up * 0.55f, new Vector3(0.08f, 1.1f, 0.08f)); colB.Box(e + Vector3.up * 0.55f, new Vector3(0.1f, 1.1f, 0.1f)); }
+                    if (has && rng.NextDouble() > 0.08) { rust.Beam(prev, top, 0.08f, 0.08f); colB.Beam(prev, top, 0.1f, 0.1f); }
                     prev = top;
                     has = true;
                 }
@@ -242,10 +253,12 @@ namespace Sealebrities
             // propeller and rudder
             Vector3 hub = new Vector3(0f, 2.3f, Stern - 0.4f);
             rust.Ico(hub, new Vector3(0.5f, 0.5f, 0.75f), Quaternion.identity, 0);
+            colB.Ico(hub, new Vector3(0.5f, 0.5f, 0.75f), Quaternion.identity, 0);
             for (int i = 0; i < 4; i++)
             {
                 Quaternion q = Quaternion.Euler(0f, 0f, i * 90f + 20f) * Quaternion.Euler(0f, 25f, 0f);
                 rust.Box(hub + q * new Vector3(0f, 1.0f, 0f), new Vector3(0.75f, 1.6f, 0.1f), q);
+                colB.Box(hub + q * new Vector3(0f, 1.0f, 0f), new Vector3(0.75f, 1.6f, 0.12f), q);
             }
             BoxCol(rust, colB, new Vector3(0f, 3.4f, Stern - 1.6f), new Vector3(0.4f, 3.6f, 2.2f));
 
@@ -285,7 +298,7 @@ namespace Sealebrities
                 var type = PropReef.RandomType(rng, 2, 1, 1, 3, 4, 1);
                 if (rng.NextDouble() < 0.18) type = PropCoralType.Anemone;
                 Vector3 wpnt = S.MultiplyPoint3x4(lp);
-                PropReef.Place(debris, rng, wpnt, shipRot * Vector3.up, type, 0.75f, -4f);
+                PropReef.Place(debris, rng, wpnt, shipRot * Vector3.up, type, 0.75f, -4f, cols);
             }
             if (PropRun.Due()) yield return null;
 
@@ -352,6 +365,8 @@ namespace Sealebrities
                 Material dmat = i % 3 == 0 ? PropMats.DrumRed : i % 3 == 1 ? PropMats.DrumBlue : PropMats.Rust;
                 Quaternion q = Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), rng.NextDouble() < 0.6 ? 90f : 0f);
                 debris.B(dmat, dp).Cylinder(dp + q * new Vector3(0f, -0.44f, 0f) + Vector3.up * 0.25f, q, 0.29f, 0.29f, 0.88f, 8, true, true);
+                Vector3 dax = q * Vector3.up * 0.15f;
+                PropSolid.Segment(cols, dp + Vector3.up * 0.25f - dax, dp + Vector3.up * 0.25f + dax, 0.29f, "Barrel");
             }
             for (int i = 0; i < 7; i++)
             {
@@ -363,7 +378,9 @@ namespace Sealebrities
             // half buried orange lifeboat
             Vector3 lifeboat = pos + yawRot * new Vector3(-14f, 0f, -18f);
             lifeboat.y = G(lifeboat.x, lifeboat.z) - 0.3f;
-            PropBeach.RowingBoat(debris, Matrix4x4.TRS(lifeboat, Quaternion.Euler(8f, yaw + 60f, 25f), Vector3.one * 1.6f), PropMats.BuoyOrange, true);
+            var lifeTrs = Matrix4x4.TRS(lifeboat, Quaternion.Euler(8f, yaw + 60f, 25f), Vector3.one * 1.6f);
+            PropBeach.RowingBoat(debris, lifeTrs, PropMats.BuoyOrange, true);
+            PropSolid.RowingBoat(cols, lifeTrs, true);
             // sea whips and sponges around the wreck
             for (int i = 0; i < 70; i++)
             {
@@ -372,7 +389,7 @@ namespace Sealebrities
                 Vector3 lpnt = Quaternion.Inverse(yawRot) * (new Vector3(x, 0f, z) - pos);
                 if (Mathf.Abs(lpnt.x) < 8f && Mathf.Abs(lpnt.z) < 38f) continue;
                 float g = G(x, z);
-                PropReef.Place(debris, rng, new Vector3(x, g, z), PropGround.Normal(x, z, 1f), PropReef.RandomType(rng, 1, 1, 0, 2, 3, 3), 1f, -6f);
+                PropReef.Place(debris, rng, new Vector3(x, g, z), PropGround.Normal(x, z, 1f), PropReef.RandomType(rng, 1, 1, 0, 2, 3, 3), 1f, -6f, cols);
             }
 
             batch.Flush(decor, "Wreck", ShadowCastingMode.On, 0f);

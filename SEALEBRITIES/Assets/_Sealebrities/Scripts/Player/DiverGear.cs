@@ -56,115 +56,147 @@ namespace Sealebrities
 
         public static int FinTierOf(DiverLook look) => Mathf.Clamp(look.finTier, 0, 3);
 
-        /// Body surface radius of the bean at an absolute height (matches DiverBuilder's body profile).
-        static float BodyRadius(float y) => DiverBuilder.BodyRadiusAt(y);
-
-        /// Distance of the tank surface behind the body axis (round 2b: the rounder bean is ~2 cm wider at the back).
-        const float BackGap = 0.268f;
+        // round 3: the gear sits on the human torso (DiverBuilder.TorsoRX / RZ – elliptical, per body type); everything
+        // above the waist rides on the chest node (it twists and leans with the upper body), in chest space (y − ChestY)
+        static int curBuild;
 
         static float FrontZ(float y, float x)
         {
-            float r = BodyRadius(y);
-            return Mathf.Sqrt(Mathf.Max(0.0001f, r * r - x * x));
+            float rx = DiverBuilder.TorsoRX(y, curBuild), rz = DiverBuilder.TorsoRZ(y, curBuild);
+            float u = Mathf.Clamp01(Mathf.Abs(x) / Mathf.Max(0.01f, rx));
+            return rz * Mathf.Sqrt(Mathf.Max(0.0001f, 1f - u * u));
         }
 
+        static float BackZ(float y) => -DiverBuilder.TorsoRZ(y, curBuild);
+
         // ------------------------------------------------------------------ back: harness, tank(s), strap items, scooter
-        /// Harness, tank(s) by tier, the strap lamp + strap camera (toggled by DiverPuppet) and the dive scooter.
+        /// Harness (chest band + shoulder straps), tank(s) by tier, the strap lamp + strap camera (toggled by DiverPuppet)
+        /// and the dive scooter.
         public static void BuildBack(DiverPuppet p, DiverLook look, Material suit)
         {
-            Transform pv = p.pivot;
-            float py = DiverBuilder.PivotY;
+            curBuild = look.build;
+            Transform chestT = p.chest != null ? p.chest : p.pivot;
+            float py = p.chest != null ? DiverBuilder.ChestY : DiverBuilder.PivotY;
+            // the BCD + tank(s) under one node: the puppet takes them off while lying in a bed / hammock
+            Transform pv = DiverMeshes.Node(chestT, "BackGear", Vector3.zero);
+            p.backGear = pv;
             int tank = TankTierOf(look);
             Material strap = M(StrapDark);
+            var shape = DiverBuilder.ShapeOf(look.build);
 
             if (tank > 0)
             {
-                // BCD straps: chest band + waist band (the bean has no shoulders – no straps over the head)
-                // straps hug the (round 2b, rounder) bean: radius from DiverBuilder's body profile
-                DiverMeshes.Part(pv, "Harness", DiverMeshes.Torus(BodyRadius(1.24f) + 0.004f, 0.016f, 20, 4), strap, new Vector3(0f, 1.24f - py, 0f), Vector3.one);
-                DiverMeshes.Part(pv, "WaistBand", DiverMeshes.Torus(BodyRadius(0.97f) + 0.004f, 0.014f, 20, 4), strap, new Vector3(0f, 0.97f - py, 0f), new Vector3(1f, 1.2f, 1f), default, false);
-                DiverMeshes.Part(pv, "Buckle", DiverMeshes.Sphere(3, 6), M(ValveChrome), new Vector3(0f, 0.97f - py, FrontZ(0.97f, 0f) + 0.012f), new Vector3(0.05f, 0.032f, 0.018f), default, false);
+                // BCD: a chest band hugging the elliptical torso + two shoulder straps over the (round 3) shoulders
+                const float bandY = 1.26f;
+                float rx = DiverBuilder.TorsoRX(bandY, look.build) + 0.006f;
+                DiverMeshes.Part(pv, "Harness", DiverMeshes.Torus(rx, 0.016f, 16, 3), strap, new Vector3(0f, bandY - py, 0f), new Vector3(1f, 1f, shape.depth));
+                float sx = 0.085f * shape.chest;
+                for (int s = -1; s <= 1; s += 2)
+                {
+                    Vector3 f = new Vector3(s * sx, bandY - py, FrontZ(bandY, sx) + 0.006f);
+                    Vector3 top = new Vector3(s * (sx + 0.02f), 1.472f - py, 0f);
+                    Vector3 b = new Vector3(s * sx, bandY - py, BackZ(bandY) - 0.006f);
+                    Vector3 fm = new Vector3(s * (sx + 0.01f), 1.4f - py, FrontZ(1.4f, sx + 0.01f) + 0.006f);
+                    Vector3 bm = new Vector3(s * (sx + 0.01f), 1.4f - py, BackZ(1.4f) - 0.006f);
+                    Strip(pv, "StrapF", f, fm, 0.012f, strap);
+                    Strip(pv, "StrapF", fm, top, 0.012f, strap);
+                    Strip(pv, "StrapB", top, bm, 0.012f, strap);
+                    Strip(pv, "StrapB", bm, b, 0.012f, strap);
+                }
+                DiverMeshes.Part(pv, "Buckle", DiverMeshes.Sphere(3, 6), M(ValveChrome), new Vector3(0f, bandY - py, FrontZ(bandY, 0f) + 0.014f), new Vector3(0.045f, 0.03f, 0.016f), default, false);
             }
 
+            // tank surface ~1 cm behind the back, from the hips to the shoulder blades
+            float backZ = BackZ(1.2f) - 0.012f;
             switch (tank)
             {
                 case 1:   // scrap tank: small, dented, duct tape
                 {
-                    float r = 0.09f, len = 0.5f, z = -(BackGap + r);
-                    Single(pv, "Tank", r, len, 0.93f - py, 0f, z, M(TankDented));
+                    float r = 0.085f, len = 0.46f, z = backZ - r;
+                    Single(pv, "Tank", r, len, 1.0f - py, 0f, z, M(TankDented));
                     var dent = DiverMeshes.Part(pv, "Dent", DiverMeshes.Sphere(3, 6), M(TankDent),
-                        new Vector3(r * 0.72f, 1.16f - py, z - r * 0.62f), new Vector3(0.06f, 0.085f, 0.022f), new Vector3(0f, 130f, 0f), false);
+                        new Vector3(r * 0.72f, 1.2f - py, z - r * 0.62f), new Vector3(0.055f, 0.08f, 0.02f), new Vector3(0f, 130f, 0f), false);
                     dent.receiveShadows = true;
-                    DiverMeshes.Part(pv, "Tape", DiverMeshes.Torus(r + 0.002f, 0.009f, 16, 3), M(DuctTape), new Vector3(0f, 1.26f - py, z), new Vector3(1f, 2.2f, 1f), new Vector3(0f, 0f, 6f), false);
-                    ValveOn(pv, "Valve", 0f, 0.93f + len - 0.02f - py, z, M(Valve), M(StrapDark));
+                    DiverMeshes.Part(pv, "Tape", DiverMeshes.Torus(r + 0.002f, 0.009f, 14, 3), M(DuctTape), new Vector3(0f, 1.3f - py, z), new Vector3(1f, 2.2f, 1f), new Vector3(0f, 0f, 6f), false);
+                    ValveOn(pv, "Valve", 0f, 1.0f + len - 0.02f - py, z, M(Valve), M(StrapDark));
                     break;
                 }
                 case 2:   // 12 L steel, blue, band in the suit colour
                 {
-                    float r = 0.105f, len = 0.56f, z = -(BackGap + r);
-                    Single(pv, "Tank", r, len, 0.92f - py, 0f, z, M(TankSteel));
-                    DiverMeshes.Part(pv, "TankBand", DiverMeshes.Torus(r + 0.003f, 0.012f, 16, 3), suit, new Vector3(0f, 1.32f - py, z), Vector3.one);
-                    ValveOn(pv, "Valve", 0f, 0.92f + len - 0.02f - py, z, M(Valve), M(ValveChrome));
+                    float r = 0.098f, len = 0.52f, z = backZ - r;
+                    Single(pv, "Tank", r, len, 0.98f - py, 0f, z, M(TankSteel));
+                    DiverMeshes.Part(pv, "TankBand", DiverMeshes.Torus(r + 0.003f, 0.012f, 14, 3), suit, new Vector3(0f, 1.36f - py, z), Vector3.one);
+                    ValveOn(pv, "Valve", 0f, 0.98f + len - 0.02f - py, z, M(Valve), M(ValveChrome));
                     break;
                 }
                 case 3:   // twin grey with a manifold
                 {
-                    float r = 0.085f, len = 0.54f, z = -(BackGap + r), x = 0.092f;
+                    float r = 0.08f, len = 0.5f, z = backZ - r, x = 0.086f;
                     Material body = M(TankTwin), band = M(StrapDark);
                     for (int s = -1; s <= 1; s += 2)
                     {
-                        Single(pv, s < 0 ? "TankL" : "TankR", r, len, 0.93f - py, s * x, z, body);
-                        DiverMeshes.Part(pv, "Band", DiverMeshes.Torus(r + 0.003f, 0.011f, 16, 3), band, new Vector3(s * x, 1.05f - py, z), Vector3.one, default, false);
-                        DiverMeshes.Part(pv, "Band", DiverMeshes.Torus(r + 0.003f, 0.011f, 16, 3), band, new Vector3(s * x, 1.3f - py, z), Vector3.one, default, false);
-                        ValveOn(pv, "Valve", s * x, 0.93f + len - 0.02f - py, z, M(Valve), M(ValveChrome));
+                        Single(pv, s < 0 ? "TankL" : "TankR", r, len, 0.99f - py, s * x, z, body);
+                        DiverMeshes.Part(pv, "Band", DiverMeshes.Torus(r + 0.003f, 0.011f, 12, 3), band, new Vector3(s * x, 1.1f - py, z), Vector3.one, default, false);
+                        DiverMeshes.Part(pv, "Band", DiverMeshes.Torus(r + 0.003f, 0.011f, 12, 3), band, new Vector3(s * x, 1.34f - py, z), Vector3.one, default, false);
+                        ValveOn(pv, "Valve", s * x, 0.99f + len - 0.02f - py, z, M(Valve), M(ValveChrome));
                     }
-                    Bar(pv, "Manifold", new Vector3(-x, 0.93f + len + 0.045f - py, z), new Vector3(x, 0.93f + len + 0.045f - py, z), 0.016f, M(ValveChrome));
+                    Bar(pv, "Manifold", new Vector3(-x, 0.99f + len + 0.045f - py, z), new Vector3(x, 0.99f + len + 0.045f - py, z), 0.016f, M(ValveChrome));
                     break;
                 }
                 case 4:   // nitrox: light body, yellow + green band
                 {
-                    float r = 0.11f, len = 0.6f, z = -(BackGap + r);
-                    Single(pv, "Tank", r, len, 0.9f - py, 0f, z, M(TankNitrox));
-                    DiverMeshes.Part(pv, "Yellow", DiverMeshes.Taper(r + 0.004f, r + 0.004f, 16, false), M(NitroxYellow), new Vector3(0f, 1.3f - py, z), new Vector3(1f, 0.085f, 1f), default, false);
-                    DiverMeshes.Part(pv, "Green", DiverMeshes.Taper(r + 0.004f, r + 0.004f, 16, false), M(NitroxGreen), new Vector3(0f, 1.27f - py, z), new Vector3(1f, 0.022f, 1f), default, false);
-                    ValveOn(pv, "Valve", 0f, 0.9f + len - 0.02f - py, z, M(Valve), M(NitroxYellow));
+                    float r = 0.102f, len = 0.55f, z = backZ - r;
+                    Single(pv, "Tank", r, len, 0.97f - py, 0f, z, M(TankNitrox));
+                    DiverMeshes.Part(pv, "Yellow", DiverMeshes.Taper(r + 0.004f, r + 0.004f, 14, false), M(NitroxYellow), new Vector3(0f, 1.34f - py, z), new Vector3(1f, 0.08f, 1f), default, false);
+                    DiverMeshes.Part(pv, "Green", DiverMeshes.Taper(r + 0.004f, r + 0.004f, 14, false), M(NitroxGreen), new Vector3(0f, 1.31f - py, z), new Vector3(1f, 0.022f, 1f), default, false);
+                    ValveOn(pv, "Valve", 0f, 0.97f + len - 0.02f - py, z, M(Valve), M(NitroxYellow));
                     break;
                 }
                 case 5:   // trimix: twin black, orange bands, the big rig
                 {
-                    float r = 0.095f, len = 0.62f, z = -(BackGap + r), x = 0.102f;
+                    float r = 0.09f, len = 0.58f, z = backZ - r, x = 0.096f;
                     Material body = M(TankTrimix), orange = M(TrimixOrange);
                     for (int s = -1; s <= 1; s += 2)
                     {
-                        Single(pv, s < 0 ? "TankL" : "TankR", r, len, 0.88f - py, s * x, z, body);
-                        DiverMeshes.Part(pv, "Band", DiverMeshes.Torus(r + 0.003f, 0.013f, 16, 3), orange, new Vector3(s * x, 1.0f - py, z), Vector3.one, default, false);
-                        DiverMeshes.Part(pv, "Band", DiverMeshes.Torus(r + 0.003f, 0.013f, 16, 3), orange, new Vector3(s * x, 1.34f - py, z), Vector3.one, default, false);
-                        ValveOn(pv, "Valve", s * x, 0.88f + len - 0.02f - py, z, M(Valve), orange);
+                        Single(pv, s < 0 ? "TankL" : "TankR", r, len, 0.95f - py, s * x, z, body);
+                        DiverMeshes.Part(pv, "Band", DiverMeshes.Torus(r + 0.003f, 0.013f, 12, 3), orange, new Vector3(s * x, 1.06f - py, z), Vector3.one, default, false);
+                        DiverMeshes.Part(pv, "Band", DiverMeshes.Torus(r + 0.003f, 0.013f, 12, 3), orange, new Vector3(s * x, 1.38f - py, z), Vector3.one, default, false);
+                        ValveOn(pv, "Valve", s * x, 0.95f + len - 0.02f - py, z, M(Valve), orange);
                     }
-                    Bar(pv, "Manifold", new Vector3(-x, 0.88f + len + 0.045f - py, z), new Vector3(x, 0.88f + len + 0.045f - py, z), 0.017f, M(ValveChrome));
+                    Bar(pv, "Manifold", new Vector3(-x, 0.95f + len + 0.045f - py, z), new Vector3(x, 0.95f + len + 0.045f - py, z), 0.017f, M(ValveChrome));
                     break;
                 }
             }
 
-            BuildStrapLamp(p, py);
-            BuildStrapCamera(p, py);
-            if (FinTierOf(look) >= 3) BuildScooter(p, py);
+            BuildStrapLamp(p, chestT, py);
+            BuildStrapCamera(p, chestT, py);
+            if (FinTierOf(look) >= 3) BuildScooter(p, DiverBuilder.PivotY);
         }
 
         /// One upright tank: capsule from y0 (pivot space) with radius r and length len.
         static void Single(Transform pv, string name, float r, float len, float y0, float x, float z, Material m)
         {
-            DiverMeshes.Part(pv, name, DiverMeshes.Capsule(r, len, 12), m, new Vector3(x, y0, z), Vector3.one);
+            DiverMeshes.Part(pv, name, DiverMeshes.Capsule(r, len, 10), m, new Vector3(x, y0, z), Vector3.one);
             // a soft neck where the valve sits
-            DiverMeshes.Part(pv, name + "Neck", DiverMeshes.Taper(r * 0.42f, r * 0.3f, 10), m, new Vector3(x, y0 + len - r * 0.25f, z), new Vector3(1f, 0.05f, 1f), default, false);
+            DiverMeshes.Part(pv, name + "Neck", DiverMeshes.Taper(r * 0.42f, r * 0.3f, 8), m, new Vector3(x, y0 + len - r * 0.25f, z), new Vector3(1f, 0.05f, 1f), default, false);
         }
 
         static void ValveOn(Transform pv, string name, float x, float y, float z, Material body, Material knob)
         {
-            DiverMeshes.Part(pv, name, DiverMeshes.Capsule(0.03f, 0.085f, 8), body, new Vector3(x, y, z), Vector3.one, default, false);
-            DiverMeshes.Part(pv, name + "Knob", DiverMeshes.Torus(0.024f, 0.009f, 8, 3), knob, new Vector3(x, y + 0.075f, z), Vector3.one, default, false);
+            DiverMeshes.Part(pv, name, DiverMeshes.Capsule(0.028f, 0.08f, 6), body, new Vector3(x, y, z), Vector3.one, default, false);
+            DiverMeshes.Part(pv, name + "Knob", DiverMeshes.Torus(0.022f, 0.008f, 6, 3), knob, new Vector3(x, y + 0.075f, z), Vector3.one, default, false);
             // first stage pointing to the right shoulder
             DiverMeshes.Part(pv, name + "Stage", DiverMeshes.Capsule(0.019f, 0.07f, 6), body, new Vector3(x + 0.02f, y + 0.045f, z), Vector3.one, new Vector3(0f, 0f, -90f), false);
+        }
+
+        /// A thin strap / cord between two points: a cheap tapered capsule (5 sides).
+        static MeshRenderer Strip(Transform parent, string name, Vector3 a, Vector3 b, float r, Material m)
+        {
+            Vector3 d = b - a;
+            float len = Mathf.Max(0.001f, d.magnitude);
+            var part = DiverMeshes.Part(parent, name, DiverMeshes.TaperCapsule(r, r, len + r * 2f, 5, 1), m, a - (d / len) * r, Vector3.one, default, false);
+            part.transform.localRotation = Quaternion.FromToRotation(Vector3.up, d / len);
+            return part;
         }
 
         /// Capsule between two pivot-space points.
@@ -178,36 +210,36 @@ namespace Sealebrities
             return part;
         }
 
-        /// The dive lamp clipped to the left side of the chest strap (shown while it is not in a hand).
-        static void BuildStrapLamp(DiverPuppet p, float py)
+        /// The dive lamp clipped to the left shoulder strap (shown while it is not in a hand).
+        static void BuildStrapLamp(DiverPuppet p, Transform pv, float py)
         {
-            const float y = 1.29f, x = -0.14f;
+            const float y = 1.32f, x = -0.1f;
             float z = FrontZ(y, x);
-            var root = DiverMeshes.Node(p.pivot, "StrapLamp", new Vector3(x, y - py, z + 0.012f), new Vector3(-12f, -28f, 0f));
-            DiverMeshes.Part(root, "Clip", DiverMeshes.Capsule(0.012f, 0.05f, 10), M(StrapDark), new Vector3(0f, -0.03f, -0.006f), Vector3.one, default, false);
-            DiverMeshes.Part(root, "Body", DiverMeshes.Capsule(0.02f, 0.12f, 16), M(LampYellow), new Vector3(0f, -0.06f, 0.016f), Vector3.one, default, false);
-            DiverMeshes.Part(root, "Head", DiverMeshes.Taper(0.021f, 0.027f, 18), M(LampHead), new Vector3(0f, 0.045f, 0.016f), new Vector3(1f, 0.035f, 1f), default, false);
-            DiverMeshes.Part(root, "Lens", DiverMeshes.Sphere(6, 16), MaterialLibrary.Emissive(LampLens, LowPoly.Hex("#FFD9A0"), 0.4f), new Vector3(0f, 0.08f, 0.016f), new Vector3(0.046f, 0.012f, 0.046f), default, false);
+            var root = DiverMeshes.Node(pv, "StrapLamp", new Vector3(x, y - py, z + 0.016f), new Vector3(-10f, -18f, 0f));
+            DiverMeshes.Part(root, "Clip", DiverMeshes.Capsule(0.011f, 0.045f, 6), M(StrapDark), new Vector3(0f, -0.03f, -0.006f), Vector3.one, default, false);
+            DiverMeshes.Part(root, "Body", DiverMeshes.Capsule(0.018f, 0.11f, 10), M(LampYellow), new Vector3(0f, -0.055f, 0.014f), Vector3.one, default, false);
+            DiverMeshes.Part(root, "Head", DiverMeshes.Taper(0.019f, 0.025f, 12), M(LampHead), new Vector3(0f, 0.042f, 0.014f), new Vector3(1f, 0.033f, 1f), default, false);
+            DiverMeshes.Part(root, "Lens", DiverMeshes.Sphere(4, 10), MaterialLibrary.Emissive(LampLens, LowPoly.Hex("#FFD9A0"), 0.4f), new Vector3(0f, 0.075f, 0.014f), new Vector3(0.042f, 0.011f, 0.042f), default, false);
             p.strapLamp = root;
             root.gameObject.SetActive(false);
         }
 
         /// The hand camera hanging from a lanyard in front of the chest (shown while it is not in a hand).
-        static void BuildStrapCamera(DiverPuppet p, float py)
+        static void BuildStrapCamera(DiverPuppet p, Transform pv, float py)
         {
-            const float y = 1.08f, x = 0.07f;
+            const float y = 1.19f, x = 0.05f;
             float z = FrontZ(y, x);
-            var root = DiverMeshes.Node(p.pivot, "StrapCamera", new Vector3(x, y - py, z + 0.03f), new Vector3(8f, 0f, -4f));
-            DiverMeshes.Part(root, "Body", DiverMeshes.RoundedSlab("strapcam", 0.085f, 0.064f, 0.048f, 0.012f, 3), M(CamBody), Vector3.zero, Vector3.one, default, false)
+            var root = DiverMeshes.Node(pv, "StrapCamera", new Vector3(x, y - py, z + 0.028f), new Vector3(8f, 0f, -4f));
+            DiverMeshes.Part(root, "Body", DiverMeshes.RoundedSlab("strapcam", 0.08f, 0.06f, 0.045f, 0.012f, 3), M(CamBody), Vector3.zero, Vector3.one, default, false)
                 .sharedMaterials = new[] { M(CamBody), M(CamBody) };
-            DiverMeshes.Part(root, "Lens", DiverMeshes.Capsule(0.019f, 0.04f, 16), M(CamDark), new Vector3(0.012f, 0f, 0.012f), Vector3.one, new Vector3(90f, 0f, 0f), false);
-            DiverMeshes.Part(root, "LensRing", DiverMeshes.Torus(0.019f, 0.004f, 18, 5), M(ScooterStripe), new Vector3(0.012f, 0f, 0.045f), Vector3.one, new Vector3(90f, 0f, 0f), false);
-            DiverMeshes.Part(root, "RecDot", DiverMeshes.Sphere(5, 10), M(LowPoly.Hex("#E04848")), new Vector3(-0.028f, 0.02f, 0.025f), Vector3.one * 0.009f, default, false);
+            DiverMeshes.Part(root, "Lens", DiverMeshes.Capsule(0.018f, 0.038f, 10), M(CamDark), new Vector3(0.012f, 0f, 0.012f), Vector3.one, new Vector3(90f, 0f, 0f), false);
+            DiverMeshes.Part(root, "LensRing", DiverMeshes.Torus(0.018f, 0.004f, 12, 3), M(ScooterStripe), new Vector3(0.012f, 0f, 0.043f), Vector3.one, new Vector3(90f, 0f, 0f), false);
+            DiverMeshes.Part(root, "RecDot", DiverMeshes.Sphere(3, 6), M(LowPoly.Hex("#E04848")), new Vector3(-0.026f, 0.018f, 0.024f), Vector3.one * 0.009f, default, false);
             // lanyard up to the collar (both ends)
-            Vector3 top = new Vector3(x, 1.45f - py, FrontZ(1.45f, x) - 0.01f);
+            Vector3 top = new Vector3(0f, 1.47f - py, 0.05f);
             Vector3 c = root.localPosition;
-            var lr = Bar(p.pivot, "LanyardR", c + new Vector3(0.036f, 0.03f, -0.01f), top + new Vector3(0.05f, 0f, -0.03f), 0.0045f, M(Cord));
-            var ll = Bar(p.pivot, "LanyardL", c + new Vector3(-0.036f, 0.03f, -0.01f), top + new Vector3(-0.08f, 0f, -0.02f), 0.0045f, M(Cord));
+            var lr = Strip(pv, "LanyardR", c + new Vector3(0.034f, 0.028f, -0.01f), top + new Vector3(0.05f, 0f, 0f), 0.0045f, M(Cord));
+            var ll = Strip(pv, "LanyardL", c + new Vector3(-0.034f, 0.028f, -0.01f), top + new Vector3(-0.05f, 0f, 0f), 0.0045f, M(Cord));
             // the lanyard belongs to the camera: parent it so it hides together
             lr.transform.SetParent(root, true);
             ll.transform.SetParent(root, true);
@@ -218,8 +250,8 @@ namespace Sealebrities
         /// t3 fins: a dive scooter under the body (in front of the chest; while swimming the bean lies on it).
         static void BuildScooter(DiverPuppet p, float py)
         {
-            float z = 0.375f;
-            var root = DiverMeshes.Node(p.pivot, "Scooter", new Vector3(0f, 0.8f - py, z));
+            float z = DiverBuilder.TorsoRZ(1.0f, curBuild) + 0.11f;
+            var root = DiverMeshes.Node(p.pivot, "Scooter", new Vector3(0f, 0.86f - py, z));
             Material body = M(ScooterBody), dark = M(ScooterDark), stripe = M(ScooterStripe);
             DiverMeshes.Part(root, "Hull", DiverMeshes.Capsule(0.085f, 0.5f, 24), body, Vector3.zero, Vector3.one, default, false);
             DiverMeshes.Part(root, "Nose", DiverMeshes.Sphere(8, 20), dark, new Vector3(0f, 0.47f, 0f), new Vector3(0.12f, 0.08f, 0.12f), default, false);
@@ -281,7 +313,7 @@ namespace Sealebrities
                     {
                         Vector3 a = new Vector3(s * 0.072f, -0.02f, 0f), b = new Vector3(s * 0.094f, 0.4f, 0f);
                         Vector3 d = b - a;
-                        var part = DiverMeshes.Part(fin, "Rail", DiverMeshes.Capsule(0.011f, d.magnitude, 6), rail, a, Vector3.one, default, false);
+                        var part = DiverMeshes.Part(fin, "Rail", DiverMeshes.TaperCapsule(0.011f, 0.011f, d.magnitude, 5, 1), rail, a, Vector3.one, default, false);
                         part.transform.localRotation = Quaternion.FromToRotation(Vector3.up, d.normalized);
                     }
                     break;

@@ -35,7 +35,7 @@ namespace Sealebrities
         static readonly List<Vector2[]> Connections = new List<Vector2[]>();
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { routes = null; dense = null; Samples.Clear(); Connections.Clear(); }
+        static void ResetStatics() { routes = null; dense = null; Samples.Clear(); Connections.Clear(); SignAudit.Clear(); }
 
         public static void ClearConnections() => Connections.Clear();
 
@@ -87,7 +87,7 @@ namespace Sealebrities
                     // through the gully the world cuts into the cove's southern ridge, down to the hidden beach
                     new Route { name = "bay", points = new[] { V(rt.x - 6f, rt.z + 8f), XZ(WorldFeatures.BayGullyTop), Vector2.Lerp(XZ(WorldFeatures.BayGullyTop), XZ(WorldFeatures.BayGullyBottom), 0.5f), XZ(WorldFeatures.BayGullyBottom), XZ(WorldFeatures.HiddenBayBeach) } },
                     new Route { name = "heli_ravine", points = new[] { V(rv.x + 2f, rv.z - 16f), V(-1f, -45f), V(14f, -47f), V(heli.x - 9f, heli.z - 2f) } },
-                    // the village Altriff (L.8) on the old second beach: the trail ends on the terrace
+                    // the south beach (round 3: the village Altriff is gone – the trail ends on the open beach meadow by the jetty)
                     new Route { name = "second_beach", points = new[] { V(heli.x - 2f, heli.z - 10f), I(60f, -100f), I(52f, -130f), V(sb.x + 4f, sb.z + 22f), V(sb.x, sb.z + 10f) } },
                     new Route { name = "tidepools", points = new[] { V(sb.x + 12f, sb.z + 10f), I(80f, -158f), I(110f, -138f), I(132f, -114f), V(tp.x - 6f, tp.z + 4f) } },
                     new Route { name = "tide_hut", points = new[] { V(tp.x - 8f, tp.z + 9f), I(134f, -62f), I(124f, -36f), I(113f, -10f) } },
@@ -129,10 +129,10 @@ namespace Sealebrities
                 new Junction { at = rampFoot + V(2.5f, -2f), icons = new[] { PropIcon.Cave, PropIcon.Waterfall, PropIcon.Bridge }, toward = new[] { XZ(WorldFeatures.FallFoot) + XZ(WorldFeatures.FallDir) * 9f, XZ(WorldFeatures.FallRampTop), rampFoot + V(9f, -9f) } },
                 new Junction { at = XZ(WorldFeatures.PoolBeach) + V(2.5f, -1f), icons = new[] { PropIcon.Waterfall, PropIcon.Bridge }, toward = new[] { XZ(WorldLayout.WaterfallPool), I(-44f, 22f) } },
                 new Junction { at = V(rv.x + 4f, rv.z - 15f), icons = new[] { PropIcon.Bridge, PropIcon.Radio, PropIcon.Helipad }, toward = new[] { V(rv.x, rv.z), I(-48f, -76f), V(-1f, -45f) } },
-                new Junction { at = V(heli.x - 7f, heli.z - 9f), icons = new[] { PropIcon.Helipad, PropIcon.Village, PropIcon.Bridge }, toward = new[] { V(heli.x, heli.z), I(60f, -100f), V(14f, -47f) } },
-                new Junction { at = V(tp.x - 3f, tp.z + 10f), icons = new[] { PropIcon.TidePools, PropIcon.Hut, PropIcon.Village }, toward = new[] { V(tp.x, tp.z), I(134f, -62f), I(132f, -114f) } },
+                new Junction { at = V(heli.x - 7f, heli.z - 9f), icons = new[] { PropIcon.Helipad, PropIcon.Beach, PropIcon.Bridge }, toward = new[] { V(heli.x, heli.z), I(60f, -100f), V(14f, -47f) } },
+                new Junction { at = V(tp.x - 3f, tp.z + 10f), icons = new[] { PropIcon.TidePools, PropIcon.Hut, PropIcon.Beach }, toward = new[] { V(tp.x, tp.z), I(134f, -62f), I(132f, -114f) } },
                 new Junction { at = V(rt.x + 4f, rt.z + 9f), icons = new[] { PropIcon.Radio, PropIcon.Bay, PropIcon.Bridge }, toward = new[] { V(rt.x, rt.z), XZ(WorldFeatures.BayGullyTop), I(-78f, -96f) } },
-                new Junction { at = V(sb.x + 8f, sb.z + 14f), icons = new[] { PropIcon.Village, PropIcon.TidePools, PropIcon.Helipad }, toward = new[] { V(sb.x, sb.z), I(80f, -158f), I(52f, -130f) } },
+                new Junction { at = V(sb.x + 8f, sb.z + 14f), icons = new[] { PropIcon.Beach, PropIcon.TidePools, PropIcon.Helipad }, toward = new[] { V(sb.x, sb.z), I(80f, -158f), I(52f, -130f) } },
                 new Junction { at = XZ(WorldFeatures.BayGullyBottom) + V(3f, 1f), icons = new[] { PropIcon.Bay, PropIcon.Radio }, toward = new[] { V(bay.x, bay.z), XZ(WorldFeatures.BayGullyTop) } },
                 new Junction { at = V(dw.x + 1.5f, dw.z - 10f), icons = new[] { PropIcon.Driftwood, PropIcon.Hut }, toward = new[] { V(dw.x, dw.z), V(57f, 76f) } },
             };
@@ -228,10 +228,12 @@ namespace Sealebrities
             var detail = new PropBatch(64f);
             var rng = new System.Random(3131);
             var rs = Routes;
+            var routeSamples = new List<List<Vector2>>(rs.Count);
             for (int r = 0; r < rs.Count; r++)
             {
                 var route = rs[r];
                 var pts = SampleSpline(route.points, 1f, 40 + r * 13, route.boardwalk ? 0.4f : 1.4f);
+                routeSamples.Add(pts);
                 if (route.boardwalk) Boardwalk(batch, cols, pts, excl, rng);
                 else DirtStrip(batch, detail, pts, excl, pathMask, skip, rng, 900 + r * 31);
                 // tiki torches along the main trail and the boardwalk (lit at night)
@@ -265,18 +267,106 @@ namespace Sealebrities
                 DirtStrip(batch, detail, pts, excl, pathMask, skip, rng, 1700 + c * 17);
             }
 
-            // signposts
+            // signposts – round 3 sign audit (GDD §19 "falsche bzw. verbuggte Schilder"): every post stands 2.2 m beside its
+            // trail (never on it, never lost in the bushes) and every arrow points along the trail it names (the tangent
+            // ~8 m down that trail), not in a straight line at a control point behind a curve
             var js = Junctions();
+            SignAudit.Clear();
             for (int i = 0; i < js.Length; i++)
             {
-                Signpost(batch, cols, js[i], i);
-                excl.Add(js[i].at.x, js[i].at.y, 1.2f);
+                var j = js[i];
+                j.at = SnapBesideTrail(j.at, routeSamples);
+                for (int k = 0; k < j.toward.Length; k++) j.toward[k] = j.at + TrailBearing(j.at, j.toward[k], rs, routeSamples) * 10f;
+                Signpost(batch, cols, j, i);
+                excl.Add(j.at.x, j.at.y, 2.2f);
+                SignAudit.Add(new SignInfo { at = new Vector3(j.at.x, G(j.at.x, j.at.y), j.at.y), icons = j.icons, toward = j.toward });
             }
 
             batch.SetShadows(PropMats.PathDirt, ShadowCastingMode.Off);
             batch.SetShadows(PropMats.PathDirtDark, ShadowCastingMode.Off);
             batch.Flush(root, "PathMesh", ShadowCastingMode.On, 240f);
             detail.Flush(root, "PathStones", ShadowCastingMode.Off, 110f);
+        }
+
+        /// One built signpost (round 3 audit / tests): post position (y = ground) and per board the icon and a point 10 m
+        /// along the direction its arrow points.
+        public struct SignInfo
+        {
+            public Vector3 at;
+            public PropIcon[] icons;
+            public Vector2[] toward;
+        }
+
+        /// Every signpost of the last build (for AutoPlaytest step 60 and AutoShot).
+        public static readonly List<SignInfo> SignAudit = new List<SignInfo>();
+
+        /// Moves a junction post so it stands 2.2 m beside the nearest trail centre line (on dry, walkable ground).
+        static Vector2 SnapBesideTrail(Vector2 at, List<List<Vector2>> samples)
+        {
+            int br = -1, bi = -1;
+            float best = float.MaxValue;
+            for (int r = 0; r < samples.Count; r++)
+            {
+                var s = samples[r];
+                for (int i = 0; i < s.Count; i++)
+                {
+                    float d = (s[i] - at).sqrMagnitude;
+                    if (d < best) { best = d; br = r; bi = i; }
+                }
+            }
+            if (br < 0) return at;
+            float dist = Mathf.Sqrt(best);
+            if (dist >= 1.7f && dist <= 3.2f && G(at.x, at.y) > 0.5f) return at;
+            var sm = samples[br];
+            Vector2 p = sm[bi];
+            Vector2 a = sm[Mathf.Max(0, bi - 2)], b = sm[Mathf.Min(sm.Count - 1, bi + 2)];
+            Vector2 dir = (b - a).sqrMagnitude > 1e-6f ? (b - a).normalized : Vector2.right;
+            Vector2 perp = new Vector2(-dir.y, dir.x);
+            float side = Vector2.Dot(at - p, perp) >= 0f ? 1f : -1f;
+            for (int t = 0; t < 2; t++)
+            {
+                Vector2 q = p + perp * (side * 2.2f);
+                if (G(q.x, q.y) > 0.5f && PropGround.Slope(q.x, q.y, 0.8f) < 0.8f) return q;
+                side = -side;
+            }
+            return p + perp * (side * 2.2f);
+        }
+
+        /// Unit direction an arrow at 'at' should point to lead toward 'toward': when 'toward' is a control point of a
+        /// trail, the direction ~8 m down that trail from its nearest point (the way the path really leaves the junction);
+        /// otherwise (a destination right there – the pool, the helipad …) straight at it.
+        static Vector2 TrailBearing(Vector2 at, Vector2 toward, List<Route> rs, List<List<Vector2>> samples)
+        {
+            Vector2 direct = toward - at;
+            direct = direct.sqrMagnitude > 1e-6f ? direct.normalized : Vector2.right;
+            for (int r = 0; r < rs.Count; r++)
+            {
+                var cps = rs[r].points;
+                bool member = false;
+                for (int c = 0; c < cps.Length; c++) if ((cps[c] - toward).sqrMagnitude < 0.36f) { member = true; break; }
+                if (!member) continue;
+                var s = samples[r];
+                int ni = 0, ti = 0;
+                float bn = float.MaxValue, bt = float.MaxValue;
+                for (int i = 0; i < s.Count; i++)
+                {
+                    float dn = (s[i] - at).sqrMagnitude, dt = (s[i] - toward).sqrMagnitude;
+                    if (dn < bn) { bn = dn; ni = i; }
+                    if (dt < bt) { bt = dt; ti = i; }
+                }
+                if (ni == ti) return direct;
+                int step = ti > ni ? 1 : -1;
+                float acc = 0f;
+                int k = ni;
+                while (k != ti && acc < 8f)
+                {
+                    acc += (s[k + step] - s[k]).magnitude;
+                    k += step;
+                }
+                Vector2 v = s[k] - at;
+                return v.sqrMagnitude > 1e-4f ? v.normalized : direct;
+            }
+            return direct;
         }
 
         static void DirtStrip(PropBatch batch, PropBatch detail, List<Vector2> pts, PropExclusion excl, PropExclusion pathMask, PropExclusion skip, System.Random rng, int seed)
@@ -418,7 +508,7 @@ namespace Sealebrities
                 var icon = batch.W(PropMats.SignIcon(j.icons[k]), center);
                 for (int s = -1; s <= 1; s += 2)
                 {
-                    Vector3 face = center + right * (0.028f * s) - fwd * 0.05f;
+                    Vector3 face = center + right * (0.036f * s) - fwd * 0.05f;   // 1 cm proud of the board (no z-fighting)
                     Vector3 u = fwd * (0.11f * s), v = up * 0.11f;
                     // u runs along the board so the icon reads left → right from both sides
                     icon.QuadAuto(face - u - v, face - u + v, face + u + v, face + u - v, new Vector2(0f, 0f), new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(1f, 0f), right * s);

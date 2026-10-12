@@ -418,7 +418,7 @@ namespace Sealebrities
                 {
                     searchKey = key;
                     searchLang = Loc.Current;
-                    searchLine = key == -2 ? Loc.Tr("Paket im Dorf holen", "Get the parcel in the village")
+                    searchLine = key == -2 ? Loc.Tr("Paket am Südstrand holen", "Get the parcel on the south beach")
                                            : Loc.Tr("Paket suchen: ", "Find the parcel: ") + HeliMishaps.ZoneName(key);
                 }
                 QuestTracker.SetEntry(QuestSource.Other, "heli_search", searchLine, null, best.transform.position, NotifyKind.Delivery);

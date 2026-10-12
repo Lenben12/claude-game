@@ -958,6 +958,11 @@ namespace Sealebrities
                 case HoldItem.Camera: return ItemCamera;
                 case HoldItem.Flashlight: return ItemFlashlight;
                 case HoldItem.FishingRod: return ItemRod;
+                case HoldItem.Stick: return ItemStick;
+                case HoldItem.Spear: return ItemSpear;
+                case HoldItem.SpearGun: return ItemSpeargun;
+                case HoldItem.Food: return ItemSnack;
+                case HoldItem.Tool: return ItemStone;
                 default: return null;
             }
         }

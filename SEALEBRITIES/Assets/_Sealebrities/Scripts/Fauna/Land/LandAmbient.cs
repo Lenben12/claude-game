@@ -56,7 +56,7 @@ namespace Sealebrities
             for (int i = 0; i < spots.Count && actors.Count < MaxActors; i++)
             {
                 var s = spots[i];
-                if (chickens < 6 && (s.kind == FaunaSpotKind.Pen || (s.kind == FaunaSpotKind.Ground && s.tag == "village")) && rng.NextDouble() < 0.5)
+                if (chickens < 6 && (s.kind == FaunaSpotKind.Pen || (s.kind == FaunaSpotKind.Ground && (s.tag == "camp" || s.tag == "village"))) && rng.NextDouble() < 0.5)
                 { Add(Kind.Chicken, s.pos, rng); chickens++; }
                 else if (crabs < 12 && s.kind == FaunaSpotKind.Beach && rng.NextDouble() < 0.18)
                 { Add(Kind.Crab, s.pos, rng); crabs++; }

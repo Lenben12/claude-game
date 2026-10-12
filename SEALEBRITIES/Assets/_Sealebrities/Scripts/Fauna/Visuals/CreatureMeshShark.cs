@@ -14,6 +14,7 @@ namespace Sealebrities
         {
             var s = ctx.S;
             string v = s.variant ?? "";
+            if (v == "mosasaur") { CreatureMeshFossils.Mosasaur(ctx); return; }   // round 3: the volcano's monster
             bool hammer = v == "hammer", whale = v == "whale", goblin = v == "goblin";
             float H = CreatureMeshMath.Clamp(s.bodyHeight, 0.06f, 0.4f);
             float W = CreatureMeshMath.Clamp(s.bodyWidth, 0.06f, 0.4f);

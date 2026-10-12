@@ -68,6 +68,14 @@ namespace Sealebrities
                 desired += c.FleeFromPlayer(c.cruise * 3f + 0.4f, 0.3f);
                 if (!sc.anchored) sc.scare = 2f;
             }
+            else if (!sc.anchored && FaunaReact.Startled(c.pos, out Vector3 sf))
+            {
+                // round 3: a spear hit / shark charge nearby – the whole school bursts away
+                Vector3 away = c.pos - sf;
+                desired += (away.sqrMagnitude > 1e-4f ? away.normalized : -c.Transform.forward) * (c.cruise * 3f + 0.6f);
+                sc.scare = 2f;
+                scared = true;
+            }
 
             if (sc.anchored)
             {

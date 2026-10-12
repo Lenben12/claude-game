@@ -18,24 +18,29 @@ namespace Sealebrities
             trackerDirty = true;
             objectsDirty = true;
             talkIndex.Clear();
-            escortPlayer = -1;
-            escortDone = false;
             recNightReef = recCanoe = recMast = listenWhale = 0f;
+            for (int i = 0; i < recJob.Length; i++) recJob[i] = 0f;
+            rumourTalks = 0;
             holdObj = null;
             holdT = 0f;
             deliveringCarry = null;
         }
 
         // ================================================================ HOST think
+        /// Screenshots / tests: the schedules pause (NPCs stay where a test placed them).
+        public static bool FreezeSchedules;
+
         void HostThink()
         {
+            if (FreezeSchedules) return;
             ThinkPrologue();
             ThinkHorst();
             ThinkWanda();
             ThinkFin();
             ThinkRivals();
             ThinkVillage();
-            ThinkEscort();
+            ThinkHermits();
+            ThinkSabotage();
             TickOffers();
             markerTimer -= 0.1f;
             if (markerTimer <= 0f) { markerTimer = 0.5f; ThinkMarkers(); ThinkQuestTimers(); ThinkSoundClues(); }
@@ -54,10 +59,25 @@ namespace Sealebrities
         {
             trackerDirty = true;
             objectsDirty = true;
+            LocalMorningCrafts(day);   // every machine: each player's own backpack (fish trap, harvest)
             if (!Net.HasAuthority || !InGame) return;
             MissionsNewDay();
             RivalsNewDay();
+            SabotageNewDay();
+            Hermits.NewDay();
             EnsureResearchOffers(true);
+        }
+
+        /// Every machine: a dive site unlocked (the banner comes from Progression) → Gus calls (Q42: only now, never
+        /// before), the wreck also opens the volcano island.
+        void OnSiteUnlocked(DiveSite site)
+        {
+            if (site == null || !InGame) return;
+            string pre = "gus.site." + site.id;
+            if (DialogueDatabase.Seq(pre).Count > 0) Radio(NpcDatabase.Gus, pre, pre);
+            if (site.id == VolcanoGate.RequiredSite)
+                GameEvents.RaiseNotify(NotifyKind.Story, Loc.Tr("Die Strömung am Vulkan lässt nach", "The current at the volcano eases"), Loc.Tr("Vulkaninsel", "Volcano Isle"));
+            trackerDirty = true;
         }
 
         // ================================================================ talk routing (HOST)
@@ -73,21 +93,24 @@ namespace Sealebrities
             if (id == NpcDatabase.Horst)
             {
                 if (prologueActive) return;
+                if (a.Motion == NpcMotion.Lie) { WakeHorst(a); Talk(a, "horst.gag.awake"); return; }
                 if (TutorialRunning)
                 {
                     int beat = BeatFor(S.questIndex);
                     if (!StoryFlags.Has(NpcKeys.Beat(beat))) { PlayBeat(a, beat); return; }
                 }
-                if (EscortTalk(fromId, a)) return;
+            }
+            // round 3: the hermits – wary / furious ones shoo or warn, calm ones take hand-ins, friends give jobs
+            if (NpcDatabase.IsHermit(id))
+            {
+                int band = Hermits.Band(Hermits.Mood(id));
+                if (band >= 2 && SideQuestHandIn(fromId, a, carried)) return;
+                HermitTalk(fromId, a);
+                return;
             }
             if (id == NpcDatabase.Toni && ToniTalk(fromId, a, carried)) return;
             if (SideQuestHandIn(fromId, a, carried)) return;
             if (OfferSideQuest(a)) return;
-            if (id == NpcDatabase.Pearl && !StoryFlags.Has(NpcKeys.PearlMet))
-            {
-                Talk(a, "pearl.first", () => { StoryFlags.Set(NpcKeys.PearlMet); StoryFlags.Set(StoryKeys.NightOfTheEye); });
-                return;
-            }
             if (id == NpcDatabase.Fin && !StoryFlags.Has(NpcKeys.FinMet))
             {
                 Talk(a, "fin.first", () => { StoryFlags.Set(NpcKeys.FinMet); EnsureResearchOffers(true); });
@@ -132,37 +155,51 @@ namespace Sealebrities
             }
         }
 
+        int rumourTalks;
+
         void SmallTalk(NpcActor a)
         {
             string id = a.Id;
-            // clue lines first (L.6) – once each, then the normal rotation
-            string clue = ClueFor(id);
-            if (clue != null) { Talk(a, clue); return; }
             string line = null;
             switch (id)
             {
-                case NpcDatabase.Horst: line = HorstSmallTalk(); break;
+                case NpcDatabase.Horst:
+                {
+                    // mid-game rumour about the smoke in the west (the camp stays hidden until somebody finds it)
+                    var s = S;
+                    if (s != null && s.day >= 3 && !StoryFlags.Has(StoryKeys.HermitCampFound) && !StoryFlags.Has(NpcKeys.CampRumour) && ++rumourTalks >= 2)
+                    {
+                        StoryFlags.Set(NpcKeys.CampRumour);
+                        a.PlayGesture(NpcGesture.Point);
+                        Talk(a, "horst.rumour");
+                        return;
+                    }
+                    // Lantern Evening: where to watch the hermits' ritual
+                    if (s != null && StoryRules.IsLanternDay(s.day) && Hour >= 16f && Hour < 22f && lanternToldDay != s.day) { lanternToldDay = s.day; Talk(a, "horst.lantern"); return; }
+                    // every third talk a clue (map pieces, chests, curiosities …) instead of small talk
+                    if (++horstClueTalks % 3 == 0)
+                    {
+                        string clue = NpcClues.Pick(id, true);
+                        if (clue != null) { Talk(a, clue); return; }
+                    }
+                    line = HorstSmallTalk();
+                    break;
+                }
                 case NpcDatabase.Fin: line = FinSmallTalk(); break;
-                case NpcDatabase.Lio:
-                    if (VillageCrateWaiting()) { line = "lio.crate"; break; }
-                    line = Rotate(id, "lio.talk"); break;
                 case NpcDatabase.Chad: case NpcDatabase.Brad: line = Rotate(id, "rival.visit"); break;
-                case NpcDatabase.Weaver1: line = "v.greet.1"; break;
-                case NpcDatabase.Weaver2: line = "v.greet.2"; break;
-                case NpcDatabase.Fisher1: line = "v.greet.3"; break;
-                case NpcDatabase.Fisher2: line = "v.greet.4"; break;
-                case NpcDatabase.Teen: line = "v.greet.5"; break;
-                case NpcDatabase.Grandpa: line = "v.greet.6"; break;
-                case NpcDatabase.Ada: line = Rotate(id, "ada.talk"); break;
-                case NpcDatabase.Juno:
-                    line = Village.IsLanternEvening ? Rotate("juno_l", "village.lantern") : Rotate(id, "juno.talk"); break;
-                case NpcDatabase.Pearl:
-                    if (StoryFlags.Has(NpcKeys.PearlLightStory) && NpcUtil.Hash01(NpcUtil.Day, 51) < 0.3f) { Talk(a, "pearl.afterP3"); return; }
-                    line = Rotate(id, "pearl.talk"); break;
+                case NpcDatabase.Toni:
+                {
+                    string clue = (++toniClueTalks % 2 == 0) ? NpcClues.Pick(id, true) : null;
+                    if (clue != null) { Talk(a, clue); return; }
+                    line = Rotate(id, "toni.talk");
+                    break;
+                }
                 default: line = Rotate(id, id + ".talk"); break;
             }
-            if (line != null) { if (id != NpcDatabase.Grandpa && id != NpcDatabase.Ada) a.PlayGesture(NpcGesture.Greet); Talk(a, line); }
+            if (line != null) { a.PlayGesture(NpcGesture.Nod); Talk(a, line); }
         }
+
+        int horstClueTalks, toniClueTalks, lanternToldDay = -1;
 
         string Rotate(string key, string prefix)
         {
@@ -171,46 +208,6 @@ namespace Sealebrities
             talkIndex.TryGetValue(key, out int i);
             talkIndex[key] = i + 1;
             return seq[i % seq.Count];
-        }
-
-        // ---- L.6 clue lines: (speaker, line id, secret key, condition)
-        string ClueFor(string npc)
-        {
-            switch (npc)
-            {
-                case NpcDatabase.Pearl:
-                    if (!StoryFlags.Has(NpcKeys.PearlMet)) return null;
-                    if (TryClue("lighthouse_top", "pearl.clue.top")) return "pearl.clue.top";
-                    if (TryClue("lighthouse_cellar", "pearl.clue.cellar")) return "pearl.clue.cellar";
-                    if (Progression.IsSiteUnlocked("kelp_forest") && TryClue("kelp_carving", "pearl.clue.kelp")) return "pearl.clue.kelp";
-                    if (Quests.IsDone("P2") && TryClue("village_loft", "pearl.clue.loft")) return "pearl.clue.loft";
-                    return null;
-                case NpcDatabase.Juno: return TryClue("waterfall", "juno.clue.falls") ? "juno.clue.falls" : null;
-                case NpcDatabase.Lio: return TryClue("ravine_piggy", "lio.clue.ravine") ? "lio.clue.ravine" : null;
-                case NpcDatabase.Toni:
-                    if (!StoryFlags.Has(StoryKeys.FogMap)) return null;
-                    if (Progression.IsSiteUnlocked("blue_drop") && TryClue("blue_buoy", "toni.clue.buoy")) return "toni.clue.buoy";
-                    if (TryClue("fog_archive", "toni.clue.archive")) return "toni.clue.archive";
-                    return null;
-            }
-            return null;
-        }
-
-        static bool TryClue(string secret, string line)
-        {
-            string flag = NpcKeys.CluePrefix + secret;
-            if (StoryFlags.Has(flag) || Collectibles.IsCollected("secret:" + secret)) return false;
-            StoryFlags.Set(flag);
-            return true;
-        }
-
-        bool VillageCrateWaiting()
-        {
-            var s = S;
-            if (s == null) return false;
-            for (int i = 0; i < s.deliveries.Count; i++)
-                if (s.deliveries[i] != null && s.deliveries[i].dropped && s.deliveries[i].Mishap == DeliveryMishap.Village) return true;
-            return false;
         }
 
         // ================================================================ side quests (HOST)
@@ -225,7 +222,8 @@ namespace Sealebrities
             if (!string.IsNullOrEmpty(d.needSite) && !Progression.IsSiteUnlocked(d.needSite)) return false;
             if (!string.IsNullOrEmpty(d.needQuest) && !Quests.IsDone(d.needQuest)) return false;
             if (!string.IsNullOrEmpty(d.needItem) && !s.ownedItems.Contains(d.needItem)) return false;
-            if (d.needVillage && !StoryFlags.Has(StoryKeys.VillageVisited)) return false;
+            // round 3: the hermits give jobs once the camp was found and the giver is a friend (GDD §20 Q4)
+            if (SideQuestDatabase.HermitGiver(d) && (!StoryFlags.Has(StoryKeys.HermitCampFound) || Hermits.Mood(d.giver) < Hermits.Friendly)) return false;
             if (d.id == "P3" && !StoryRules.IsLanternDay(s.day)) return false;
             return true;
         }
@@ -247,7 +245,8 @@ namespace Sealebrities
                 if (d.giver != a.Id || !Available(d)) continue;
                 if (Quests.ActiveSideCount >= Quests.MaxActiveSide)
                 {
-                    Talk(a, "horst.full", null, a.Id);
+                    // hermits show it with their hands (three fingers, then a shrug)
+                    Talk(a, NpcDatabase.IsHermit(a.Id) ? "hm.learn.no" : "horst.full", null, a.Id);
                     return true;
                 }
                 bool rivals = a.Id == NpcDatabase.Brad || a.Id == NpcDatabase.Chad;
@@ -293,15 +292,16 @@ namespace Sealebrities
                 trackerDirty = true;
                 return;
             }
+            bool hermit = NpcDatabase.IsHermit(a.Id);
             if (decline)
             {
-                Talk(a, a.Id == NpcDatabase.Horst ? "horst.later" : "sq.later.v", null, a.Id);
+                Talk(a, a.Id == NpcDatabase.Horst ? "horst.later" : hermit ? "sq.later.v" : "sq.later.n", null, a.Id);
                 return;
             }
             if (d == null) return;
             if (Quests.Start(d.id))
             {
-                Talk(a, a.Id == NpcDatabase.Horst ? "horst.accept" : "sq.accept.v", null, a.Id);
+                Talk(a, a.Id == NpcDatabase.Horst ? "horst.accept" : hermit ? "sq.accept.v" : "sq.accept.n", null, a.Id);
                 a.PlayGesture(NpcGesture.ThumbsUp);
                 GameEvents.RaiseNotify(NotifyKind.Quest, Loc.Tr("Neue Aufgabe", "New task"), d.Title);
                 // the pin is per player: only the accepting player's own line follows it
@@ -334,17 +334,15 @@ namespace Sealebrities
                 switch (st.kind)
                 {
                     case SqStep.Talk:
-                        // P2: E on Pearl starts the card night once – pressing E again while it runs must not restart it
-                        if (d.id == "P2") { if (!cardsRunning) StartCardNight(a); return true; }
                         CompleteSideQuest(d, a);
                         return true;
                     case SqStep.Bring:
-                        if (st.spot == "hangar" || st.spot == "v_boatshed") break;   // delivered at a drop zone, not to the giver
+                        if (st.spot == "hangar") break;   // delivered at a drop zone, not to the giver
                         string item = CarryModels.ItemOf(carried);
                         if (item == null || !ContainsItem(st.target, item)) break;
                         if (d.id == "A1" && Delivered(q) + 1 >= st.count && !HasFish(s, "mackerel", 2))
                         {
-                            Talk(a, "ada.needfish", null, a.Id);
+                            Talk(a, "hm.needfish", null, a.Id);
                             return true;
                         }
                         TakeCarried(fromId, carried);
@@ -481,12 +479,11 @@ namespace Sealebrities
             GameEvents.RaiseNotify(NotifyKind.Quest, Loc.Tr("Erledigt: ", "Done: ") + d.Title, chip);
             if (giver != null && giver.Present)
             {
-                giver.PlayGesture(NpcGesture.TaDa);
+                giver.PlayGesture(NpcDatabase.IsHermit(giver.Id) ? NpcGesture.Bow : NpcGesture.TaDa);
                 Talk(giver, d.EndSeq, null, giver.Id);
-                if (d.id == "P1") TalkMore(giver, "pearl.afterP1");
-                if (d.id == "P3") TalkMore(giver, "pearl.afterP3");
-                if (d.id == "L1") giver.PlayGesture(NpcGesture.Selfie);
             }
+            // a finished hermit job warms the giver up a bit more
+            if (SideQuestDatabase.HermitGiver(d)) Hermits.AddMood(d.giver, 10);
             trackerDirty = true;
             objectsDirty = true;
         }
@@ -517,7 +514,7 @@ namespace Sealebrities
             for (int i = 0; i < all.Count && n > 0; i++)
             {
                 var sp = all[i];
-                if (sp.land || Journal.IsDiscovered(sp.id)) continue;
+                if (sp.land || sp.meme || Journal.IsDiscovered(sp.id)) continue;
                 string f = NpcKeys.DepthHintPrefix + sp.id;
                 if (StoryFlags.Has(f)) continue;
                 StoryFlags.Set(f);
@@ -542,77 +539,6 @@ namespace Sealebrities
                 else if (st.kind == SqStep.Lantern && Village.LanternReleasedToday)
                     AdvanceSideQuest(d, q, null);
             }
-        }
-
-        // ---- P2 card night: Horst escorted to the village after 18:00
-        int escortPlayer = -1;
-        bool escortDone;
-        float escortRepath;
-
-        bool EscortActive => escortPlayer >= 0 || cardsRunning;
-
-        bool EscortTalk(int fromId, NpcActor horst)
-        {
-            var q = Quests.Get("P2");
-            if (q == null || q.done || q.step != 0) return false;
-            if (Hour < 18f && Hour > 6f) { Talk(horst, "horst.cardsearly"); return true; }
-            escortPlayer = fromId;
-            Talk(horst, "horst.cards");
-            horst.PlayGesture(NpcGesture.Shrug);
-            return true;
-        }
-
-        void ThinkEscort()
-        {
-            var horst = Actor(NpcDatabase.Horst);
-            if (horst == null) return;
-            if (escortDone)
-            {
-                escortDone = false;
-                escortPlayer = -1;
-                var d = SideQuestDatabase.Get("P2");
-                CompleteSideQuest(d, Actor(NpcDatabase.Pearl));
-                return;
-            }
-            if (escortPlayer < 0 || cardsRunning) return;
-            var q = Quests.Get("P2");
-            if (q == null || q.done) { escortPlayer = -1; return; }
-            horst.SetPresent(true);
-            Vector3 meet = QuestSpots.Get("v_meeting");
-            if (q.step == 0)
-            {
-                if (NpcUtil.FlatDist(horst.Position, meet) < 14f && Hour >= 18f)
-                {
-                    Quests.SetProgress("P2", 1, 0);
-                    horst.GoTo(QuestSpots.Get("v_cards_h"), 2f);
-                    GameEvents.RaiseNotify(NotifyKind.Quest, Loc.Tr("Kartenabend", "Card Night"), Loc.Tr("Zu Perle", "To Pearl"));
-                    trackerDirty = true;
-                    return;
-                }
-                escortRepath -= 0.1f;
-                Vector3 target = PlayerPos(escortPlayer);
-                if (escortRepath <= 0f && NpcUtil.FlatDist(horst.Position, target) > 3f)
-                {
-                    escortRepath = 1f;
-                    horst.GoTo(target - (target - horst.Position).normalized * 2f, NpcUtil.FlatDist(horst.Position, target) > 12f ? 3.6f : 2.4f);
-                }
-            }
-        }
-
-        void StartCardNight(NpcActor pearl)
-        {
-            // only reached at P2 step 1 (Horst was escorted here). After a reload the escort/session fields are gone and
-            // Horst is back at the dock – place him at the card table instead of refusing (cardsRunning keeps him there).
-            var horst = Actor(NpcDatabase.Horst);
-            if (horst != null)
-            {
-                horst.SetPresent(true);
-                horst.Stop();
-                horst.Place(QuestSpots.Get("v_cards_h"), 270f);
-            }
-            cardsRunning = true;
-            cardsT = 0f;
-            Talk(pearl, "pearl.talk.2");
         }
 
         // ================================================================ Toni's chain (HOST, K.8)
@@ -780,24 +706,18 @@ namespace Sealebrities
                     }
                     else if (st.count > 1)
                     {
-                        if (!water) continue;
+                        // landmarks (W2) must be shot from the water; curiosities (H5) are species – any n of the list
+                        bool landmarks = st.target.StartsWith("lm_", StringComparison.Ordinal);
+                        if (landmarks && !water) continue;
                         string[] targets = st.target.Split(',');
                         bool any = false;
                         for (int k = 0; k < targets.Length; k++)
-                            if (tagSet.Contains(targets[k]) && !StoryFlags.Has(ObjFlag(d.id, k))) { StoryFlags.Set(ObjFlag(d.id, k)); any = true; }
+                            if ((tagSet.Contains(targets[k]) || species == targets[k]) && !StoryFlags.Has(ObjFlag(d.id, k))) { StoryFlags.Set(ObjFlag(d.id, k)); any = true; }
                         if (any) CountFlagsAndAdvance(d, q, st, targets.Length);
                     }
                     else if (species == st.target && depth >= st.a) AdvanceSideQuest(d, q, null);
                 }
-                else if (st.kind == SqStep.Selfie && tagSet.Contains("selfie") && tagSet.Contains("npc:" + st.target)) AdvanceSideQuest(d, q, null);
-            }
-            // ---- Lio guards a mishap crate in the village: pay with a selfie (L.12)
-            if (tagSet.Contains("selfie") && tagSet.Contains("npc:" + NpcDatabase.Lio) && VillageCrateWaiting())
-            {
-                StoryFlags.Set("lio_selfie:" + s.day);
-                LioSelfieTaken?.Invoke();
-                var lio = Actor(NpcDatabase.Lio);
-                if (lio != null) { lio.PlayGesture(NpcGesture.TaDa); Talk(lio, "lio.cratedone"); }
+                else if (st.kind == SqStep.Selfie && tagSet.Contains("selfie") && (tagSet.Contains("npc:" + st.target) || species == st.target)) AdvanceSideQuest(d, q, null);
             }
             // ---- research photos
             var all = ResearchDatabase.All;
@@ -817,9 +737,6 @@ namespace Sealebrities
             if (tagSet.Contains("selfie") && species == "green_turtle") Achievements.Unlock("gerald_selfie");
         }
 
-        /// Raised on the host when the village kids got their selfie (L.12 mishap "village") – the Boat module may
-        /// release the crate (also readable as StoryFlags "lio_selfie:&lt;day&gt;").
-        public static event Action LioSelfieTaken;
 
         void HostClip(int fromId, string species, string flags, float seconds)
         {
@@ -836,6 +753,8 @@ namespace Sealebrities
                 var d = SideQuestDatabase.Get(q.id);
                 if (d == null || q.step >= d.steps.Length) continue;
                 var st = d.steps[q.step];
+                // a selfie CLIP with the animal counts for a selfie job too (F1 Gerald)
+                if (st.kind == SqStep.Selfie && st.target == species && tagSet.Contains("selfie")) { AdvanceSideQuest(d, q, null); continue; }
                 if (st.kind != SqStep.Film) continue;
                 int k = IndexInCsv(st.target, species);
                 if (k < 0) continue;
@@ -855,6 +774,7 @@ namespace Sealebrities
                 ResearchAdvance(r, 1);
             }
             if (species == "green_turtle") RivalGeraldClip(seconds, quality);
+            RivalStealClip(fromId, species, quality);
         }
 
         void HostRecording(string what, float seconds)
@@ -991,6 +911,134 @@ namespace Sealebrities
             }
         }
 
+        // ================================================================ round 3: hand-ins from the backpack
+        // Since round 3 everything picked up lands in the backpack (coconuts from the palms, grilled fish from the fire,
+        // driftwood …). A Bring step whose item is a backpack item is handed in from there – no carrying one by one.
+
+        /// A backpack item (food / material) – not a carried quest prop ("q:<item>").
+        static bool BackpackItem(string item) => !string.IsNullOrEmpty(item) && ItemDatabase.Get(item) != null;
+
+        static readonly Dictionary<SqStepDef, string[]> csvParts = new Dictionary<SqStepDef, string[]>();
+
+        /// The csv target of a step split once (prompt checks run every frame – no allocation).
+        static string[] Parts(SqStepDef st)
+        {
+            if (!csvParts.TryGetValue(st, out var p)) { p = string.IsNullOrEmpty(st.target) ? new string[0] : st.target.Split(','); csvParts[st] = p; }
+            return p;
+        }
+
+        /// What the giver `a` still needs from the LOCAL backpack: quest id + item + count (false = nothing).
+        static bool BackpackNeed(NpcActor a, out string quest, out string item, out int n)
+        {
+            quest = null; item = null; n = 0;
+            var s = S;
+            if (a == null || s == null) return false;
+            for (int i = 0; i < s.sideQuests.Count; i++)
+            {
+                var q = s.sideQuests[i];
+                if (q == null || q.done) continue;
+                var d = SideQuestDatabase.Get(q.id);
+                if (d == null || q.step >= d.steps.Length || d.giver != a.Id) continue;
+                var st = d.steps[q.step];
+                if (st.kind != SqStep.Bring || st.spot == "hangar") continue;
+                var parts = Parts(st);
+                for (int k = 0; k < parts.Length; k++)
+                {
+                    string it = parts[k];
+                    if (!BackpackItem(it)) continue;
+                    int need;
+                    if (q.id == Quests.ToniChain)
+                    {
+                        if (q.step != 1) continue;
+                        bool has = it == FoodDatabase.Coconut ? StoryFlags.Has(ToniCoconut) : it == FoodDatabase.GrilledFish ? StoryFlags.Has(ToniFish) : true;
+                        need = has ? 0 : 1;
+                    }
+                    else need = st.count - q.progress;
+                    int have = Backpack.Count(it);
+                    if (need <= 0 || have <= 0) continue;
+                    quest = q.id; item = it; n = Mathf.Min(need, have);
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// LOCAL: the prompt shows „Übergeben“ when the local backpack holds what this NPC is waiting for.
+        public static bool BackpackHandInReady(NpcActor a) => a != null && BackpackNeed(a, out _, out _, out _);
+
+        /// LOCAL (E on the giver): takes the items out of the own backpack and hands them in through the host.
+        static bool TryBackpackHandIn(NpcActor a)
+        {
+            if (!BackpackNeed(a, out string quest, out string item, out int n)) return false;
+            var q = Quests.Get(quest);
+            var d = SideQuestDatabase.Get(quest);
+            // A1: the two mackerel have to be in the shared cooler before the last coconut (else the items stay)
+            if (quest == "A1" && q != null && d != null && q.progress + n >= d.steps[q.step].count && !HasFish(S, "mackerel", 2))
+            {
+                NpcNet.Request("handin", a.Id, quest + "|" + item, "0");
+                return true;
+            }
+            if (!Backpack.Remove(item, n)) return false;
+            NpcNet.Request("handin", a.Id, quest + "|" + item, NpcNet.I(n));
+            return true;
+        }
+
+        /// HOST: a backpack hand-in (n = 0: only the reason why not).
+        void HostHandIn(int fromId, NpcActor a, string questItem, int n)
+        {
+            if (a == null || string.IsNullOrEmpty(questItem)) return;
+            int bar = questItem.IndexOf('|');
+            if (bar <= 0) return;
+            string quest = questItem.Substring(0, bar), item = questItem.Substring(bar + 1);
+            var q = Quests.Get(quest);
+            var s = S;
+            if (q == null || q.done || s == null) { if (n > 0) GiveTo(fromId, item, n); return; }
+            a.FacePoint = PlayerPos(fromId);
+            if (quest == Quests.ToniChain)
+            {
+                if (q.step != 1) { if (n > 0) GiveTo(fromId, item, n); return; }
+                if (item == FoodDatabase.Coconut) StoryFlags.Set(ToniCoconut);
+                else if (item == FoodDatabase.GrilledFish) StoryFlags.Set(ToniFish);
+                bool nut = StoryFlags.Has(ToniCoconut), fish = StoryFlags.Has(ToniFish);
+                if (!fish && s.fishInventory.Count > 0 && TakeAnyFish(s) != null) { fish = true; StoryFlags.Set(ToniFish); Talk(a, "toni.t2sushi"); }
+                if (nut && fish)
+                {
+                    Quests.SetProgress(Quests.ToniChain, 2, 0);
+                    StoryFlags.Set(StoryKeys.ToniT2);
+                    a.PlayGesture(NpcGesture.TaDa);
+                    TalkMore(a, "toni.t2done");
+                }
+                else { Quests.SetProgress(Quests.ToniChain, 1, (nut ? 1 : 0) + (fish ? 1 : 0)); TalkMore(a, "toni.t2need"); }
+                trackerDirty = true;
+                objectsDirty = true;
+                return;
+            }
+            var d = SideQuestDatabase.Get(quest);
+            if (d == null || q.step >= d.steps.Length || d.steps[q.step].kind != SqStep.Bring) { if (n > 0) GiveTo(fromId, item, n); return; }
+            var st = d.steps[q.step];
+            int delivered = Delivered(q) + n;
+            if (quest == "A1" && delivered >= st.count && !HasFish(s, "mackerel", 2))
+            {
+                if (n > 0) GiveTo(fromId, item, n);
+                Talk(a, "hm.needfish", null, a.Id);
+                return;
+            }
+            if (n <= 0) return;
+            a.PlayGesture(NpcGesture.ThumbsUp);
+            if (delivered >= st.count)
+            {
+                if (quest == "A1") RemoveFish(s, "mackerel", 2);
+                AdvanceSideQuest(d, q, a);
+            }
+            else
+            {
+                Quests.SetProgress(d.id, q.step, delivered);
+                GameEvents.RaiseNotify(NotifyKind.Quest, d.Title, delivered + "/" + st.count);
+            }
+            trackerDirty = true;
+            objectsDirty = true;
+        }
+
         // ================================================================ markers above heads (HOST)
         void ThinkMarkers()
         {
@@ -1007,6 +1055,8 @@ namespace Sealebrities
             var s = S;
             if (s == null || prologueActive) return 0;
             string id = a.Id;
+            // round 3: the hermits show nothing until the camp was found (the phone map must not give it away)
+            if (NpcDatabase.IsHermit(id) && !StoryFlags.Has(StoryKeys.HermitCampFound)) return 0;
             // ready to hand in → "?"
             for (int i = 0; i < s.sideQuests.Count; i++)
             {
@@ -1018,7 +1068,7 @@ namespace Sealebrities
                 if (!mine) continue;
                 var st = d.steps[q.step];
                 if (st.kind == SqStep.Talk || st.kind == SqStep.Choice) return 2;
-                if (st.kind == SqStep.Bring && AnyCarrying(st.target)) return 2;
+                if (st.kind == SqStep.Bring && st.spot != "hangar" && (AnyCarrying(st.target) || BackpackHandInReady(a))) return 2;
             }
             if (id == NpcDatabase.Toni)
             {
@@ -1035,13 +1085,8 @@ namespace Sealebrities
             }
             // story beats → "!"
             if (id == NpcDatabase.Horst && TutorialRunning && !StoryFlags.Has(NpcKeys.Beat(BeatFor(s.questIndex)))) return 1;
-            if (id == NpcDatabase.Pearl && !StoryFlags.Has(NpcKeys.PearlMet)) return 1;
             if (id == NpcDatabase.Fin && !StoryFlags.Has(NpcKeys.FinMet)) return 1;
-            if (id == NpcDatabase.Horst)
-            {
-                var p2 = Quests.Get("P2");
-                if (p2 != null && !p2.done && p2.step == 0 && Hour >= 18f) return 1;
-            }
+            if (id == NpcDatabase.HLeader && Hermits.IsFriendly(id) && !StoryFlags.Has(NpcKeys.HermitsAccepted)) return 1;
             // a side quest to give → "!"
             var all = SideQuestDatabase.All;
             for (int i = 0; i < all.Length; i++)
@@ -1188,10 +1233,9 @@ namespace Sealebrities
             for (int i = 0; i < 3; i++) Collect("P1", i, "peg", ObjKind.Collect, "Gezeitenpflock nehmen", "Take the tide peg");
             for (int i = 0; i < 5; i++) Collect("M1", i, "driftwood", ObjKind.Collect, "Treibholz sammeln", "Collect driftwood");
             Pick("M2", 0, "paddle", "q_paddle", "Gus' Paddel nehmen", "Take Gus's paddle");
-            Add("drop:boatshed", "v_boatshed", "pallet", ObjKind.Drop, "Paddel ablegen", "Put the paddle down", () => SqStepIs("M2", 0) && LocalCarrying("paddle"));
             for (int i = 0; i < 3; i++) Collect("T1", i, "ghostnet", ObjKind.Hold, "Netz lösen (halten)", "Cut the net (hold)").hold = 5f;
             for (int i = 0; i < 6; i++) Collect("A2", i, "seagrape", ObjKind.Collect, "Seetrauben pflücken", "Pick sea grapes");
-            Pick("L1", 0, "kite", "q_kite", "Lios Drachen nehmen", "Take Lio's kite");
+            Pick("L1", 0, "kite", "q_kite", "Horsts Drachen nehmen", "Take Horst's kite");
             Collect("L3", 0, "liochest", ObjKind.Collect, "Schatz öffnen", "Open the treasure").spot = "q_liochest";
             Pick("N2", 0, "tape", "q_tape", "Das letzte Band nehmen", "Take the last tape");
             Pick("B1", 0, "selfie_stick", "q_selfie_stick", "Selfie-Stick nehmen", "Take the selfie stick");
@@ -1219,11 +1263,8 @@ namespace Sealebrities
                 }
             // ---- rivals R4: the sub's air valve
             Add("r4_valve", "r4_sub", "valve_sub", ObjKind.Use, "Luft abgeben (30 %)", "Give air (30 %)", () => StoryFlags.Has(NpcKeys.RivalR4Started) && !StoryFlags.Has(NpcKeys.RivalR4Rescued) && !StoryFlags.Has(NpcKeys.RivalR4Ignored)).offset = new Vector3(1.3f, 0f, -0.4f);
-            // ---- village: lantern stand, Ada's kiosk
+            // ---- the old jetty: the lantern stand on Lantern Evening (the hermits' ritual)
             Add("lantern_stand", "v_jetty", "lantern_stand", ObjKind.Use, "Laterne loslassen", "Release a lantern", () => Village.IsLanternEvening && !Village.LanternReleasedToday).offset = new Vector3(1.2f, 0f, 0.6f);
-            Add("kiosk:coconut_curry", "v_kiosk", "food:coconut_curry", ObjKind.Kiosk, null, null, () => KioskVisible("coconut_curry")).offset = new Vector3(-0.45f, 0.95f, 0f);
-            Add("kiosk:sea_grape_salad", "v_kiosk", "food:sea_grape_salad", ObjKind.Kiosk, null, null, () => KioskVisible("sea_grape_salad")).offset = new Vector3(0f, 0.95f, 0f);
-            Add("kiosk:ginger_fizz", "v_kiosk", "food:ginger_fizz", ObjKind.Kiosk, null, null, () => KioskVisible("ginger_fizz")).offset = new Vector3(0.45f, 0.95f, 0f);
         }
 
         ObjDef Add(string id, string spot, string model, ObjKind kind, string de, string en, Func<bool> visible)
@@ -1593,7 +1634,7 @@ namespace Sealebrities
 
         void HostDropZone(string zone)
         {
-            string quest = zone == "drop:hangar" ? "W1" : zone == "drop:boatshed" ? "M2" : null;
+            string quest = zone == "drop:hangar" ? "W1" : null;
             var q = Quests.Get(quest);
             var d = SideQuestDatabase.Get(quest);
             if (q == null || q.done || d == null || q.step >= d.steps.Length) return;
@@ -1721,7 +1762,8 @@ namespace Sealebrities
             if (gull != null && gull.Root.gameObject.activeSelf && InView(c, gull.Root.position, 30f)) Tag("guenther");
             if (InView(c, WorldLayout.Lighthouse + Vector3.up * 18f, 280f)) Tag("lm_lighthouse");
             if (InView(c, WorldLayout.Hut + Vector3.up * 3f, 220f)) Tag("lm_hut");
-            if (InView(c, WorldLayout.Village + Vector3.up * 3f, 260f)) Tag("lm_village");
+            Vector3 pad = WorldInfo.HelipadPosition != Vector3.zero ? WorldInfo.HelipadPosition : WorldLayout.Helipad;
+            if (InView(c, pad + Vector3.up * 1.5f, 260f, false)) Tag("lm_helipad");
             int lan = LanternsInView(c);
             if (lan > 0) Tag("lanterns:" + lan);
             if (ChumActive && vehicles.Length > VYacht && vehicles[VYacht].Present && InView(c, vehicles[VYacht].Pos + Vector3.up * 2f, 180f, false)) Tag("yacht_chum");
@@ -1779,7 +1821,14 @@ namespace Sealebrities
                     for (int i = VCanoe1; i <= VCanoe2 && i < vehicles.Length; i++)
                         if (vehicles[i].Present && InView(c, vehicles[i].Pos + Vector3.up * 0.6f, 90f, false)) { recCanoe += dt * 0.5f; }
                 if (MissionActive("M4") && InView(c, QuestSpots.Get("m4_mast") + Vector3.up * 5f, 22f, false)) recMast += dt;
+                // round 3: the funny filming jobs (Horst asleep, the camp goats, Kokos, the sunset greeting, the chopper)
+                jobScan -= dt;
+                if (jobScan <= 0f) { jobScan = 0.5f; ScanFilmingJobs(c, me); }
+                for (int i = 0; i < recJob.Length; i++) if (jobOk[i]) recJob[i] += dt;
             }
+            else for (int i = 0; i < jobOk.Length; i++) jobOk[i] = false;
+            for (int i = 0; i < recJob.Length; i++)
+                if (recJob[i] >= 2f) { NpcNet.Request("evt", "rec", JobTargets[i], NpcNet.F(recJob[i])); recJob[i] = 0f; }
             if (recNightReef >= 5f) { NpcNet.Request("evt", "rec", "night_reef", NpcNet.F(recNightReef)); recNightReef = 0f; }
             if (recCanoe >= 4f) { NpcNet.Request("evt", "rec", "canoe", NpcNet.F(recCanoe)); recCanoe = 0f; }
             if (recMast >= 5f) { NpcNet.Request("evt", "rec", "mast", NpcNet.F(recMast)); recMast = 0f; ShowEyeShadow(); }
@@ -1802,6 +1851,76 @@ namespace Sealebrities
             }
             if (whaleNear) listenWhale += dt;
             if (listenWhale >= 5f) { NpcNet.Request("evt", "listen", "humpback", NpcNet.F(listenWhale)); listenWhale = 0f; }
+        }
+
+        // ---- round 3: Record conditions of the filming jobs (checked twice a second while the camera records)
+        static readonly string[] JobTargets = { "npc_sleep:" + NpcDatabase.Horst, "goats", "kokos", "ritual", "chopper" };
+        readonly float[] recJob = new float[5];
+        readonly bool[] jobOk = new bool[5];
+        float jobScan;
+        HeliChopper chopperCache;
+        float chopperScan;
+
+        bool JobActive(string target)
+        {
+            var s = S;
+            if (s == null) return false;
+            for (int i = 0; i < s.sideQuests.Count; i++)
+            {
+                var q = s.sideQuests[i];
+                if (q == null || q.done) continue;
+                var d = SideQuestDatabase.Get(q.id);
+                if (d == null || q.step >= d.steps.Length) continue;
+                var st = d.steps[q.step];
+                if (st.kind == SqStep.Record && st.target == target) return true;
+            }
+            return false;
+        }
+
+        void ScanFilmingJobs(Camera c, Vector3 me)
+        {
+            for (int i = 0; i < jobOk.Length; i++) jobOk[i] = false;
+            // 0 Horst asleep in his hammock (H4 ASMR)
+            if (JobActive(JobTargets[0]))
+            {
+                var h = Actor(NpcDatabase.Horst);
+                jobOk[0] = h != null && h.Present && h.Motion == NpcMotion.Lie && InView(c, h.Position + Vector3.up * 0.4f, 12f, false);
+            }
+            // 1 at least two camp goats in frame (P2 goat yoga)
+            if (JobActive(JobTargets[1]))
+            {
+                int n = 0;
+                var list = CreatureRegistry.Active;
+                for (int i = 0; i < list.Count && n < 2; i++)
+                {
+                    var cr = list[i];
+                    if (cr == null || cr.Species == null || cr.Species.id != "goat") continue;
+                    if ((cr.Position - me).sqrMagnitude > 25f * 25f) continue;
+                    if (InView(c, cr.Position + Vector3.up * 0.4f, 25f, false)) n++;
+                }
+                jobOk[1] = n >= 2;
+            }
+            // 2 Kokos, the coconut buddy on his crate (C1)
+            if (JobActive(JobTargets[2]) && PropInfo.Spot("camp_map_piece", out var kp))
+                jobOk[2] = InView(c, kp + Vector3.up * 0.55f, 9f, false);
+            // 3 the sunset greeting: ≥ 3 hermits in frame at the shrine, 18–19 h (C2)
+            if (JobActive(JobTargets[3]) && Between(Hour, 18f, 19.2f))
+            {
+                int n = 0;
+                for (int i = 0; i < hermitRt.Length; i++)
+                {
+                    var a = hermitRt[i] != null ? hermitRt[i].a : null;
+                    if (a != null && a.Present && InView(c, a.Position + Vector3.up * 1.2f, 25f, false)) n++;
+                }
+                jobOk[3] = n >= 3;
+            }
+            // 4 the delivery chopper in flight (W3)
+            if (JobActive(JobTargets[4]))
+            {
+                chopperScan -= 0.5f;
+                if (chopperCache == null && chopperScan <= 0f) { chopperScan = 2f; chopperCache = FindAnyObjectByType<HeliChopper>(); }
+                jobOk[4] = chopperCache != null && chopperCache.isActiveAndEnabled && InView(c, chopperCache.transform.position, 140f, false);
+            }
         }
 
         // ---- M4: the Big Eye's shadow passes behind the mast (scripted, unfilmable)
@@ -1898,6 +2017,18 @@ namespace Sealebrities
                 id = "story:r2";
                 line = Loc.Tr("Gerald 20 s filmen + ehrlich hochladen", "Film Gerald 20 s + honest upload");
             }
+            else
+            {
+                // round 3 sabotage: the brothers copied a subject today – film it better
+                string stolen = StolenToday();
+                if (stolen != null)
+                {
+                    var sp = SpeciesDatabase.Get(stolen);
+                    id = "story:steal";
+                    line = Loc.Tr("Besser filmen als die Kopie: ", "Out-film the copy: ") + (sp != null ? sp.Name : stolen);
+                    kind = NotifyKind.Warning;
+                }
+            }
             QuestTracker.SetEntry(QuestSource.Story, id, line, prog, target, kind);
         }
 
@@ -1930,7 +2061,7 @@ namespace Sealebrities
                 case SqStep.Record: prog = pick.progress + "/" + Mathf.RoundToInt(st.a) + " s"; break;
             }
             Vector3? target = null;
-            if (st.kind == SqStep.Talk || st.kind == SqStep.Choice || (st.kind == SqStep.Bring && LocalCarrying(FirstItem(st.target)) && st.spot != "hangar" && st.spot != "v_boatshed"))
+            if (st.kind == SqStep.Talk || st.kind == SqStep.Choice || (st.kind == SqStep.Bring && st.spot != "hangar" && (LocalCarrying(FirstItem(st.target)) || BackpackHandInReady(Actor(d.giver)))))
             {
                 var g = Actor(d.giver);
                 if (g != null && g.Present) target = g.Position;

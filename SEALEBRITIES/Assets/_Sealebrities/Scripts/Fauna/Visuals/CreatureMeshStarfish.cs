@@ -14,6 +14,7 @@ namespace Sealebrities
         public static void Build(CreatureMeshContext ctx)
         {
             var s = ctx.S;
+            if ((s.variant ?? "") == "crinoid") { CreatureMeshFossils.Crinoid(ctx); return; }   // round 3: sea lily
             bool thorns = (s.variant ?? "") == "thorns";
             var b = ctx.B;
             ctx.Layout = CreatureMeshLayout.Custom;

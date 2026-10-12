@@ -49,9 +49,23 @@ namespace Sealebrities
         static readonly float[] PrX, PrZ, PrR, PrTop;
         static readonly float RdX0, RdZ0, RdX1, RdZ1;
         static float[] LdX, LdZ, LdR, LdTop;     // filled last in the static constructor (the tops need the finished ground)
+        // round 3: hermit camp hollow + its game trail, volcano island
+        static readonly float CampX, CampZ, CampEX, CampEZ, CampLX, CampLZ;
+        static readonly float CtAX, CtAZ, CtAY, CtBX, CtBZ, CtBY, CtCX, CtCZ, CtCY;
+        static readonly float VolX, VolZ, VolBX, VolBZ, VolLX, VolLZ;
+        const float VolReach = 215f;
 
         static WorldHeightField()
         {
+            CampX = WorldLayout.HermitCamp.x; CampZ = WorldLayout.HermitCamp.z;
+            CampEX = WorldFeatures.CampEntranceDir.x; CampEZ = WorldFeatures.CampEntranceDir.z;
+            CampLX = WorldFeatures.CampLookout.x; CampLZ = WorldFeatures.CampLookout.z;
+            var ta = WorldFeatures.CampTrailStart; var tb = WorldFeatures.CampTrailBend; var tc = WorldFeatures.CampTrailGap;
+            CtAX = ta.x; CtAZ = ta.z; CtAY = ta.y; CtBX = tb.x; CtBZ = tb.z; CtBY = tb.y; CtCX = tc.x; CtCZ = tc.z; CtCY = tc.y;
+            VolX = WorldLayout.VolcanoIsland.x; VolZ = WorldLayout.VolcanoIsland.z;
+            VolBX = WorldFeatures.VolcanoBeachDir.x; VolBZ = WorldFeatures.VolcanoBeachDir.z;
+            VolLX = WorldFeatures.VolcanoLavaDir.x; VolLZ = WorldFeatures.VolcanoLavaDir.z;
+
             HutX = WorldLayout.Hut.x; HutZ = WorldLayout.Hut.z;
             HeliX = WorldLayout.Helipad.x; HeliZ = WorldLayout.Helipad.z;
             DockStartX = WorldLayout.DockStart.x; DockEndX = WorldLayout.DockEnd.x; DockZ = WorldLayout.DockEnd.z;
@@ -239,7 +253,16 @@ namespace Sealebrities
                 h = Lerp(h, -FogDepth(x, z, dFog), 1f - SmoothStep(Fog.r, Fog.r + 110f, dFog));
 
             // landmark islands next to the outer sites (they only ever raise the ground)
-            if (r > 400f) h = MiniIslands(x, z, h);
+            if (r > 400f)
+            {
+                h = MiniIslands(x, z, h);
+                // round 3: the volcano island (black-sand shelf on the west, steep drop-off on the east)
+                float dvx = x - VolX, dvz = z - VolZ;
+                if (dvx * dvx + dvz * dvz < VolReach * VolReach) h = Volcano(x, z, h);
+                // round 3: the "Urzeit-Schlund" east of the volcano – the prehistoric monster's lair (only lowers)
+                float dax = x - WorldLayout.VolcanoAbyss.x, daz = z - WorldLayout.VolcanoAbyss.z;
+                if (dax * dax + daz * daz < (WorldLayout.VolcanoAbyssRadius + 8f) * (WorldLayout.VolcanoAbyssRadius + 8f)) h = Abyss(x, z, h);
+            }
 
             return Clamp(h, MinHeight, MaxHeight);
         }
@@ -270,6 +293,15 @@ namespace Sealebrities
             // the flanks of the landmark islands and sea stacks are bare rock
             if (r > 400f)
             {
+                // round 3: volcano – black lava rock everywhere except the sandy shelf in front of the beach
+                float vd = Dist(x, z, VolX, VolZ);
+                if (vd < VolReach)
+                {
+                    float facing = vd > 1e-3f ? ((x - VolX) * VolBX + (z - VolZ) * VolBZ) / vd : 0f;
+                    float sand = SmoothStep(0.35f, 0.8f, facing) * (1f - SmoothStep(WorldLayout.VolcanoShoreRadius + 30f, WorldLayout.VolcanoShoreRadius + 60f, vd));
+                    float boulders = SmoothStep(0.1f, 0.45f, WorldNoise.Perlin(x * 0.06f + 13f, z * 0.06f - 4f));
+                    rock = MathF.Max(rock, (1f - SmoothStep(VolReach - 40f, VolReach, vd)) * MathF.Max(1f - sand, 0.55f * boulders));
+                }
                 for (int i = 0; i < MiX.Length; i++)
                 {
                     float d = Dist(x, z, MiX[i], MiZ[i]);
@@ -304,9 +336,21 @@ namespace Sealebrities
         public static GroundHint Hint(float x, float z, float h)
         {
             float r = MathF.Sqrt(x * x + z * z);
-            if (r > 400f) return MiniIslandHint(x, z, h);
+            if (r > 400f)
+            {
+                float dvx = x - VolX, dvz = z - VolZ;
+                if (dvx * dvx + dvz * dvz < 110f * 110f) return VolcanoHint(x, z, h);
+                return MiniIslandHint(x, z, h);
+            }
             if (r > IslandOuter) return GroundHint.None;
             float dither = Hash01(x, z, 5151);
+
+            // round 3: the hermit camp – a trampled earth floor, its fire ring area, the rocky lookout
+            {
+                float dc = Dist(x, z, CampX, CampZ);
+                if (dc < WorldLayout.HermitCampRadius - 2.5f + 3f * dither && h > WorldFeatures.CampFloorY - 1f) return GroundHint.Soil;
+                if (Dist(x, z, CampLX, CampLZ) < 3.2f + 1.5f * dither) return GroundHint.Rock;
+            }
 
             // tide pool rock platform
             float tide = TideMask(x, z);
@@ -541,7 +585,9 @@ namespace Sealebrities
                 float prof = top * (1f - SmoothStep(rr * 0.45f, rr, d)) - 0.6f - 3.5f * SmoothStep(rr * 0.85f, rr + 8f, d);
                 h = MathF.Max(h, prof);
             }
-            return Details(x, z, h);
+            h = Details(x, z, h);
+            // round 3: the hidden hermit camp hollow and its game trail
+            return CampHollow(x, z, h);
         }
 
         /// Swimming hole under the swim raft (L.5 detail spot 3): the dock beach is only ~0.7 m deep there, the diving
@@ -553,7 +599,7 @@ namespace Sealebrities
             if (d2 > 16f * 16f || h > 0.5f) return h;
             // an irregular, sandy hollow (not a round bowl)
             float wob = 1f + 0.22f * RingNoise(dx, dz, 1.6f, 7.7f) + 0.1f * WorldNoise.Perlin(x * 0.3f, z * 0.3f);
-            float hole = -3.0f * (1f - SmoothStep(2.5f * wob, 13.5f * wob, MathF.Sqrt(d2)));
+            float hole = -3.7f * (1f - SmoothStep(2.5f * wob, 13.5f * wob, MathF.Sqrt(d2)));
             return hole < h ? hole : h;
         }
 
@@ -839,6 +885,159 @@ namespace Sealebrities
                 return Hash01(x, z, 7373 + i) < rocky ? GroundHint.Rock : GroundHint.None;
             }
             return GroundHint.None;
+        }
+
+        // ------------------------------------------------------------------ round 3: hermit camp
+        /// The hidden camp: a flat, trampled hollow (HermitCampRadius) in the jungle plateau, ringed by a wooded bank
+        /// 3–5 m high with a narrow gap toward the game trail (east) and a notch to the sea lookout (west); the trail is a
+        /// narrow cut from the grotto clearing (no dirt strip – the props only add cairns and hermit marks).
+        static float CampHollow(float x, float z, float h)
+        {
+            h = CampTrail(x, z, h);
+            float dx = x - CampX, dz = z - CampZ;
+            float d2 = dx * dx + dz * dz;
+            const float reach = WorldLayout.HermitCampRimRadius + 6f;
+            if (d2 > reach * reach) return h;
+            float d = MathF.Sqrt(d2);
+            float inv = d > 1e-3f ? 1f / d : 0f;
+            float r0 = WorldLayout.HermitCampRadius * (1f + 0.1f * RingNoise(dx, dz, 1.4f, 3.3f));
+            float r1 = r0 + 6.5f;
+            float floorY = WorldFeatures.CampFloorY + 0.16f * WorldNoise.Perlin(x * 0.27f + 3f, z * 0.27f - 1f);
+            float rimH = 3.6f + 1.3f * RingNoise(dx, dz, 2.2f, 8.1f) + 0.4f * WorldNoise.Perlin(x * 0.4f, z * 0.4f + 2f);
+            // the gap toward the game trail and the notch toward the lookout
+            float toGap = (dx * CampEX + dz * CampEZ) * inv;
+            float lx = CampLX - CampX, lz = CampLZ - CampZ;
+            float ll = MathF.Sqrt(lx * lx + lz * lz);
+            float toLook = ll > 1e-3f ? (dx * lx + dz * lz) * inv / ll : 0f;
+            float open = MathF.Max(SmoothStep(0.955f, 0.99f, toGap), 0.8f * SmoothStep(0.97f, 0.995f, toLook));
+            rimH *= 1f - 0.9f * open;
+            float crest = floorY + rimH;
+            float target = d < r1 ? floorY + rimH * SmoothStep(r0, r1, d) : MathF.Max(h, crest);
+            float w = 1f - SmoothStep(WorldLayout.HermitCampRimRadius - 3f, reach, d);
+            h = Lerp(h, target, w);
+            // the lookout: a flat rock shelf on the west rim
+            float dl = Dist(x, z, CampLX, CampLZ);
+            if (dl < 6f) h = Lerp(h, WorldFeatures.CampLookout.y + 0.12f * WorldNoise.Perlin(x * 0.5f, z * 0.5f), 1f - SmoothStep(2.8f, 6f, dl));
+            return h;
+        }
+
+        /// Narrow game trail (≈ 1.6 m flat, blends over 4 m) from the grotto clearing up to the camp gap.
+        static float CampTrail(float x, float z, float h)
+        {
+            float da = DistSeg(x, z, CtAX, CtAZ, CtBX, CtBZ, out float ta);
+            float db = DistSeg(x, z, CtBX, CtBZ, CtCX, CtCZ, out float tb);
+            float best, y;
+            if (da < db) { best = da; y = Lerp(CtAY, CtBY, ta); }
+            else { best = db; y = Lerp(CtBY, CtCY, tb); }
+            if (best > 4.2f) return h;
+            return Lerp(h, y + 0.1f * WorldNoise.Perlin(x * 0.6f, z * 0.6f), 1f - SmoothStep(0.8f, 4.2f, best));
+        }
+
+        /// 0..1 along the game trail centre line (for the ground colours: a faint trampled strip).
+        public static float CampTrailMask(float x, float z)
+        {
+            float da = DistSeg(x, z, CtAX, CtAZ, CtBX, CtBZ, out _);
+            float db = DistSeg(x, z, CtBX, CtBZ, CtCX, CtCZ, out _);
+            return 1f - SmoothStep(0.35f, 0.9f, MathF.Min(da, db));
+        }
+
+        // ------------------------------------------------------------------ round 3: volcano island
+        /// Volcano island (WorldLayout.VolcanoIsland): a straight, slightly concave cone up to the crater rim
+        /// (WorldLayout.VolcanoPeak, CraterRimRadius), a bowl crater (CraterFloorY), gullies down the flanks, a raised lava
+        /// tongue on the east-south-east flank (VolcanoLavaDir) and a gentle black-sand beach with a wide shallow shelf on
+        /// the side facing the main island (VolcanoBeachDir); the other sides drop steeply to the open-sea floor.
+        static float Volcano(float x, float z, float h)
+        {
+            float dx = x - VolX, dz = z - VolZ;
+            float d = MathF.Sqrt(dx * dx + dz * dz);
+            float inv = d > 1e-3f ? 1f / d : 0f;
+            float cx = dx * inv, cz = dz * inv;
+            float facing = cx * VolBX + cz * VolBZ;
+            float lavaF = cx * VolLX + cz * VolLZ;
+            float beachSide = SmoothStep(0.15f, 0.75f, facing);
+            float R = VolcanoShore(dx, dz, facing, lavaF);
+            float e = d - R;
+            if (e >= 0f)
+            {
+                float shelf = Lerp(10f, 44f, beachSide);
+                float edgeD = Lerp(9f, 6.5f, beachSide);
+                float depth = e < shelf ? 0.3f + edgeD * MathF.Pow(e / shelf, 1.25f) : edgeD + (e - shelf) * Lerp(2.4f, 0.8f, beachSide);
+                // lava ridges and pillow-lava boulders on the flanks, black sand ripples on the shelf
+                depth -= 1.7f * SmoothStep(0.25f, 0.6f, WorldNoise.Ridge(x * 0.05f + 3f, z * 0.05f - 8f)) * SmoothStep(3f, 12f, depth);
+                depth -= 0.2f * Ripple(x + 900f, z, 7f) * beachSide * (1f - SmoothStep(8f, 14f, depth));
+                depth += 0.22f * WorldNoise.Perlin(x * 0.3f, z * 0.3f);
+                return MathF.Max(h, -depth);
+            }
+            float L = -e;
+            float rim = WorldFeatures.CraterRimRadius;
+            float u = Clamp01((d - rim) / MathF.Max(R - rim, 1f));
+            float peak = WorldLayout.VolcanoPeak;
+            float cone = peak * MathF.Pow(1f - u, 1.4f);
+            // erosion gullies on the cone (not on the summit, not on the beach)
+            cone -= 1.5f * WorldNoise.Ridge(MathF.Atan2(cz, cx) * 2.6f + 7f, d * 0.05f) * SmoothStep(0.12f, 0.45f, u) * (1f - SmoothStep(0.75f, 0.95f, u));
+            // the crater: a lip on the rim, a bowl down to the floor
+            cone += 1.1f * MathF.Exp(-(d - rim) * (d - rim) / 4f);
+            if (d < rim)
+            {
+                float floorY = WorldFeatures.CraterFloorY + 0.3f * WorldNoise.Perlin(x * 0.4f, z * 0.4f);
+                cone = Lerp(floorY, peak + 1.1f, SmoothStep(WorldFeatures.CraterFloorRadius, rim, d));
+            }
+            // lava tongue: a rough raised flow from the rim down the flank into the sea
+            float flow = SmoothStep(0.88f, 0.975f, lavaF);
+            cone += flow * (1.4f + 0.9f * WorldNoise.Perlin(x * 0.18f, z * 0.18f)) * SmoothStep(0.05f, 0.3f, u) * (1f - SmoothStep(0.97f, 1.0f, u));
+            // black-sand beach on the island side, rocky lava shore elsewhere
+            float beach = MathF.Min(L * Lerp(0.38f, 0.1f, beachSide), Lerp(2.6f, 1.3f, beachSide));
+            float sL = SmoothStep(0f, Lerp(4f, 18f, beachSide), L);
+            float land = Lerp(beach, MathF.Max(beach, cone), sL);
+            land += flow * 0.6f * (1f - sL);
+            land += 0.22f * WorldNoise.Perlin(x * 0.35f, z * 0.35f + 4f) * sL;
+            return MathF.Max(h, land);
+        }
+
+        /// The prehistoric monster's sinkhole: a flat floor at −VolcanoAbyssDepth (±2 m lumps) within ~22 m, terraced
+        /// near-vertical walls up to the sea floor at VolcanoAbyssRadius (wobbly outline). Only ever lowers the ground.
+        static float Abyss(float x, float z, float h)
+        {
+            float dx = x - WorldLayout.VolcanoAbyss.x, dz = z - WorldLayout.VolcanoAbyss.z;
+            float d = MathF.Sqrt(dx * dx + dz * dz);
+            float rim = WorldLayout.VolcanoAbyssRadius * (1f + 0.12f * RingNoise(dx, dz, 1.8f, 31.7f));
+            float floorY = -WorldLayout.VolcanoAbyssDepth + 2f * WorldNoise.Perlin(x * 0.08f + 3f, z * 0.08f - 5f);
+            float t = SmoothStep(rim * 0.42f, rim, d);
+            // terraces on the walls (ledges for the living fossils, overhang feel)
+            float terr = 4f * WorldNoise.Perlin(x * 0.11f + 9f, z * 0.11f) * t * (1f - t) * 4f;
+            float prof = Lerp(floorY, h, MathF.Pow(t, 0.7f)) + terr;
+            return prof < h ? prof : h;
+        }
+
+        /// Shore radius of the volcano in the direction (dx, dz) (facing = cos to the beach dir, lavaF = cos to the flow).
+        static float VolcanoShore(float dx, float dz, float facing, float lavaF) =>
+            WorldLayout.VolcanoShoreRadius * (1f + 0.07f * RingNoise(dx, dz, 1.6f, 21.3f) + 0.04f * RingNoise(dx, dz, 3.7f, 5.1f))
+            + 7f * SmoothStep(0.7f, 0.96f, lavaF) - 4f * SmoothStep(0.7f, 0.95f, facing);
+
+        /// Ground hint on the volcano: black sand (Sand – the terrain tints it) on the beach, lava rock on the flow, the
+        /// upper cone and the crater, fern / grass slopes (None) in between.
+        static GroundHint VolcanoHint(float x, float z, float h)
+        {
+            float dx = x - VolX, dz = z - VolZ;
+            float d = MathF.Sqrt(dx * dx + dz * dz);
+            float inv = d > 1e-3f ? 1f / d : 0f;
+            float facing = (dx * VolBX + dz * VolBZ) * inv;
+            float lavaF = (dx * VolLX + dz * VolLZ) * inv;
+            float dither = Hash01(x, z, 6262);
+            if (lavaF > 0.9f - 0.03f * dither) return GroundHint.Rock;
+            if (h > 21f + 4f * dither || d < WorldFeatures.CraterRimRadius + 2f) return GroundHint.Rock;
+            if (h < 2.3f + 0.8f * dither && facing > 0.1f) return GroundHint.Sand;
+            if (h < 1.8f + 0.6f * dither) return GroundHint.Rock;
+            // lava boulder fields between the fern patches
+            return WorldNoise.Perlin(x * 0.07f + 5f, z * 0.07f - 9f) > 0.32f + 0.1f * dither ? GroundHint.Rock : GroundHint.None;
+        }
+
+        /// True within the volcano island's tinted area (black sand, dark lava, darker seabed) – WorldTerrainData.
+        public static bool InVolcanoZone(float x, float z, out float dist)
+        {
+            float dx = x - VolX, dz = z - VolZ;
+            dist = MathF.Sqrt(dx * dx + dz * dz);
+            return dist < WorldLayout.VolcanoShoreRadius + 70f;
         }
 
         // ------------------------------------------------------------------ open sea

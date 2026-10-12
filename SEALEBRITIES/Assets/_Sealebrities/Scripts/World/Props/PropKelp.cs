@@ -89,14 +89,15 @@ namespace Sealebrities
                 Quaternion r = Quaternion.Euler(PropUtil.Range(rng, -8f, 8f), PropUtil.Range(rng, 0f, 360f), 0f);
                 var mesh = PropRocks.Mesh(sc, rng.Next(), 1, 0.16f);
                 batch.Add(mesh, boulders % 3 == 0 ? PropMats.RockDark : PropMats.Rock, Matrix4x4.TRS(p, r, Vector3.one));
-                if (s > 1.6f) PropCol.Mesh(cols, mesh, p, r, Vector3.one, "KelpBoulder");
+                // round 3 (GDD §19): every boulder is solid (was s > 1.6 only; they are all ≥ 0.8 m)
+                PropCol.Mesh(cols, mesh, p, r, Vector3.one, "KelpBoulder");
                 // a few cold-water sponges and anemones on the boulders
                 int extras = rng.Next(4);
                 for (int k = 0; k < extras; k++)
                 {
                     Vector2 eo = PropUtil.InDisc(rng, sc.x * 0.6f);
                     Vector3 ep = p + new Vector3(eo.x, sc.y * 0.75f, eo.y);
-                    PropReef.Place(batch, rng, ep, Vector3.up, rng.NextDouble() < 0.5 ? PropCoralType.Sponge : PropCoralType.Anemone, 0.8f, -3f);
+                    PropReef.Place(batch, rng, ep, Vector3.up, rng.NextDouble() < 0.5 ? PropCoralType.Sponge : PropCoralType.Anemone, 0.8f, -3f, cols);
                 }
                 boulders++;
                 if (PropRun.Due()) yield return null;
@@ -109,7 +110,12 @@ namespace Sealebrities
                 if (-g < 5f) continue;
                 float s = PropUtil.Range(rng, 0.25f, 0.9f);
                 Vector3 p = new Vector3(x, g - s * 0.2f, z);
-                PropRocks.Build(batch.B(PropMats.Rock, p), p, new Vector3(s * 1.3f, s * 0.7f, s), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), rng.Next(), 0);
+                Vector3 ssc = new Vector3(s * 1.3f, s * 0.7f, s);
+                Quaternion sq = Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f);
+                int sseed = rng.Next();
+                PropRocks.Build(batch.B(PropMats.Rock, p), p, ssc, sq, sseed, 0);
+                // round 3: stones you would bump into (≥ 0.35) are solid – convex hull of the same seeded rock
+                if (s >= 0.35f) PropSolid.Rock(cols, p, ssc, sq, sseed, 0, 0.14f, true, "KelpStone");
             }
             batch.Flush(decor, "KelpRocks", ShadowCastingMode.On, 170f);
         }

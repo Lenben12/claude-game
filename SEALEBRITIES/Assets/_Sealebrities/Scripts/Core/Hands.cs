@@ -3,57 +3,65 @@ using UnityEngine;
 
 namespace Sealebrities
 {
-    /// Items that can sit in a hotbar slot and be held in a hand. QuestItem (L.7, K.3) is never on the hotbar: it is
-    /// what the hands hold while the local player carries a quest item / heavy salvage (Carry.Current – the model is
-    /// chosen by the carried item id). APPEND new values at the end (sent as bytes in the avatar state).
-    public enum HoldItem { None, Camera, Flashlight, FishingRod, QuestItem }
+    /// What a hand shows (model / animation). QuestItem (L.7, K.3) is never on the hotbar: it is what the hands hold while
+    /// the local player carries a quest item / heavy salvage (Carry.Current). Round 3: Stick, Spear, SpearGun (weapons),
+    /// Food (anything edible or a raw fish / bottle of water) and Tool (any other backpack item – bottle, stone, map …).
+    /// APPEND new values at the end (sent as bytes in the avatar state; Hands.LastItem is the network clamp).
+    public enum HoldItem { None, Camera, Flashlight, FishingRod, QuestItem, Stick, Spear, SpearGun, Food, Tool }
 
+    /// Right = MAIN hand ("Erst-Hand"), Left = OFFHAND ("Zweit-Hand").
     public enum Hand { Right, Left }
 
-    /// How-to-Fish style hotbar of the LOCAL player: right hand and left hand (offhand) with 3 slots each and one
-    /// active slot per hand (-1 = empty hand). An item lives in at most one slot. The fishing rod is two-handed:
-    /// selecting it empties the other hand, and selecting anything while the rod is out stows the rod.
-    /// Keys: GameAction.RightSlot1..3 (1/2/3) and LeftSlot1..3 (4/5/6) – call HandleInput once per frame.
-    /// State lives per player in GameState (hotbarRight/hotbarLeft/activeRight/activeLeft, never synced in co-op).
+    /// Round 3 hotbar of the LOCAL player (GDD §19 „ein großer Balken statt 3 + 3“): ONE row of 8 slots (keys 1–8 =
+    /// GameAction.Slot(0..7), mouse wheel = main hand, Shift + wheel = offhand). Every slot references a backpack item id
+    /// (or a gear pseudo item "Camera" / "Flashlight" / "FishingRod") and belongs to a hand: main (default) or offhand
+    /// (chosen in the backpack: right-click a slot or drop an item onto the offhand). Pressing a slot's key puts that item
+    /// into its hand (again = empty the hand). Two-handed items (rod, speargun) empty the other hand; selecting anything
+    /// while one is held stows it. The same item can sit in several slots; a stack that runs out leaves its slot dimmed.
+    /// State lives per player in GameState (hotbar / hotbarOffMask / activeMain / activeOff), never synced in co-op – the
+    /// avatar bytes carry the held HoldItem only. Old 3 + 3 saves migrate in GameState.EnsureHotbar (right 1–3 → slots
+    /// 1–3 main hand, left 1–3 → slots 4–6 offhand: the keys stay the same).
     public static class Hands
     {
+        public const int SlotCount = 8;
+        /// Legacy (3 + 3 hotbar). Only used by the save migration.
         public const int SlotsPerHand = 3;
+        /// Highest HoldItem value (network clamp).
+        public const HoldItem LastItem = HoldItem.Tool;
 
-        /// Raised whenever a slot assignment or an active slot changes (also after a new game / load).
+        /// Raised whenever a slot assignment, a slot's hand or a held item changes (also after a new game / load).
         public static event Action Changed;
 
-        static readonly HoldItem[] right = new HoldItem[SlotsPerHand];
-        static readonly HoldItem[] left = new HoldItem[SlotsPerHand];
-        static GameState cachedState;
-        static string[] cachedRight, cachedLeft;
         static float lastDeniedToast = -100f;
 
-        const string NameNone = "None", NameCamera = "Camera", NameFlashlight = "Flashlight", NameRod = "FishingRod";
+        // ------------------------------------------------------------------ item ids
+        /// Hold item of an item id (gear pseudo items, backpack items; None for unknown / "None").
+        public static HoldItem ItemOf(string id)
+        {
+            if (string.IsNullOrEmpty(id) || id == ItemIds.None) return HoldItem.None;
+            var d = ItemDatabase.Get(id);
+            return d != null ? d.hold : HoldItem.None;
+        }
 
-        /// Serialized name of an item (GameState.hotbarRight/Left entries).
-        public static string ItemName(HoldItem i)
+        /// Item id of a gear hold item (Camera / Flashlight / FishingRod), else null.
+        public static string GearId(HoldItem i)
         {
             switch (i)
             {
-                case HoldItem.Camera: return NameCamera;
-                case HoldItem.Flashlight: return NameFlashlight;
-                case HoldItem.FishingRod: return NameRod;
-                default: return NameNone;
+                case HoldItem.Camera: return ItemIds.Camera;
+                case HoldItem.Flashlight: return ItemIds.Flashlight;
+                case HoldItem.FishingRod: return ItemIds.FishingRod;
+                default: return null;
             }
         }
 
-        public static HoldItem ParseItem(string s)
-        {
-            switch (s)
-            {
-                case NameCamera: return HoldItem.Camera;
-                case NameFlashlight: return HoldItem.Flashlight;
-                case NameRod: return HoldItem.FishingRod;
-                default: return HoldItem.None;
-            }
-        }
+        /// Legacy serialized name of a gear item ("Camera", "Flashlight", "FishingRod", "None").
+        public static string ItemName(HoldItem i) => GearId(i) ?? ItemIds.None;
 
-        /// Localized item name for tooltips.
+        /// Legacy: hold item of a serialized gear name.
+        public static HoldItem ParseItem(string s) => ItemOf(s);
+
+        /// Localized item name (tooltips, hotbar label).
         public static string DisplayName(HoldItem i)
         {
             switch (i)
@@ -61,61 +69,46 @@ namespace Sealebrities
                 case HoldItem.Camera: return Loc.Tr("Kamera", "Camera");
                 case HoldItem.Flashlight: return Loc.Tr("Lampe", "Lamp");
                 case HoldItem.FishingRod: return Loc.Tr("Angel", "Fishing rod");
+                case HoldItem.Stick: return Loc.Tr("Stock", "Stick");
+                case HoldItem.Spear: return Loc.Tr("Speer", "Spear");
+                case HoldItem.SpearGun: return Loc.Tr("Harpune", "Speargun");
                 default: return "";
             }
         }
 
-        /// The gear slot that decides which model/stats an item uses (Camera → camera tier etc.).
+        public static string DisplayName(string id)
+        {
+            var d = ItemDatabase.Get(id);
+            return d != null ? d.Name : "";
+        }
+
+        /// The gear slot that decides which model/stats a gear item uses (Camera → camera tier etc.).
         public static GearSlot GearSlotOf(HoldItem i) =>
             i == HoldItem.Flashlight ? GearSlot.Lamp : i == HoldItem.FishingRod ? GearSlot.Rod : GearSlot.Camera;
 
         /// Items that may sit in a hotbar slot (QuestItem never does – it comes from Carry).
-        public static bool IsHotbarItem(HoldItem i) => i == HoldItem.Camera || i == HoldItem.Flashlight || i == HoldItem.FishingRod;
+        public static bool IsHotbarItem(HoldItem i) => i != HoldItem.None && i != HoldItem.QuestItem;
+
+        public static bool IsTwoHanded(HoldItem i) => i == HoldItem.FishingRod || i == HoldItem.SpearGun;
+
+        public static bool IsTwoHandedId(string id)
+        {
+            var d = ItemDatabase.Get(id);
+            return d != null && (d.twoHanded || IsTwoHanded(d.hold));
+        }
 
         // ------------------------------------------------------------------ state access
-        static GameState Sync()
+        static GameState S
         {
-            var gm = GameManager.I;
-            if (gm == null) return null;
-            var s = gm.State;
-            if (s == null) return null;
-            if (!ReferenceEquals(s, cachedState) || !ReferenceEquals(s.hotbarRight, cachedRight) || !ReferenceEquals(s.hotbarLeft, cachedLeft))
+            get
             {
-                s.EnsureHotbar();
-                for (int i = 0; i < SlotsPerHand; i++)
-                {
-                    right[i] = ParseItem(s.hotbarRight[i]);
-                    left[i] = ParseItem(s.hotbarLeft[i]);
-                }
-                cachedState = s;
-                cachedRight = s.hotbarRight;
-                cachedLeft = s.hotbarLeft;
+                var gm = GameManager.I;
+                if (gm == null) return null;
+                var s = gm.State;
+                if (s == null) return null;
+                if (s.hotbar == null || s.hotbar.Length != SlotCount) s.EnsureHotbar();
+                return s;
             }
-            return s;
-        }
-
-        static HoldItem[] Arr(Hand h) => h == Hand.Right ? right : left;
-        static Hand Other(Hand h) => h == Hand.Right ? Hand.Left : Hand.Right;
-        static int RawActive(GameState s, Hand h) => h == Hand.Right ? s.activeRight : s.activeLeft;
-
-        static void SetRawActive(GameState s, Hand h, int v)
-        {
-            if (h == Hand.Right) s.activeRight = v;
-            else s.activeLeft = v;
-        }
-
-        static void WriteSlot(GameState s, Hand h, int slot, HoldItem item)
-        {
-            Arr(h)[slot] = item;
-            (h == Hand.Right ? s.hotbarRight : s.hotbarLeft)[slot] = ItemName(item);
-        }
-
-        static int IndexOf(Hand h, HoldItem item)
-        {
-            if (item == HoldItem.None) return -1;
-            var a = Arr(h);
-            for (int i = 0; i < SlotsPerHand; i++) if (a[i] == item) return i;
-            return -1;
         }
 
         static bool Seated
@@ -125,38 +118,71 @@ namespace Sealebrities
                 var p = Refs.Player;
                 if (p == null) return false;
                 if (p is UnityEngine.Object o && o == null) return false;
-                return p.IsSeated;
+                // round 3: the passenger bench keeps the hands free (filming from the boat, Q36)
+                return p.IsSeated && !SeatRules.LocalPassenger;
+            }
+        }
+
+        static bool InWater
+        {
+            get
+            {
+                var p = Refs.Player;
+                return p != null && !(p is UnityEngine.Object o && o == null) && p.IsInWater;
             }
         }
 
         // ------------------------------------------------------------------ queries
-        /// Active slot of a hand, -1 = empty hand.
+        /// Item id in a slot ("None" when empty or out of range).
+        public static string SlotId(int slot)
+        {
+            var s = S;
+            if (s == null || slot < 0 || slot >= SlotCount) return ItemIds.None;
+            return string.IsNullOrEmpty(s.hotbar[slot]) ? ItemIds.None : s.hotbar[slot];
+        }
+
+        public static HoldItem SlotItem(int slot) => ItemOf(SlotId(slot));
+
+        /// The hand a slot's item goes into (two-handed items always count as main hand).
+        public static Hand SlotHand(int slot)
+        {
+            var s = S;
+            if (s == null || slot < 0 || slot >= SlotCount) return Hand.Right;
+            if (IsTwoHandedId(s.hotbar[slot])) return Hand.Right;
+            return (s.hotbarOffMask & (1 << slot)) != 0 ? Hand.Left : Hand.Right;
+        }
+
+        /// The player has the slot's item right now (gear owned / stack not empty).
+        public static bool SlotUsable(int slot) => OwnsId(SlotId(slot));
+
+        /// Active slot of a hand, −1 = empty hand.
         public static int ActiveSlot(Hand h)
         {
-            var s = Sync();
+            var s = S;
             if (s == null) return -1;
-            int a = RawActive(s, h);
-            if (a < 0 || a >= SlotsPerHand) return -1;
-            return Arr(h)[a] == HoldItem.None ? -1 : a;
+            int a = h == Hand.Right ? s.activeMain : s.activeOff;
+            if (a < 0 || a >= SlotCount) return -1;
+            return ItemOf(s.hotbar[a]) == HoldItem.None ? -1 : a;
         }
 
         /// Item currently held in a hand (None = empty hand).
         public static HoldItem Active(Hand h)
         {
             int a = ActiveSlot(h);
-            return a < 0 ? HoldItem.None : Arr(h)[a];
+            return a < 0 ? HoldItem.None : SlotItem(a);
         }
 
-        public static HoldItem SlotItem(Hand h, int slot)
+        /// Item id currently held in a hand (null = empty hand).
+        public static string ActiveId(Hand h)
         {
-            if (slot < 0 || slot >= SlotsPerHand || Sync() == null) return HoldItem.None;
-            return Arr(h)[slot];
+            int a = ActiveSlot(h);
+            return a < 0 ? null : SlotId(a);
         }
-
-        public static bool IsTwoHanded(HoldItem i) => i == HoldItem.FishingRod;
 
         /// True when the item is held in either hand right now.
         public static bool IsHeld(HoldItem i) => i != HoldItem.None && (Active(Hand.Right) == i || Active(Hand.Left) == i);
+
+        public static bool IsHeldId(string id) => !string.IsNullOrEmpty(id) && (ActiveId(Hand.Right) == id || ActiveId(Hand.Left) == id);
 
         /// Hand holding the item (false when it is not held).
         public static bool TryGetHeld(HoldItem i, out Hand hand)
@@ -168,31 +194,56 @@ namespace Sealebrities
             return Active(Hand.Left) == i;
         }
 
-        /// Slot that contains the item (false when it is not on the hotbar).
+        /// First slot that contains the item (false when it is not on the hotbar).
+        public static bool Find(HoldItem i, out int slot)
+        {
+            slot = -1;
+            if (i == HoldItem.None || S == null) return false;
+            string gear = GearId(i);
+            for (int k = 0; k < SlotCount; k++)
+            {
+                if (gear != null ? SlotId(k) == gear : SlotItem(k) == i) { slot = k; return true; }
+            }
+            return false;
+        }
+
+        /// Legacy overload: slot + the hand that slot belongs to.
         public static bool Find(HoldItem i, out Hand hand, out int slot)
         {
-            hand = Hand.Right;
+            bool ok = Find(i, out slot);
+            hand = ok ? SlotHand(slot) : Hand.Right;
+            return ok;
+        }
+
+        public static bool FindId(string id, out int slot)
+        {
             slot = -1;
-            if (Sync() == null || i == HoldItem.None) return false;
-            slot = IndexOf(Hand.Right, i);
-            if (slot >= 0) return true;
-            hand = Hand.Left;
-            slot = IndexOf(Hand.Left, i);
-            return slot >= 0;
+            if (string.IsNullOrEmpty(id) || S == null) return false;
+            for (int k = 0; k < SlotCount; k++) if (SlotId(k) == id) { slot = k; return true; }
+            return false;
         }
 
         /// The local player owns at least one item of the matching gear slot (camera / lamp / rod).
         public static bool Owns(HoldItem i)
         {
-            if (!IsHotbarItem(i)) return false;
+            string gear = GearId(i);
+            if (gear != null) return OwnsId(gear);
+            return false;
+        }
+
+        /// Gear pseudo item: a matching gear item is owned. Backpack item: at least one in the backpack.
+        public static bool OwnsId(string id)
+        {
+            var d = ItemDatabase.Get(id);
+            if (d == null) return false;
+            if (!d.isGear) return Backpack.Count(id) > 0;
             var gm = GameManager.I;
             if (gm == null || gm.State == null) return false;
             var owned = gm.State.ownedItems;
-            var slot = GearSlotOf(i);
             for (int k = 0; k < owned.Count; k++)
             {
                 var g = GearDatabase.Get(owned[k]);
-                if (g != null && g.slot == slot) return true;
+                if (g != null && g.slot == d.gearSlot) return true;
             }
             return false;
         }
@@ -200,54 +251,74 @@ namespace Sealebrities
         /// Hotbar selection is ignored while a modal UI is open or the player is seated (boat wheel).
         public static bool CanSelectNow => !UIState.BlocksGameplay && !Seated;
 
-        // ------------------------------------------------------------------ mutations (local player only)
-        /// Toggles a slot: selecting the active slot (or an empty slot) empties that hand. A two-handed item empties
-        /// the other hand; selecting anything while the rod is active stows the rod.
-        public static void Select(Hand h, int slot)
+        /// The MAIN hand holds a backpack item that uses LMB itself (weapon, food, bottle …): an offhand camera must not
+        /// start recording on the same click (PlayerTools acts instead).
+        public static bool MainHandTakesUse
         {
-            var s = Sync();
-            if (s == null || slot < 0 || slot >= SlotsPerHand || !CanSelectNow) return;
-            HoldItem item = Arr(h)[slot];
-            int cur = ActiveSlot(h);
-            bool changed = false;
-            if (cur == slot)
+            get
             {
-                SetRawActive(s, h, -1);
-                changed = true;
+                var d = ItemDatabase.Get(ActiveId(Hand.Right));
+                return d != null && !d.isGear;
             }
-            else if (item == HoldItem.None)
+        }
+
+        // ------------------------------------------------------------------ mutations (local player only)
+        static void SetActive(GameState s, Hand h, int v)
+        {
+            if (h == Hand.Right) s.activeMain = v;
+            else s.activeOff = v;
+        }
+
+        static int RawActive(GameState s, Hand h) => h == Hand.Right ? s.activeMain : s.activeOff;
+
+        static void Denied(string de, string en)
+        {
+            if (Time.unscaledTime - lastDeniedToast < 2f) return;
+            lastDeniedToast = Time.unscaledTime;
+            GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr(de, en));
+        }
+
+        /// Toggles a slot: its item goes into the slot's hand (selecting the held slot again empties that hand; an empty
+        /// slot empties the main hand). A two-handed item empties the other hand; anything else stows a held two-hander.
+        public static void Select(int slot)
+        {
+            var s = S;
+            if (s == null || slot < 0 || slot >= SlotCount || !CanSelectNow) return;
+            string id = SlotId(slot);
+            HoldItem item = ItemOf(id);
+            Hand h = SlotHand(slot);
+            bool changed = false;
+            if (item == HoldItem.None)
             {
-                if (cur >= 0) { SetRawActive(s, h, -1); changed = true; }
+                if (ActiveSlot(Hand.Right) >= 0) { SetActive(s, Hand.Right, -1); changed = true; }
                 if (StowTwoHanded(s)) changed = true;
+            }
+            else if (ActiveSlot(h) == slot)
+            {
+                SetActive(s, h, -1);
+                changed = true;
             }
             else
             {
-                if (!Owns(item))
+                if (!OwnsId(id))
                 {
-                    if (Time.unscaledTime - lastDeniedToast > 2f)
-                    {
-                        lastDeniedToast = Time.unscaledTime;
-                        GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Noch nicht gekauft", "Not owned yet"));
-                    }
+                    var d = ItemDatabase.Get(id);
+                    if (d != null && d.isGear) Denied("Noch nicht gekauft", "Not owned yet");
+                    else Denied("Nicht im Rucksack", "Not in the backpack");
                     return;
                 }
-                if (IsTwoHanded(item))
+                if (item == HoldItem.FishingRod && InWater)
                 {
                     // the two-handed rod does not go swimming (it is stowed on entering the water as well)
-                    var p = Refs.Player;
-                    if (p != null && !(p is UnityEngine.Object o && o == null) && p.IsInWater)
-                    {
-                        if (Time.unscaledTime - lastDeniedToast > 2f)
-                        {
-                            lastDeniedToast = Time.unscaledTime;
-                            GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Nicht im Wasser", "Not in the water"));
-                        }
-                        return;
-                    }
+                    Denied("Nicht im Wasser", "Not in the water");
+                    return;
                 }
                 StowTwoHanded(s);
-                SetRawActive(s, h, slot);
-                if (IsTwoHanded(item)) SetRawActive(s, Other(h), -1);
+                // the same slot may not be "held" by both hands
+                Hand other = h == Hand.Right ? Hand.Left : Hand.Right;
+                if (RawActive(s, other) == slot) SetActive(s, other, -1);
+                SetActive(s, h, slot);
+                if (IsTwoHandedId(id)) SetActive(s, other, -1);
                 changed = true;
             }
             if (changed) Changed?.Invoke();
@@ -255,77 +326,139 @@ namespace Sealebrities
 
         public static void Stow(Hand h)
         {
-            var s = Sync();
+            var s = S;
             if (s == null || RawActive(s, h) < 0) return;
-            SetRawActive(s, h, -1);
+            SetActive(s, h, -1);
             Changed?.Invoke();
         }
 
         /// Empties both hands (boat wheel, ladder, fainting, cutscenes). Always allowed.
         public static void StowAll()
         {
-            var s = Sync();
-            if (s == null || (s.activeRight < 0 && s.activeLeft < 0)) return;
-            s.activeRight = -1;
-            s.activeLeft = -1;
+            var s = S;
+            if (s == null || (s.activeMain < 0 && s.activeOff < 0)) return;
+            s.activeMain = -1;
+            s.activeOff = -1;
             Changed?.Invoke();
         }
 
-        /// Puts an item into a slot (inventory drag & drop; None clears the slot). The item leaves any other slot;
-        /// when it came from another slot, the displaced item swaps into that slot. Held items stay in hand where
-        /// they moved within the same hand, otherwise that hand is emptied.
-        public static void Assign(Hand h, int slot, HoldItem item)
+        /// Puts an item id into a slot (backpack drag & drop; null / "None" clears it). hand = null keeps the slot's
+        /// current hand. A held slot whose item changes empties that hand.
+        public static void Assign(int slot, string id, Hand? hand = null)
         {
-            var s = Sync();
-            if (s == null || slot < 0 || slot >= SlotsPerHand) return;
-            if (item != HoldItem.None && !IsHotbarItem(item)) return;
-            HoldItem prevR = Active(Hand.Right), prevL = Active(Hand.Left);
-            HoldItem displaced = Arr(h)[slot];
-            if (displaced == item) return;
-
-            bool fromSlot = false;
-            Hand srcHand = Hand.Right;
-            int srcSlot = -1;
-            if (item != HoldItem.None)
+            var s = S;
+            if (s == null || slot < 0 || slot >= SlotCount) return;
+            if (string.IsNullOrEmpty(id) || ItemOf(id) == HoldItem.None) id = ItemIds.None;
+            bool changed = s.hotbar[slot] != id;
+            if (changed)
             {
-                fromSlot = Find(item, out srcHand, out srcSlot);
-                if (fromSlot) WriteSlot(s, srcHand, srcSlot, HoldItem.None);
+                if (s.activeMain == slot) s.activeMain = -1;
+                if (s.activeOff == slot) s.activeOff = -1;
+                s.hotbar[slot] = id;
             }
-            WriteSlot(s, h, slot, item);
-            if (fromSlot && displaced != HoldItem.None) WriteSlot(s, srcHand, srcSlot, displaced);
+            if (hand.HasValue) changed |= SetSlotHandRaw(s, slot, hand.Value);
+            if (changed) { Normalize(s); Changed?.Invoke(); }
+        }
 
-            SetRawActive(s, Hand.Right, IndexOf(Hand.Right, prevR));
-            SetRawActive(s, Hand.Left, IndexOf(Hand.Left, prevL));
+        /// Swaps two hotbar slots (contents + hand), keeping held items in hand.
+        public static void Swap(int a, int b)
+        {
+            var s = S;
+            if (s == null || a < 0 || b < 0 || a >= SlotCount || b >= SlotCount || a == b) return;
+            string t = s.hotbar[a];
+            s.hotbar[a] = s.hotbar[b];
+            s.hotbar[b] = t;
+            // the hand travels with the item, held items stay in their hand
+            int bitA = 1 << a, bitB = 1 << b;
+            bool offA = (s.hotbarOffMask & bitA) != 0, offB = (s.hotbarOffMask & bitB) != 0;
+            int m = s.hotbarOffMask & ~bitA & ~bitB;
+            if (offB) m |= bitA;
+            if (offA) m |= bitB;
+            s.hotbarOffMask = m;
+            s.activeMain = s.activeMain == a ? b : s.activeMain == b ? a : s.activeMain;
+            s.activeOff = s.activeOff == a ? b : s.activeOff == b ? a : s.activeOff;
             Normalize(s);
             Changed?.Invoke();
         }
 
-        /// Restores the default hotbar (right: camera, rod; left: lamp) with both hands empty.
-        public static void ResetToDefaults()
+        /// Sets which hand a slot's item goes into (backpack: right-click a slot / drop onto the offhand).
+        public static void SetSlotHand(int slot, Hand hand)
         {
-            var s = Sync();
-            if (s == null) return;
-            s.hotbarRight = new[] { NameCamera, NameRod, NameNone };
-            s.hotbarLeft = new[] { NameFlashlight, NameNone, NameNone };
-            s.activeRight = -1;
-            s.activeLeft = -1;
-            Sync();
+            var s = S;
+            if (s == null || slot < 0 || slot >= SlotCount) return;
+            if (!SetSlotHandRaw(s, slot, hand)) return;
+            Normalize(s);
             Changed?.Invoke();
         }
 
-        /// Reads the hotbar keys (1–6 by default) and the mouse wheel (Q17: wheel = right hand, Shift+wheel = left hand,
-        /// cycling through the slots incl. the empty hand). Call once per frame from the local player.
-        /// The wheel is ignored while the camera is aimed (it zooms), in the selfie view (arm length / hotbar keys pick
-        /// expressions) and while carrying a quest item.
+        static bool SetSlotHandRaw(GameState s, int slot, Hand hand)
+        {
+            int bit = 1 << slot;
+            int mask = hand == Hand.Left ? s.hotbarOffMask | bit : s.hotbarOffMask & ~bit;
+            if (mask == s.hotbarOffMask) return false;
+            s.hotbarOffMask = mask;
+            // a held slot changes hands with it
+            if (hand == Hand.Left && s.activeMain == slot) { s.activeMain = -1; s.activeOff = slot; }
+            else if (hand == Hand.Right && s.activeOff == slot) { s.activeOff = -1; s.activeMain = slot; }
+            return true;
+        }
+
+        /// Backpack „in die Hand“: holds an item in a hand right away. Uses a slot that already has the item (and moves
+        /// it to that hand), else the first free slot (else the last slot). False when the item cannot be held.
+        public static bool Hold(string id, Hand hand)
+        {
+            var s = S;
+            if (s == null || ItemOf(id) == HoldItem.None || !OwnsId(id)) return false;
+            if (IsTwoHandedId(id)) hand = Hand.Right;
+            if (!FindId(id, out int slot))
+            {
+                slot = -1;
+                for (int k = 0; k < SlotCount; k++) if (SlotId(k) == ItemIds.None) { slot = k; break; }
+                if (slot < 0) slot = SlotCount - 1;
+                Assign(slot, id, hand);
+            }
+            else SetSlotHand(slot, hand);
+            if (ActiveSlot(SlotHand(slot)) != slot)
+            {
+                bool can = CanSelectNow;
+                if (!can && UIState.InventoryOpen && !Seated)
+                {
+                    // the backpack is open (it blocks gameplay): apply directly
+                    StowTwoHanded(s);
+                    Hand other = hand == Hand.Right ? Hand.Left : Hand.Right;
+                    if (RawActive(s, other) == slot) SetActive(s, other, -1);
+                    SetActive(s, hand, slot);
+                    if (IsTwoHandedId(id)) SetActive(s, other, -1);
+                    Normalize(s);
+                    Changed?.Invoke();
+                }
+                else if (can) Select(slot);
+            }
+            return ActiveSlot(hand) == slot;
+        }
+
+        /// Restores the default hotbar (camera, rod, stick on 1–3 in the main hand; lamp on 4 in the offhand) with both
+        /// hands empty.
+        public static void ResetToDefaults()
+        {
+            var s = S;
+            if (s == null) return;
+            s.hotbar = GameState.DefaultHotbar();
+            s.hotbarOffMask = GameState.DefaultOffMask;
+            s.activeMain = -1;
+            s.activeOff = -1;
+            Changed?.Invoke();
+        }
+
+        /// Reads the hotbar keys (1–8 by default) and the mouse wheel (wheel = main hand, Shift + wheel = offhand,
+        /// cycling through that hand's slots incl. the empty hand). Call once per frame from the local player.
+        /// The wheel is ignored while the camera is aimed (it zooms), in the selfie view and while carrying a quest item.
         public static void HandleInput()
         {
             if (!CanSelectNow || GameManager.I == null || !GameManager.I.InGame) return;
             if (SelfieState.Active || Carry.IsCarrying) return;
-            for (int i = 0; i < SlotsPerHand; i++)
-            {
-                if (GameInput.SlotPressed(Hand.Right, i)) Select(Hand.Right, i);
-                if (GameInput.SlotPressed(Hand.Left, i)) Select(Hand.Left, i);
-            }
+            for (int i = 0; i < SlotCount; i++)
+                if (GameInput.SlotPressed(i)) Select(i);
             int scroll = GameInput.HotbarScroll;
             if (scroll != 0)
             {
@@ -335,42 +468,59 @@ namespace Sealebrities
             }
         }
 
-        /// Moves a hand's selection one step (dir +1 = next slot, −1 = previous) through empty hand → slot 1 → 2 → 3,
-        /// skipping empty slots, items not owned yet and the rod while swimming.
+        /// Moves a hand's selection one step (dir +1 = next slot, −1 = previous) through empty hand → that hand's slots,
+        /// skipping empty slots, items not owned / used up and the rod while swimming.
         public static void Cycle(Hand h, int dir)
         {
-            var s = Sync();
+            var s = S;
             if (s == null || dir == 0 || !CanSelectNow) return;
             dir = dir > 0 ? 1 : -1;
             int cur = ActiveSlot(h);
-            const int positions = SlotsPerHand + 1;   // -1 (empty) .. SlotsPerHand-1
+            const int positions = SlotCount + 1;   // -1 (empty) .. SlotCount-1
             for (int step = 1; step < positions; step++)
             {
                 int idx = (((cur + 1 + dir * step) % positions) + positions) % positions - 1;
                 if (idx < 0)
                 {
-                    if (cur >= 0) { SetRawActive(s, h, -1); Changed?.Invoke(); }
+                    if (cur >= 0) { SetActive(s, h, -1); Changed?.Invoke(); }
                     return;
                 }
-                var item = Arr(h)[idx];
-                if (item == HoldItem.None || !Owns(item)) continue;
-                if (IsTwoHanded(item))
-                {
-                    var p = Refs.Player;
-                    if (p != null && !(p is UnityEngine.Object po && po == null) && p.IsInWater) continue;
-                }
-                Select(h, idx);
+                string id = SlotId(idx);
+                var item = ItemOf(id);
+                if (item == HoldItem.None || SlotHand(idx) != h || !OwnsId(id)) continue;
+                if (item == HoldItem.FishingRod && InWater) continue;
+                Select(idx);
                 return;
             }
+        }
+
+        /// A held stack ran out (eaten, broken, dropped): that hand becomes empty. Called after backpack changes.
+        public static void ValidateHeld()
+        {
+            var gm = GameManager.I;
+            if (gm == null || gm.State == null || gm.State.hotbar == null) return;
+            var s = gm.State;
+            bool changed = false;
+            for (int k = 0; k < 2; k++)
+            {
+                var h = (Hand)k;
+                int a = RawActive(s, h);
+                if (a < 0 || a >= SlotCount) continue;
+                if (!OwnsId(s.hotbar[a])) { SetActive(s, h, -1); changed = true; }
+            }
+            if (changed) Changed?.Invoke();
         }
 
         /// Called by GameManager after the GameState object was replaced (new game, load, co-op snapshot).
         public static void NotifyStateReplaced()
         {
-            cachedState = null;
-            Sync();
+            var s = S;
+            if (s != null) Normalize(s);
             Changed?.Invoke();
         }
+
+        /// Raises Changed (gear bought / backpack refilled: the hotbar redraws its dimmed slots).
+        public static void RaiseChanged() => Changed?.Invoke();
 
         static bool StowTwoHanded(GameState s)
         {
@@ -378,9 +528,9 @@ namespace Sealebrities
             {
                 var h = (Hand)k;
                 int a = ActiveSlot(h);
-                if (a >= 0 && IsTwoHanded(Arr(h)[a]))
+                if (a >= 0 && IsTwoHandedId(s.hotbar[a]))
                 {
-                    SetRawActive(s, h, -1);
+                    SetActive(s, h, -1);
                     return true;
                 }
             }
@@ -389,26 +539,25 @@ namespace Sealebrities
 
         static void Normalize(GameState s)
         {
-            for (int k = 0; k < 2; k++)
-            {
-                var h = (Hand)k;
-                int a = RawActive(s, h);
-                if (a >= SlotsPerHand || (a >= 0 && (Arr(h)[a] == HoldItem.None || !Owns(Arr(h)[a])))) SetRawActive(s, h, -1);
-            }
-            if (IsTwoHanded(Active(Hand.Right))) SetRawActive(s, Hand.Left, -1);
-            else if (IsTwoHanded(Active(Hand.Left))) SetRawActive(s, Hand.Right, -1);
+            if (s.activeMain >= SlotCount || s.activeMain < -1) s.activeMain = -1;
+            if (s.activeOff >= SlotCount || s.activeOff < -1) s.activeOff = -1;
+            if (s.activeMain >= 0 && (ItemOf(s.hotbar[s.activeMain]) == HoldItem.None || SlotHandRaw(s, s.activeMain) != Hand.Right)) s.activeMain = -1;
+            if (s.activeOff >= 0 && (ItemOf(s.hotbar[s.activeOff]) == HoldItem.None || SlotHandRaw(s, s.activeOff) != Hand.Left)) s.activeOff = -1;
+            if (s.activeMain >= 0 && s.activeMain == s.activeOff) s.activeOff = -1;
+            if (s.activeMain >= 0 && IsTwoHandedId(s.hotbar[s.activeMain])) s.activeOff = -1;
+        }
+
+        static Hand SlotHandRaw(GameState s, int slot)
+        {
+            if (IsTwoHandedId(s.hotbar[slot])) return Hand.Right;
+            return (s.hotbarOffMask & (1 << slot)) != 0 ? Hand.Left : Hand.Right;
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics()
         {
             Changed = null;
-            cachedState = null;
-            cachedRight = null;
-            cachedLeft = null;
             lastDeniedToast = -100f;
-            Array.Clear(right, 0, right.Length);
-            Array.Clear(left, 0, left.Length);
         }
     }
 }

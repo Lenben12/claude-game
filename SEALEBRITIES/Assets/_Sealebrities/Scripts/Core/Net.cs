@@ -54,7 +54,9 @@ namespace Sealebrities
         public const int DiscoveryPort = 27016;
         /// Bump on every wire, GameState or species-order change (2: Testversion 4 final – EvNotify actor, OpenCrate
         /// day/time, Kiosk command, Hochsee species ungated). Older builds are refused with the VersionMismatch text.
-        public const int ProtocolVersion = 2;
+        /// 3: round 3 – the look carries body / hair / beard / nose / accessory bytes (NetLookCodec).
+        /// 4: round 3 UI step – GameState v8 (shared map pins, CoreCommands.PinKey), passenger bench on the boat.
+        public const int ProtocolVersion = 4;
 
         public static NetMode Mode;
         public static bool IsOnline => Mode != NetMode.Offline;
@@ -210,6 +212,15 @@ namespace Sealebrities
         /// deal (0 = none). LOCAL: every machine sets it from the SHARED deals (DiverSponsor.CurrentIndex) – not on the wire.
         public int sponsor;
 
+        // ---- round 3 (GDD §19 „mehr Optionen beim Anpassen“) – every field 0 = default, so older data stays valid
+        public int build;      // 0 normal, 1 slim, 2 sturdy, 3 broad shoulders
+        public int height;     // −2 … +2 (× 0.92 … × 1.08 of 1.85 m)
+        public int hair;       // CosmeticsDatabase hair styles (0 short … last = bald) – shows under every hat
+        public int hairColor;  // CosmeticsDatabase.HairColors
+        public int beard;      // 0 none, 1 moustache, 2 goatee, 3 full beard, 4 captain's beard, 5 stubble
+        public int nose;       // 0 button, 1 round, 2 long, 3 pointy, 4 snub
+        public int accessory;  // 0 none, 1 shell necklace, 2 neckerchief, 3 earrings, 4 flower, 5 dive watch, 6 freckles, 7 plaster
+
         public static readonly Color DefaultMask = new Color(0.118f, 0.106f, 0.169f);    // #1E1B2B
         public static readonly Color DefaultFins = new Color(0.169f, 0.145f, 0.2f);      // #2B2533
 
@@ -224,16 +235,26 @@ namespace Sealebrities
                 l.mouth = f % 5;
                 l.lookVersion = CurrentVersion;
             }
-            l.skin = Mathf.Clamp(l.skin, 0, 5);
-            l.mouth = Mathf.Clamp(l.mouth, 0, 4);
+            l.skin = Mathf.Clamp(l.skin, 0, CosmeticsDatabase.SkinTones.Length - 1);
+            l.mouth = Mathf.Clamp(l.mouth, 0, CosmeticsDatabase.MouthCount - 1);
             l.face = l.skin * 5 + l.mouth;
             if (l.hat < 0) l.hat = 0;
             if (l.pattern < 0) l.pattern = 0;
             if (l.eyes < 0) l.eyes = 0;
             if (l.brows < 0) l.brows = 0;
+            l.build = Mathf.Clamp(l.build, 0, CosmeticsDatabase.BuildCount - 1);
+            l.height = Mathf.Clamp(l.height, -2, 2);
+            l.hair = Mathf.Clamp(l.hair, 0, CosmeticsDatabase.HairCount - 1);
+            l.hairColor = Mathf.Clamp(l.hairColor, 0, CosmeticsDatabase.HairColors.Length - 1);
+            l.beard = Mathf.Clamp(l.beard, 0, CosmeticsDatabase.BeardCount - 1);
+            l.nose = Mathf.Clamp(l.nose, 0, CosmeticsDatabase.NoseCount - 1);
+            l.accessory = Mathf.Clamp(l.accessory, 0, CosmeticsDatabase.AccessoryCount - 1);
             l.suit.a = 1f;
             return l;
         }
+
+        /// Round 3: uniform size factor of the character from `height` (−2 … +2 → 0.92 … 1.08).
+        public float HeightScale => 1f + Mathf.Clamp(height, -2, 2) * 0.04f;
 
         /// Cuff colour to render (Auto → suit lightened 55 %).
         public Color ResolvedCuff => cuff.a <= 0f ? WithAlpha(Color.Lerp(suit, Color.white, 0.55f)) : WithAlpha(cuff);

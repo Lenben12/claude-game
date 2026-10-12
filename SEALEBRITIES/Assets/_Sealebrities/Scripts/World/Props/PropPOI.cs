@@ -120,7 +120,11 @@ namespace Sealebrities
                     Vector3 rp = new Vector3(P.x + Mathf.Cos(a0) * (pr + 0.6f), 0f, P.z + Mathf.Sin(a0) * (pr + 0.6f));
                     float s = PropUtil.Range(rng, 0.45f, 1.0f);
                     rp.y = G(rp) + s * 0.15f;
-                    PropRocks.BuildSplit(batch, rp, rp, new Vector3(s * 1.3f, s * 0.6f, s), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), rng.Next(), 0, 0.14f, PropMats.RockMid, PropMats.Moss, null);
+                    Quaternion rq = Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f);
+                    int rs = rng.Next();
+                    PropRocks.BuildSplit(batch, rp, rp, new Vector3(s * 1.3f, s * 0.6f, s), rq, rs, 0, 0.14f, PropMats.RockMid, PropMats.Moss, null);
+                    // round 3: the rim rocks are solid
+                    PropCol.Mesh(cols, PropRocks.ColliderMesh(new Vector3(s * 1.3f, s * 0.6f, s), rs, 0, 0.14f), rp, rq, Vector3.one, "PoolRock");
                 }
             }
             // reeds at the pool edge
@@ -289,7 +293,10 @@ namespace Sealebrities
                     if (Vector3.Dot(Flat(rp - P), -d) > 0.75f) continue;   // open toward the falls
                     float s = PropUtil.Range(rng, 0.5f, 1.1f);
                     rp.y = Mathf.Min(G(rp), wl) + s * 0.2f;
-                    PropRocks.BuildSplit(batch, rp, rp, new Vector3(s * 1.3f, s * 0.6f, s), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), rng.Next(), 0, 0.14f, PropMats.RockMid, PropMats.Moss, null);
+                    Quaternion rq = Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f);
+                    int rs = rng.Next();
+                    PropRocks.BuildSplit(batch, rp, rp, new Vector3(s * 1.3f, s * 0.6f, s), rq, rs, 0, 0.14f, PropMats.RockMid, PropMats.Moss, null);
+                    PropCol.Mesh(cols, PropRocks.ColliderMesh(new Vector3(s * 1.3f, s * 0.6f, s), rs, 0, 0.14f), rp, rq, Vector3.one, "PoolRock");
                 }
             }
             for (int i = 0; i < 9; i++)

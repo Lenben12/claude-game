@@ -463,7 +463,7 @@ namespace Sealebrities
             content.Add(ToggleRow(UIGlyphs.Wave, Loc.Tr("Kopfwippen", "Head bob"), d.headBob, v => d.headBob = v));
             content.Add(ToggleRow(UIGlyphs.Camera, Loc.Tr("Kamerawackeln", "Camera shake"), d.cameraShake, v => d.cameraShake = v));
             // K.2 auto-record
-            content.Add(ToggleRow(UIGlyphs.Rec, Loc.Tr("Unter Wasser automatisch filmen", "Auto-record under water"), d.autoRecordUnderwater, v => d.autoRecordUnderwater = v));
+            // round 3 (GDD §19): no auto-record under water any more – recording only with the player's own click
             content.Add(ToggleRow(UIGlyphs.Bubble, Loc.Tr("Untertitel", "Subtitles"), d.subtitles, v => d.subtitles = v));
             content.Add(ToggleRow(UIGlyphs.Person, Loc.Tr("Tutorial-Hilfe von Horst", "Tutorial help from Horst"), d.npcTutorial, v => d.npcTutorial = v));
 

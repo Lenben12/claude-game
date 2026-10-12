@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -132,14 +132,61 @@ namespace Sealebrities
         public static bool TextInput;
         /// The selfie frame is shown (K.4). Does NOT block gameplay (WASD still moves at ×0.6).
         public static bool SelfieOpen;
-        public static bool BlocksGameplay => PhoneOpen || PauseOpen || MainMenuOpen || LoadingOpen || InventoryOpen || CharacterOpen;
+        /// Round 3: the hut furnishing screen („Einrichten“, UIHutDecor) – blocks gameplay like the backpack.
+        public static bool DecorOpen;
+        /// Round 3 (npc step): the gesture wheel or the gift / trade picker at an NPC is open – blocks gameplay, frees the
+        /// cursor (the wheel is picked with the mouse).
+        public static bool NpcMenuOpen;
+        /// Round 3 (GDD §19 „Während der Fahrt Zugriff auf die Karte“, Q36): the treasure-map overlay (M) is open. It does
+        /// NOT block gameplay – the driver keeps steering with WASD, a passenger keeps sitting – but it frees the cursor
+        /// (drag / zoom / pins), so mouse look, the hotbar wheel and the mouse actions (Use / Aim) pause meanwhile.
+        public static bool MapOverlayOpen;
+        public static bool BlocksGameplay => PhoneOpen || PauseOpen || MainMenuOpen || LoadingOpen || InventoryOpen || CharacterOpen || DecorOpen || NpcMenuOpen;
+        /// The cursor is free (menus or the map overlay).
+        public static bool CursorFree => BlocksGameplay || MapOverlayOpen;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics()
         {
             PhoneOpen = false; PauseOpen = false; MainMenuOpen = true; LoadingOpen = true; InventoryOpen = false;
-            CharacterOpen = false; TextInput = false; SelfieOpen = false;
+            CharacterOpen = false; TextInput = false; SelfieOpen = false; DecorOpen = false; NpcMenuOpen = false;
+            MapOverlayOpen = false;
         }
+    }
+
+    /// Round 3 (GDD §19 „ein zweiter Sitzplatz, z. B. eine Sitzbank vorne“, Q36 „Beifahrer: Filmen + Karte ansehen“):
+    /// seats on which the player keeps the hands free (the passenger bench on the boat's foredeck). Seated there the
+    /// camera, the phone and the map work; walking / weapons / the selfie stay off like on every seat. The driver seat
+    /// is NOT such a seat (both hands on the wheel).
+    public static class SeatRules
+    {
+        static readonly List<Transform> passengerSeats = new List<Transform>();
+        /// Eye height above a passenger seat's transform (the transform marks the sitter's root, hips at root + 0.36 m).
+        public const float PassengerEyeHeight = 1.12f;
+        /// Look range left / right on a passenger seat (degrees).
+        public const float PassengerYawLimit = 150f;
+        /// The LOCAL player sits on a passenger seat right now (set by the Player module).
+        public static bool LocalPassenger;
+
+        public static void RegisterPassengerSeat(Transform seat)
+        {
+            if (seat != null && !passengerSeats.Contains(seat)) passengerSeats.Add(seat);
+        }
+
+        public static bool IsPassengerSeat(Transform seat)
+        {
+            if (seat == null) return false;
+            for (int i = passengerSeats.Count - 1; i >= 0; i--)
+            {
+                var s = passengerSeats[i];
+                if (s == null) { passengerSeats.RemoveAt(i); continue; }
+                if (s == seat) return true;
+            }
+            return false;
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { passengerSeats.Clear(); LocalPassenger = false; }
     }
 
     /// Fixed render layers (1c, 1d). The world camera excludes Preview and ViewModel; CreatureIcons is the icon studio.
@@ -272,8 +319,33 @@ namespace Sealebrities
         public static readonly Vector3 DriftwoodRaft = new Vector3(66f, 0f, 104f);
         /// Wanda's hangar shack on the helipad plateau (L.12).
         public static readonly Vector3 HangarSpot = new Vector3(56f, 0f, -52f);
-        /// Floating swim raft with a diving board in the lagoon (L.5 detail spot 3).
-        public static readonly Vector3 SwimRaft = new Vector3(118f, 0f, 34f);
+        /// Floating swim raft with a diving board (L.5 detail spot 3). Round 3 (GDD §19 "Badeinsel weiter ins Meer"): moved
+        /// from 14 m to ~40 m off the dock beach (was (118, 34)), north of the boat lane, ~3.5 m of water under it.
+        public static readonly Vector3 SwimRaft = new Vector3(146f, 0f, 44f);
+
+        // ---- round 3 (GDD §19 "Insel und Welt")
+        /// The village Altriff is gone (round 3): WorldLayout.Village stays as the anchor of the open beach meadow on the
+        /// south coast (the old terrace, jetty and lagoon remain; no houses). NPC / fauna code that still uses it is
+        /// relocated by the NPC step (see docs/Runde3_Fortschritt.md, step 3).
+        /// Hidden camp of the hermits / castaways on the far (west) side: a jungle hollow on the plateau between the
+        /// waterfall grotto and the hidden bay, ringed by wooded ridges, no trail and no signpost leads there.
+        public static readonly Vector3 HermitCamp = new Vector3(-92f, 0f, 16f);
+        /// Radius of the flat camp floor (the wooded rim rises around it up to ~CampRimRadius).
+        public const float HermitCampRadius = 12f, HermitCampRimRadius = 24f;
+        /// Volcano island east of the main island (seen from the dock across the house reef): black-sand beach on its west
+        /// side, a smoking crater, lava flows on the east flank. Fauna zone Zones.Volcano (prehistoric "living fossils").
+        public static readonly Vector3 VolcanoIsland = new Vector3(700f, 0f, 120f);
+        /// Mean shore radius and summit (crater rim) height of the volcano island.
+        public const float VolcanoShoreRadius = 56f, VolcanoPeak = 36f;
+        /// Spawn area of the volcano fauna zone (land + sea) around VolcanoIsland.
+        public const float VolcanoZoneRadius = 190f;
+        /// Player answer: the volcano becomes reachable with the WRECK unlock (VolcanoGate). Until then a strong current
+        /// ring of this radius around VolcanoIsland pushes boats back out (the requirement is shown, nothing announced).
+        public const float VolcanoGateRadius = 235f;
+        /// "Urzeit-Schlund": a deep sinkhole on the volcano's east flank reserved for the big prehistoric monster
+        /// (fauna step) – floor ~VolcanoAbyssDepth m, flat within ~22 m, steep walls out to VolcanoAbyssRadius.
+        public static readonly Vector3 VolcanoAbyss = new Vector3(818f, 0f, 150f);
+        public const float VolcanoAbyssRadius = 48f, VolcanoAbyssDepth = 128f;
 
         /// Small landmark islands next to the outer dive sites (center, radius in meters). UNCHANGED in round 2.
         public static readonly Vector3 KelpIsland = new Vector3(-470f, 0f, 420f);
@@ -451,10 +523,17 @@ namespace Sealebrities
         public static int BracketCount;
         /// Valid Sealog photo subject inside the central 40 % frame (null = none) – the frame turns green.
         public static SpeciesDef SealogSubject;
+        /// Round 3 (Q40 „kleine Symbole erkannter Tiere“): the distinct species detected in frame right now (max
+        /// MaxBrackets) and whether each is already in the Sealog („?“ for new ones).
+        public static readonly SpeciesDef[] DetectedSpecies = new SpeciesDef[MaxBrackets];
+        public static readonly bool[] DetectedKnown = new bool[MaxBrackets];
+        public static int DetectedSpeciesCount;
 
         public static void Clear()
         {
             Hint = ShotHint.None; ThumbQuality01 = 0f; DetectedCount = 0; BracketCount = 0; SealogSubject = null;
+            for (int i = 0; i < DetectedSpecies.Length; i++) DetectedSpecies[i] = null;
+            DetectedSpeciesCount = 0;
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
@@ -551,10 +630,13 @@ namespace Sealebrities
         public const string HouseReef = "house_reef", Kelp = "kelp_forest", Wreck = "wreck", BlueDrop = "blue_drop",
             Trench = "deep_trench", FogIsle = "fog_isle", Lagoon = "lagoon", OpenSea = "open_sea", DeepSea = "deep_sea",
             Island = "island", TidePools = "tide_pools", Beach = "beach";
+        /// Round 3 (world step): the volcano island and its waters (WorldLayout.VolcanoIsland, VolcanoZoneRadius) – reserved
+        /// for the prehistoric "living fossil" fauna (fauna step). Appended so the old zoneMask bits stay valid.
+        public const string Volcano = "volcano_isle";
 
         /// Display order of the zone chips (Sealog "Fundorte").
         public static readonly string[] All =
-            { HouseReef, Lagoon, Kelp, Wreck, BlueDrop, Trench, FogIsle, OpenSea, DeepSea, Island, TidePools, Beach };
+            { HouseReef, Lagoon, Kelp, Wreck, BlueDrop, Trench, FogIsle, OpenSea, DeepSea, Island, TidePools, Beach, Volcano };
 
         /// Bit index of a zone in JournalEntry.zoneMask (-1 for unknown ids). Allocation free.
         public static int Index(string zone)
@@ -582,6 +664,7 @@ namespace Sealebrities
                 case Island: return Loc.Tr("Insel", "Island");
                 case TidePools: return Loc.Tr("Gezeitentümpel", "Tide Pools");
                 case Beach: return Loc.Tr("Strand", "Beach");
+                case Volcano: return Loc.Tr("Vulkaninsel", "Volcano Isle");
                 default: return zone ?? "";
             }
         }

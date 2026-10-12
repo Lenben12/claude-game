@@ -113,9 +113,13 @@ namespace Sealebrities
     /// come from the art bible §1.2 table (zenith, 30°, horizon away from / toward the sun) by sun elevation and are
     /// pre-compensated for the post-processing grade, so the screen measures the targets (no white horizon band).
     /// Recoloured only when the sun moved noticeably (no per-frame allocation).
+    /// Round 3: a gentle extra glow hugging the horizon toward the sun around sunset / sunrise, and a few far, thin,
+    /// faceted stratus / cirrus bands near the horizon (1–7° up, soft vertex-alpha edges, drawn over the sun disc):
+    /// whitish by day, glowing peach on the sun side at sunset, darker lilac silhouettes away from it, dark at night;
+    /// more, denser and greyer on cloudy days (bandCover / bandGrey from WorldClouds), drifting slowly in azimuth.
     public sealed class WorldSkyDome
     {
-        public const int DomeQueue = 1000, SunQueue = 1001;
+        public const int DomeQueue = 1000, SunQueue = 1001, BandQueue = 1002;
         public const float Radius = 5f;
         const int Seg = 64;
         static readonly float[] Rings = { -90f, -30f, -10f, -3f, 0f, 1f, 2.5f, 4.5f, 7f, 10f, 14f, 19f, 25f, 32f, 40f, 50f, 62f, 76f, 90f };
@@ -157,6 +161,22 @@ namespace Sealebrities
         readonly Transform t, sunT;
         readonly bool linearSpace;
         float lastElev = -999f, lastAz = -999f, lastFogVis = -1f;
+
+        // ---- horizon cloud bands
+        const int BandCount = 9, BandCols = 9;
+        readonly Mesh bandMesh;
+        readonly Material bandMat;
+        readonly MeshRenderer bandR;
+        readonly Transform bandT;
+        readonly Vector3[] bandDirs;      // unit directions (un-rotated)
+        readonly float[] bandAlpha;       // soft edges / tapering ends
+        readonly int[] bandOf;            // band index per vertex
+        readonly Color[] bandCols;
+        static readonly Color BandWhiteScreen = SkyGrade.Hex("#EEF2F8");
+        readonly Color bandWhite;
+        float lastBandCover = -1f, lastBandGrey = -1f, lastBandYaw = -999f;
+        /// Azimuth drift of the bands in degrees (set every frame by the day/night cycle from the cloud wind).
+        public float BandYaw { get; set; }
         Vector3 sunDir = Vector3.up;
         bool sunVisible;
 
@@ -178,6 +198,7 @@ namespace Sealebrities
                     lin[k, c] = SkyGrade.InverseLinear(SkyGrade.AcesHueFix(SkyGrade.Hex(Table[k, c])));
             warmAway = SkyGrade.InverseLinear(SkyGrade.AcesHueFix(WarmAwayScreen));
             warmMid = SkyGrade.InverseLinear(SkyGrade.AcesHueFix(WarmMidScreen));
+            bandWhite = SkyGrade.InverseLinear(SkyGrade.AcesHueFix(BandWhiteScreen));
             if (vertexColorShader == null) return;
 
             // ---- dome
@@ -255,7 +276,72 @@ namespace Sealebrities
             sunR = sgo.AddComponent<MeshRenderer>();
             Setup(sunR, sunMat);
             sunT = sgo.transform;
+
+            // ---- far horizon cloud bands (fixed layout; each band a faceted strip of 3 rows: soft edge, core, soft edge)
+            int bv = BandCount * BandCols * 3;
+            bandDirs = new Vector3[bv];
+            bandAlpha = new float[bv];
+            bandOf = new int[bv];
+            bandCols = new Color[bv];
+            var bt = new int[BandCount * (BandCols - 1) * 12];
+            var brng = new System.Random(4242);
+            int bi = 0;
+            for (int b = 0; b < BandCount; b++)
+            {
+                float az0 = (b * 360f / BandCount + R(brng, -14f, 14f)) * Mathf.Deg2Rad;
+                float span = R(brng, 16f, 40f) * Mathf.Deg2Rad;
+                // the first bands (always shown) sit low; the extra ones of cloudy days reach higher
+                float e0 = R(brng, 1.5f, 3.6f) + (b >= 4 ? R(brng, 0.5f, 3f) : 0f);
+                float thick = R(brng, 0.55f, 1.35f);
+                float tilt = R(brng, -0.6f, 0.6f);
+                for (int c = 0; c < BandCols; c++)
+                {
+                    float u = c / (float)(BandCols - 1);
+                    float prof = Mathf.Pow(Mathf.Sin(u * Mathf.PI), 0.6f);
+                    float a = az0 + (u - 0.5f) * span;
+                    float th = thick * (0.2f + 0.8f * prof) * R(brng, 0.75f, 1.25f);
+                    float ec = e0 + tilt * (u - 0.5f) + R(brng, -0.2f, 0.2f) * thick;
+                    float[] el = { ec - th * 0.45f, ec + R(brng, -0.1f, 0.1f) * th, ec + th * 0.55f };
+                    float[] al = { 0.25f * prof, prof, 0.18f * prof };
+                    for (int row = 0; row < 3; row++)
+                    {
+                        float e = el[row] * Mathf.Deg2Rad;
+                        bandDirs[bi] = new Vector3(Mathf.Sin(a) * Mathf.Cos(e), Mathf.Sin(e), Mathf.Cos(a) * Mathf.Cos(e));
+                        bandAlpha[bi] = al[row];
+                        bandOf[bi] = b;
+                        bi++;
+                    }
+                }
+            }
+            int bn = 0;
+            for (int b = 0; b < BandCount; b++)
+                for (int c = 0; c < BandCols - 1; c++)
+                    for (int row = 0; row < 2; row++)
+                    {
+                        int v0 = (b * BandCols + c) * 3 + row, v1 = v0 + 1, w0 = v0 + 3, w1 = w0 + 1;
+                        bt[bn++] = v0; bt[bn++] = v1; bt[bn++] = w0;
+                        bt[bn++] = w0; bt[bn++] = v1; bt[bn++] = w1;
+                    }
+            bandMesh = new Mesh { name = "SB_SkyBands" };
+            bandMesh.MarkDynamic();
+            bandMesh.SetVertices(bandDirs);
+            bandMesh.SetColors(bandCols);
+            bandMesh.SetTriangles(bt, 0, false);
+            bandMesh.bounds = new Bounds(Vector3.zero, Vector3.one * 2000f);
+            bandMat = Material(vertexColorShader, "SB_SkyBands", BandQueue);
+            var bgo = new GameObject("SkyBands");
+            bgo.transform.SetParent(parent, false);
+            bgo.AddComponent<MeshFilter>().sharedMesh = bandMesh;
+            bandR = bgo.AddComponent<MeshRenderer>();
+            Setup(bandR, bandMat);
+            bandT = bgo.transform;
+            bandT.localScale = Vector3.one * (Radius * 0.96f);
         }
+
+        static float R(System.Random r, float a, float b) => a + (float)r.NextDouble() * (b - a);
+
+        /// Vertex-colour sky material (no depth prepass, no shadows, no motion vectors) – also used for stars / moon.
+        internal static Material SkyLayerMaterial(Shader shader, string name, int queue) => Material(shader, name, queue);
 
         static Material Material(Shader shader, string name, int queue)
         {
@@ -326,6 +412,18 @@ namespace Sealebrities
             }
             else c = horizon * Mathf.Lerp(1f, 0.82f, Mathf.Clamp01(-e / 8f));
 
+            // round 3: around sunset / sunrise a gentle, wide warm glow hugs the horizon toward the sun (fades out by
+            // ~12° up and ±70° in azimuth; none by day or at night)
+            float glowK = Mathf.Clamp01((sunElev + 6f) / 4f) * (1f - Mathf.Clamp01((sunElev - 4f) / 6f));
+            if (glowK > 0f && e > -2f)
+            {
+                float wide = Mathf.Max(0f, 0.5f + 0.5f * cosA);
+                wide *= wide;
+                float low = Mathf.Exp(-Mathf.Max(e, 0f) / 6f);
+                float g = 0.32f * glowK * wide * low;
+                c = Color.Lerp(c, toward * 1.08f, g);
+            }
+
             // soft bright halo around the sun itself (art bible: halo ≈ 3× the disc, lighter sky)
             if (sunElev > -2f)
             {
@@ -340,7 +438,8 @@ namespace Sealebrities
         /// Recolours the dome when the sun moved (≥ 0.25° elevation or 1° azimuth) or the fog near the dome changed.
         /// recolor = false (camera under water, dome hidden) only refreshes the fog/reflection colours.
         /// warm (0..1, Q41 main menu): the golden-hour horizon away from the sun and the haze turn warm peach.
-        public void Update(Vector3 sun, float sunElev, float sunAzimuth, float fogVisAtDome, Color fogLinear, bool force, bool recolor = true, float warm = 0f, float haze = 0f)
+        public void Update(Vector3 sun, float sunElev, float sunAzimuth, float fogVisAtDome, Color fogLinear, bool force, bool recolor = true, float warm = 0f, float haze = 0f,
+                           float bandCover = 0.35f, float bandGrey = 0f)
         {
             haze = Mathf.Clamp01(haze);
             int k = Segment(sunElev, out float f);
@@ -363,11 +462,16 @@ namespace Sealebrities
             sunVisible = sunElev > -1.5f;
 
             if (mat == null || (!recolor && !force)) return;
-            bool changed = force || Mathf.Abs(sunElev - lastElev) > 0.25f || Mathf.Abs(Mathf.DeltaAngle(sunAzimuth, lastAz)) > 1f
+            bandCover = Mathf.Clamp01(bandCover);
+            bandGrey = Mathf.Clamp01(bandGrey);
+            bool bandsChanged = Mathf.Abs(bandCover - lastBandCover) > 0.01f || Mathf.Abs(bandGrey - lastBandGrey) > 0.01f
+                                || Mathf.Abs(Mathf.DeltaAngle(BandYaw, lastBandYaw)) > 1f;
+            bool changed = force || bandsChanged || Mathf.Abs(sunElev - lastElev) > 0.25f || Mathf.Abs(Mathf.DeltaAngle(sunAzimuth, lastAz)) > 1f
                            || Mathf.Abs(fogVisAtDome - lastFogVis) > 0.004f || Mathf.Abs(warm - lastWarm) > 0.01f
                            || Mathf.Abs(haze - lastHaze) > 0.01f || (haze > 0.01f && FogDiffers(fogLinear));
             if (!changed) return;
             lastElev = sunElev; lastAz = sunAzimuth; lastFogVis = fogVisAtDome; lastWarm = warm; lastHaze = haze; lastFogLinear = fogLinear;
+            lastBandCover = bandCover; lastBandGrey = bandGrey; lastBandYaw = BandYaw;
 
             float vis = Mathf.Clamp(fogVisAtDome, 0.05f, 1f);
             for (int i = 0; i < dirs.Length; i++)
@@ -386,6 +490,7 @@ namespace Sealebrities
                 cols[i] = linearSpace ? c : ToGamma(c);
             }
             mesh.SetColors(cols);
+            if (bandMesh != null) RecolorBands(k, f, sun, sunElev, warm, haze, fogLinear, vis, bandCover, bandGrey);
 
             // sun disc: warm white HDR core, halo fading out; dims into the horizon
             float lowK = Mathf.Clamp01((sunElev + 1.5f) / 6f) * (1f - 0.85f * haze);
@@ -402,6 +507,50 @@ namespace Sealebrities
             sunMesh.SetColors(sunCols);
         }
 
+        /// Band colours from the sky behind them: lighter whitish streaks by day; around sunset the sun side glows warm
+        /// while the far side turns into darker lilac silhouettes; dark streaks at night. Cover = how many / how dense.
+        void RecolorBands(int k, float f, Vector3 sun, float sunElev, float warm, float haze, Color fogLinear, float vis,
+                          float cover, float grey)
+        {
+            float yaw = BandYaw * Mathf.Deg2Rad, cy = Mathf.Cos(yaw), sy = Mathf.Sin(yaw);
+            float dayK = Mathf.Clamp01((sunElev + 6f) / 8f);
+            dayK = dayK * dayK * (3f - 2f * dayK);
+            float warmK = 1f - Mathf.Clamp01((sunElev - 4f) / 12f);
+            Color toward = Color.Lerp(lin[k, 3], lin[k + 1, 3], f);
+            float sx = sun.x, sz = sun.z, sl = Mathf.Sqrt(sx * sx + sz * sz);
+            float nVis = Mathf.Lerp(3.5f, BandCount, cover);
+            float baseA = Mathf.Lerp(0.42f, 0.8f, cover);
+            for (int i = 0; i < bandDirs.Length; i++)
+            {
+                Vector3 d0 = bandDirs[i];
+                var d = new Vector3(d0.x * cy + d0.z * sy, d0.y, -d0.x * sy + d0.z * cy);
+                Color sky = Eval(d, k, f, sun, sunElev, warm);
+                float hl = Mathf.Sqrt(d.x * d.x + d.z * d.z);
+                float cosA = hl > 1e-4f && sl > 1e-4f ? (d.x * sx + d.z * sz) / (hl * sl) : 0f;
+                float face = Mathf.Max(0f, 0.5f + 0.5f * cosA);
+                face *= face;
+                Color bright = Color.Lerp(bandWhite, toward * 1.15f, warmK);
+                float litAmt = dayK * Mathf.Lerp(1f, face, warmK);
+                Color c = Color.Lerp(sky * 0.86f, Color.Lerp(sky, bright, 0.5f), litAmt);
+                if (grey > 0f)
+                {
+                    float lum = 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
+                    c = Color.Lerp(c, new Color(lum * 0.92f, lum * 0.95f, lum * 1.02f), 0.6f * grey);
+                }
+                if (haze > 0f) c = Color.Lerp(c, fogLinear, haze);
+                if (vis < 0.999f)
+                {
+                    c.r = Mathf.Max(0f, (c.r - fogLinear.r * (1f - vis)) / vis);
+                    c.g = Mathf.Max(0f, (c.g - fogLinear.g * (1f - vis)) / vis);
+                    c.b = Mathf.Max(0f, (c.b - fogLinear.b * (1f - vis)) / vis);
+                }
+                float show = Mathf.Clamp01(nVis - bandOf[i]);
+                c.a = bandAlpha[i] * baseA * show * (1f - haze) * Mathf.Lerp(0.55f, 1f, dayK);   // fainter at night
+                bandCols[i] = linearSpace ? c : ToGamma(c);
+            }
+            bandMesh.SetColors(bandCols);
+        }
+
         Color Enc(Color c, float a) { c.a = a; return linearSpace ? c : ToGamma(c); }
 
         static Color ToGamma(Color c) => new Color(G(c.r), G(c.g), G(c.b), c.a);
@@ -414,8 +563,10 @@ namespace Sealebrities
             if (r.enabled != show) r.enabled = show;
             bool sun = show && sunVisible;
             if (sunR.enabled != sun) sunR.enabled = sun;
+            if (bandR != null && bandR.enabled != show) bandR.enabled = show;
             if (!show) return;
             t.position = camPos;
+            if (bandT != null) bandT.SetPositionAndRotation(camPos, Quaternion.Euler(0f, lastBandYaw > -900f ? lastBandYaw : 0f, 0f));
             if (sun)
             {
                 float d = Radius * 0.9f;
@@ -431,6 +582,8 @@ namespace Sealebrities
             if (sunMesh != null) Object.Destroy(sunMesh);
             if (mat != null) Object.Destroy(mat);
             if (sunMat != null) Object.Destroy(sunMat);
+            if (bandMesh != null) Object.Destroy(bandMesh);
+            if (bandMat != null) Object.Destroy(bandMat);
         }
     }
 }

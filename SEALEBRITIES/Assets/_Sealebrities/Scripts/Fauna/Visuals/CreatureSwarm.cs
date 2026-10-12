@@ -38,13 +38,19 @@ namespace Sealebrities
             if (s == null) return 0;
             switch (s.id)
             {
-                case "sardine": return 4;
-                case "lanternfish": return 2;
+                case "sardine": return 5;
+                case "lanternfish": return 3;
+                // round 3 (GDD §20 Q15 "viele Fische, überall"): the new schools bring buddies too
+                case "mackerel": return 5;
+                case "jack": return 3;
+                case "snapper": return 2;
+                case "yellowfin": return 1;
+                case "flashlight_fish": return 2;
                 // playtest round 2 („überall Fische“): the small reef schoolers always bring a couple of buddies
                 case "blue_tang":
                 case "barracuda":
                     if (FaunaEventInfo.IsActive && FaunaEventInfo.ActiveId == "big_school" && (at - FaunaEventInfo.Center).sqrMagnitude < 60f * 60f) return s.id == "blue_tang" ? 4 : 1;
-                    return s.id == "blue_tang" ? 2 : 0;
+                    return s.id == "blue_tang" ? 3 : 1;
                 case "cleaner_wrasse": return FaunaEventInfo.IsActive && FaunaEventInfo.ActiveId == "cleaning_station" ? 3 : 2;
                 default: return 0;
             }

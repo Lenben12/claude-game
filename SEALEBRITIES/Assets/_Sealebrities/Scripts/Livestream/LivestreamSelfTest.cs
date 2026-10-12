@@ -105,7 +105,7 @@ namespace Sealebrities
             if (!started) started = KrillTv.DebugStart(true);
             Check(started && LiveState.IsLive, "stream started (live " + LiveState.IsLive + ")");
             Check(s.lastStreamDay == s.day, "once-per-day marker set");
-            Hands.Select(Hand.Right, 0);   // camera in hand
+            if (Hands.Find(HoldItem.Camera, out int camSlot) && !Hands.IsHeld(HoldItem.Camera)) Hands.Select(camSlot);   // camera in hand
             yield return Wait(20f);
             Check(LiveState.Viewers > 0, "viewers " + LiveState.Viewers + " (base " + StreamRules.BaseViewers(s.followers).ToString("0", Inv) + "), hype " + LiveState.Hype.ToString("0.00", Inv));
             Check(chatCount > 0, chatCount + " chat bubbles so far");

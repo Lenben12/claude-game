@@ -8,7 +8,7 @@ namespace Sealebrities
     /// desired velocity; this component adds depth-band, terrain, obstacle and leash steering, integrates the motion,
     /// orients the body, animates the rig and keeps WorldBounds / Activity01 up to date.
     /// Ticked centrally by FaunaSpawner (lower rate when far away). Registers in CreatureRegistry while active.
-    public sealed class FaunaCreature : MonoBehaviour, ICreature
+    public sealed partial class FaunaCreature : MonoBehaviour, ICreature
     {
         // ------------------------------------------------------------------ ICreature
         public SpeciesDef Species => species;
@@ -114,6 +114,9 @@ namespace Sealebrities
         ShadowCastingMode[] shadowDefault;
         internal bool culled;
         float cullDistance;
+        /// Round 3: the model has see-through materials (jellies) – hidden from above the water (they would be drawn on
+        /// top of the sea surface, which is rendered before them).
+        bool transparentModel;
         float activity = 0.2f;
         Bounds bounds;
         int boundsCountdown;
@@ -155,6 +158,21 @@ namespace Sealebrities
             }
             anim = new FaunaSwimAnimator();
             anim.Setup(rig, s);
+            transparentModel = HasTransparentMaterial(renderers);
+        }
+
+        /// True when any renderer of the model uses a transparent material (render queue ≥ 2950).
+        internal static bool HasTransparentMaterial(Renderer[] rs)
+        {
+            if (rs == null) return false;
+            for (int i = 0; i < rs.Length; i++)
+            {
+                var r = rs[i];
+                if (r == null) continue;
+                var mats = r.sharedMaterials;
+                for (int k = 0; k < mats.Length; k++) if (mats[k] != null && mats[k].renderQueue >= 2950) return true;
+            }
+            return false;
         }
 
         /// (Re)activates the creature from the pool. The GameObject is switched on at the end.
@@ -189,6 +207,7 @@ namespace Sealebrities
             ignoreObstacles = false;
             propLift = 0f;
             propCountdown = 0;
+            ResetCombat();
 
             ComputeBodyFacts();
 
@@ -367,7 +386,7 @@ namespace Sealebrities
             activityTarget = 0.2f;
 
             bool directed = director != null && director.Steer(this, dt);
-            if (!directed) behavior.Tick(dt);
+            if (!directed && !TickHitFlee(dt)) behavior.Tick(dt);
             if (pendingDespawn) return;
 
             if (mode == FaunaMode.Ground) { TickGround(dt, nearLod); Finish(dt, nearLod); return; }
@@ -434,6 +453,8 @@ namespace Sealebrities
             float lim = inAir ? (above ? cullDistance : Mathf.Min(cullDistance, 25f)) : (above ? Mathf.Min(cullDistance, 35f) : cullDistance);
             bool shouldCull = culled ? distLocal > lim - 5f : distLocal > lim + 5f;
             if (above && !inAir && pos.y < surfaceY - 5f && distLocal > FilmShotEvaluator.MaxScanRange) shouldCull = true;
+            // round 3: see-through animals (jellies) would shine through the sea surface – hide them from above
+            if (above && transparentModel && pos.y < surfaceY - 0.5f) shouldCull = true;
             if (hallucination) shouldCull = false;
             if (shouldCull != culled) SetCulled(shouldCull);
             if (anim != null)

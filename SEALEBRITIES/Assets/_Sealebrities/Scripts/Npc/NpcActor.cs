@@ -7,9 +7,11 @@ namespace Sealebrities
     /// host's replicated state (NpcNet) and interpolate. Every machine animates it procedurally (walk waddle, idle
     /// breathing, blinking, talking mouth, look-at, gestures, work loops). Ticked by NpcDirector (no Update here).
     [DisallowMultipleComponent]
-    public sealed class NpcActor : MonoBehaviour, INpc, IInteractable
+    public sealed class NpcActor : MonoBehaviour, INpc, IInteractable, IHittable
     {
         public const byte FlagOffer = 1, FlagConversation = 2, FlagChoice = 4, FlagKiosk = 8;
+        /// Round 3 (hermits): fighting / attacking, wary (shoos you, no talk), friendly (teaches, jobs).
+        public const byte FlagHostile = 16, FlagWary = 32, FlagFriendly = 64;
 
         public NpcDef Def;
         public int Index;
@@ -49,7 +51,7 @@ namespace Sealebrities
         Quaternion headRot = Quaternion.identity;
         Transform markerRoot, markerBang, markerQuestion;
         CapsuleCollider col;
-        bool visible = true;
+        bool visible = true, colLying;
         float rng01;
 
         public Vector3 Position => pos;
@@ -122,6 +124,17 @@ namespace Sealebrities
             visPos = p;
             lastVisPos = p;
             visYaw = yawDeg;
+            transform.SetPositionAndRotation(p, Quaternion.Euler(0f, yawDeg, 0f));
+        }
+
+        /// Host: teleports the NPC to an exact point (no ground snap) – lying in a hammock, sitting on a bench.
+        public void PlaceExact(Vector3 p, float yawDeg)
+        {
+            Place(p, yawDeg);
+            pos = p;
+            targetY = p.y;
+            visPos = p;
+            lastVisPos = p;
             transform.SetPositionAndRotation(p, Quaternion.Euler(0f, yawDeg, 0f));
         }
 
@@ -280,6 +293,15 @@ namespace Sealebrities
             visPos = pos;
             visYaw = Mathf.LerpAngle(visYaw, yaw, 1f - Mathf.Exp(-12f * dt));
             transform.SetPositionAndRotation(visPos, Quaternion.Euler(0f, visYaw, 0f));
+            // round 3: lying in a hammock the capsule lies down too (no invisible pillar over the hammock)
+            bool lying = Motion == NpcMotion.Lie;
+            if (col != null && lying != colLying)
+            {
+                colLying = lying;
+                col.direction = lying ? 2 : 1;
+                col.center = lying ? new Vector3(0f, LieHipHeight, 0f) : new Vector3(0f, Def.height * 0.5f, 0f);
+                col.height = lying ? Def.height * 0.9f : Def.height + 0.1f;
+            }
 
             float measured = dt > 0f ? NpcUtil.FlatDist(visPos, lastVisPos) / dt : 0f;
             lastVisPos = visPos;
@@ -314,7 +336,7 @@ namespace Sealebrities
             float t = Time.time + rng01 * 10f;
             bool horst = Def.id == NpcDatabase.Horst;
             float sp = speedSmooth;
-            bool moving = sp > 0.15f && Motion != NpcMotion.Sit && Motion != NpcMotion.Lie && Motion != NpcMotion.Swim && Motion != NpcMotion.Paddle;
+            bool moving = sp > 0.15f && Motion != NpcMotion.Sit && Motion != NpcMotion.Lie && Motion != NpcMotion.Swim && Motion != NpcMotion.Paddle && Motion != NpcMotion.Dazed;
             bool running = moving && sp > 3f;
             float stride = running ? 0.85f : 0.55f;
             float stepRate = moving ? Mathf.Clamp(sp / stride, 0.8f, 3.2f) : 0f;
@@ -350,12 +372,34 @@ namespace Sealebrities
                     elL = elR = Quaternion.Euler(-35f, 0f, 0f);
                     break;
                 case NpcMotion.Lie:
-                    pivotRot = Quaternion.Euler(-88f, 0f, 0f);
-                    pivotPos = new Vector3(0f, 0.3f, 0.2f);
-                    hipL = Quaternion.Euler(-4f, 0f, -6f); hipR = Quaternion.Euler(-4f, 0f, 6f);
-                    kneeL = kneeR = Quaternion.Euler(6f, 0f, 0f);
-                    shL = Quaternion.Euler(0f, 0f, -35f + Mathf.Sin(t * 0.5f) * 3f); shR = Quaternion.Euler(0f, 0f, 35f);
+                {
+                    // on the back, head toward −Z; in a hammock (a registered sleep spot under the root) the torso and the
+                    // legs follow the cloth's curve (head end / feet end up) – round 3: Horst's hammock, the camp hammocks
+                    EnsureLieSpot();
+                    float hr = lieHead, fr = lieFeet;
+                    pivotRot = Quaternion.Euler(-88f + hr, 0f, 0f);
+                    pivotPos = new Vector3(0f, LieHipHeight, 0f);
+                    hipL = Quaternion.Euler(-2f - fr - hr, 0f, -6f); hipR = Quaternion.Euler(-2f - fr - hr, 0f, 6f);
+                    kneeL = kneeR = Quaternion.Euler(8f + fr * 0.6f, 0f, 0f);
+                    shL = Quaternion.Euler(0f, 0f, -18f + Mathf.Sin(t * 0.5f) * 3f); shR = Quaternion.Euler(0f, 0f, 18f);
                     elL = elR = Quaternion.Euler(-12f, 0f, 0f);
+                    if (lieHammock) roll += Mathf.Sin(t * 0.9f) * 2.5f;   // gentle sway
+                    break;
+                }
+                case NpcMotion.Dazed:
+                    // knocked down: sits in the sand, leaning back on the hands, the head wobbles
+                    hipL = Quaternion.Euler(-80f, 0f, -12f); hipR = Quaternion.Euler(-75f, 0f, 12f);
+                    kneeL = Quaternion.Euler(55f, 0f, 0f); kneeR = Quaternion.Euler(35f, 0f, 0f);
+                    pivotPos.y = 0.17f;
+                    lean -= 14f;
+                    roll += Mathf.Sin(t * 3.1f) * 6f;
+                    shL = Quaternion.Euler(28f, 0f, -24f); shR = Quaternion.Euler(28f, 0f, 24f);
+                    elL = elR = Quaternion.Euler(-8f, 0f, 0f);
+                    break;
+                case NpcMotion.ArmsCrossed:
+                    shL = Quaternion.Euler(-28f, 28f, -6f); shR = Quaternion.Euler(-28f, -28f, 6f);
+                    elL = Quaternion.Euler(-108f, 0f, 0f); elR = Quaternion.Euler(-100f, 0f, 0f);
+                    lean -= 3f;
                     break;
                 case NpcMotion.Swim:
                     pivotPos.y = -b.hipY * 0.6f + Mathf.Sin(t * 2f) * 0.05f;
@@ -495,7 +539,7 @@ namespace Sealebrities
             }
             float lid = 1f;
             if (blinkT > 0f) { blinkT -= dt; lid = 0.12f; }
-            if (Motion == NpcMotion.Doze || Motion == NpcMotion.Lie && Def.id == NpcDatabase.Grandpa) lid = 0.1f;
+            if (Motion == NpcMotion.Doze || Motion == NpcMotion.Lie) lid = 0.1f;   // round 3: lying = asleep (hammocks)
             if (b.lidL != null) { b.lidL.localScale = new Vector3(1f, lid, 1f); b.lidR.localScale = new Vector3(1f, lid, 1f); }
 
             // ---- mouth + moustache bob
@@ -518,6 +562,13 @@ namespace Sealebrities
                 case NpcGesture.Fall: return 1.4f;
                 case NpcGesture.Flail: return 2.4f;
                 case NpcGesture.Greet: return 0.9f;
+                case NpcGesture.Shoo: return 1.6f;
+                case NpcGesture.HandOnHeart: return 1.8f;
+                case NpcGesture.Swing: return 0.8f;
+                case NpcGesture.Flinch: return 0.6f;
+                case NpcGesture.Bow: return 1.6f;
+                case NpcGesture.Spyglass: return 2.6f;
+                case NpcGesture.Pose: return 2.0f;
                 default: return 1.2f;
             }
         }
@@ -529,14 +580,48 @@ namespace Sealebrities
             switch (g)
             {
                 case NpcGesture.Wave:
-                    gR = Quaternion.Euler(-150f, 0f, 30f + Mathf.Sin(t * 12f) * 22f);
-                    eR = Quaternion.Euler(-25f, 0f, 0f);
-                    break;
                 case NpcGesture.Greet:
-                    // a short ordinary wave (hand moving, elbow bent) – never a still raised palm (GDD §19: „kein
-                    // komischer Arm-Gruß“)
-                    gR = Quaternion.Euler(-115f, 0f, 30f + Mathf.Sin(t * 12f) * 18f);
-                    eR = Quaternion.Euler(-40f, 0f, 0f);
+                    // round 3 (GDD §19: „Kein komischer Arm-Gruß“): no NPC waves an arm to greet any more – both old
+                    // greeting gestures are a friendly nod now
+                    lean += Mathf.Sin(Mathf.Clamp01(t / 0.9f) * Mathf.PI * 2f) * 6f;
+                    break;
+                case NpcGesture.Shoo:
+                {
+                    float s = Mathf.Sin(t * 14f);
+                    gL = Quaternion.Euler(-62f + s * 18f, 0f, -18f); gR = Quaternion.Euler(-62f - s * 18f, 0f, 18f);
+                    eL = eR = Quaternion.Euler(-35f + s * 15f, 0f, 0f);
+                    lean -= 4f;
+                    break;
+                }
+                case NpcGesture.HandOnHeart:
+                    gR = Quaternion.Euler(-58f, -38f, 4f);
+                    eR = Quaternion.Euler(-118f, 0f, 0f);
+                    lean += 14f * Mathf.Sin(Mathf.Clamp01(t / 1.8f) * Mathf.PI);
+                    break;
+                case NpcGesture.Swing:
+                    // wind-up over the shoulder (0–0.45 s), then the bonk down
+                    if (t < 0.45f) { gR = Quaternion.Euler(-165f, 0f, 22f); eR = Quaternion.Euler(-45f, 0f, 0f); lean -= 6f; }
+                    else { gR = Quaternion.Euler(-35f, 0f, 8f); eR = Quaternion.Euler(-10f, 0f, 0f); lean += 12f; }
+                    break;
+                case NpcGesture.Flinch:
+                    lean -= 16f * Mathf.Sin(Mathf.Clamp01(t / 0.6f) * Mathf.PI);
+                    gL = Quaternion.Euler(-110f, 0f, -30f); gR = Quaternion.Euler(-110f, 0f, 30f);
+                    eL = eR = Quaternion.Euler(-95f, 0f, 0f);
+                    break;
+                case NpcGesture.Bow:
+                    lean += 34f * Mathf.Sin(Mathf.Clamp01(t / 1.6f) * Mathf.PI);
+                    gL = Quaternion.Euler(-10f, 0f, -6f); gR = Quaternion.Euler(-10f, 0f, 6f);
+                    break;
+                case NpcGesture.Spyglass:
+                    gR = Quaternion.Euler(-98f, -32f, 10f);
+                    eR = Quaternion.Euler(-132f, 0f, 0f);
+                    gL = Quaternion.Euler(-70f, 20f, -10f);
+                    eL = Quaternion.Euler(-60f, 0f, 0f);
+                    break;
+                case NpcGesture.Pose:
+                    gL = Quaternion.Euler(-12f, 0f, -48f); eL = Quaternion.Euler(-95f, 0f, 0f);
+                    gR = Quaternion.Euler(-150f, 0f, 28f); eR = Quaternion.Euler(-10f, 0f, 0f);
+                    lean -= 5f;
                     break;
                 case NpcGesture.Point:
                     gR = Quaternion.Euler(-85f, 0f, 12f);
@@ -612,6 +697,38 @@ namespace Sealebrities
             elL = Quaternion.Slerp(elL, eL, w);
             elR = Quaternion.Slerp(elR, eR, w);
         }
+
+        // ---------------------------------------------------------------- lying (round 3: hammocks)
+        /// Height of the pelvis above the root while lying on the back (the root sits on the mattress / cloth / sand).
+        public const float LieHipHeight = 0.14f;
+        Vector3 lieAt = new Vector3(float.NaN, 0f, 0f);
+        float lieHead, lieFeet;
+        bool lieHammock;
+
+        /// Finds the registered sleep spot under the root (hammock / bed – same on every machine) for the cloth curve.
+        void EnsureLieSpot()
+        {
+            if (!float.IsNaN(lieAt.x) && (lieAt - pos).sqrMagnitude < 0.04f) return;
+            lieAt = pos;
+            lieHead = 0f; lieFeet = 0f; lieHammock = false;
+            var spots = PropInfo.SleepSpots;
+            for (int i = 0; i < spots.Count; i++)
+            {
+                var s = spots[i];
+                Vector3 hip = s.hip != Vector3.zero ? s.hip : s.lie;
+                if ((hip - pos).sqrMagnitude > 0.8f * 0.8f) continue;
+                lieHammock = s.kind == SleepSpotInfo.Hammock;
+                lieHead = Mathf.Clamp(s.headRise, 0f, 30f);
+                lieFeet = Mathf.Clamp(s.feetRise, 0f, 30f);
+                return;
+            }
+        }
+
+        // ---------------------------------------------------------------- IHittable (round 3: the stick fights)
+        /// Hermits can be bonked (they fight back, Q6/Q7); everybody else just complains (no wear, no hype).
+        public bool CanBeHit => Present && Motion != NpcMotion.Hidden && Motion != NpcMotion.Lie && isActiveAndEnabled;
+
+        public void OnHit(in HitInfo hit) => NpcDirector.LocalHitNpc(this, hit);
 
         // ---------------------------------------------------------------- IInteractable (local player)
         public string GetPrompt() => NpcDirector.PromptFor(this);

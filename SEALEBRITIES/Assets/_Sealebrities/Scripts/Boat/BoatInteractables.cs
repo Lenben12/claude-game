@@ -311,17 +311,25 @@ namespace Sealebrities
         void OnDestroy() => Release();
     }
 
-    /// Anchor winch on the foredeck: drop or raise the anchor.
+    /// Anchor winch on the foredeck. Round 3 (GDD §19 „Nur der Fahrer kann den Anker legen“): the anchor is worked from the
+    /// wheel only (Q at the helm) – at the winch the prompt just says so.
     public class BoatAnchorInteractable : MonoBehaviour, IInteractable
     {
         public BoatController boat;
-        readonly KeyPrompt raise = new KeyPrompt(GameAction.Interact, "Anker lichten", "Raise anchor");
-        readonly KeyPrompt drop = new KeyPrompt(GameAction.Interact, "Anker werfen", "Drop anchor");
+        string cache, cacheKey;
+        Language cacheLang;
 
         public string GetPrompt()
         {
-            if (boat == null) return null;
-            return boat.Anchored ? raise.Text : drop.Text;
+            if (boat == null || !CanInteract()) return null;
+            string q = GameInput.BindingLabel(GameAction.Anchor);
+            if (cache == null || cacheLang != Loc.Current || !ReferenceEquals(q, cacheKey))
+            {
+                cacheLang = Loc.Current;
+                cacheKey = q;
+                cache = Loc.Tr("Anker: nur am Steuer (" + q + ")", "Anchor: from the wheel only (" + q + ")");
+            }
+            return cache;
         }
 
         public bool CanInteract()
@@ -333,7 +341,169 @@ namespace Sealebrities
 
         public void Interact()
         {
-            if (boat != null && CanInteract()) boat.ToggleAnchor();
+            if (boat == null || !CanInteract()) return;
+            BoatController.NotDriverHint();
+        }
+    }
+
+    /// Round 3 (GDD §19 „Ein zweiter Sitzplatz, z. B. eine Sitzbank vorne“, Q36 „Beifahrer: Filmen + Karte ansehen“): the
+    /// passenger bench on the foredeck. „E – Hinsetzen“ takes the free seat nearest to you (two seats; a seat with another
+    /// crew member on it counts as taken). Seated here the hands stay free (SeatRules: camera, phone, map), the view turns
+    /// ±150°, E or Space stands you up next to the bench. Only the driver works the anchor.
+    public class BoatBenchInteractable : MonoBehaviour, IInteractable
+    {
+        public BoatController boat;
+        public BoatParts parts;
+        readonly KeyPrompt sit = new KeyPrompt(GameAction.Interact, "Hinsetzen", "Sit down");
+        string seatedPrompt, spE, spM;
+        Language spLang;
+        int seatedIndex = -1;
+        float seatedAt = -10f, leftAt = -10f;
+
+        public static BoatBenchInteractable Instance { get; private set; }
+
+        void Awake() { Instance = this; }
+        void OnDestroy()
+        {
+            if (Instance == this) Instance = null;
+            ReleasePrompt();
+        }
+
+        /// The local player sits on this bench (seat 0/1), −1 = not.
+        public int LocalSeat => seatedIndex;
+
+        static IPlayer Local
+        {
+            get
+            {
+                var p = Refs.Player;
+                return p == null || (p is Object o && o == null) ? null : p;
+            }
+        }
+
+        /// Another crew member sits on seat i (their avatar root is on the seat).
+        public bool Taken(int i)
+        {
+            if (parts == null || parts.benchSeats == null || i < 0 || i >= parts.benchSeats.Length || parts.benchSeats[i] == null) return true;
+            Vector3 s = parts.benchSeats[i].position;
+            var me = Local;
+            Transform mine = me != null ? me.Root : null;
+            var all = Divers.All;
+            for (int k = 0; k < all.Count; k++)
+            {
+                var t = all[k];
+                if (t == null || t == mine) continue;
+                Vector3 d = t.position - s;
+                if (Mathf.Abs(d.y) < 1.2f && d.x * d.x + d.z * d.z < 0.4f * 0.4f) return true;
+            }
+            return false;
+        }
+
+        int FreeSeatNear(Vector3 from)
+        {
+            int best = -1;
+            float bd = float.MaxValue;
+            for (int i = 0; i < 2; i++)
+            {
+                if (Taken(i)) continue;
+                float d = (parts.benchSeats[i].position - from).sqrMagnitude;
+                if (d < bd) { bd = d; best = i; }
+            }
+            return best;
+        }
+
+        public string GetPrompt()
+        {
+            if (!CanInteract()) return null;
+            var p = Local;
+            if (FreeSeatNear(p.Root.position) < 0) return Loc.Tr("Besetzt", "Occupied");
+            return sit.Text;
+        }
+
+        public bool CanInteract()
+        {
+            var p = Local;
+            if (boat == null || parts == null || parts.benchSeats == null || p == null || p.Root == null) return false;
+            if (Time.time - leftAt < 0.4f) return false;
+            return GameManager.I != null && GameManager.I.InGame && !p.IsInWater && !p.IsSeated && !p.IsFainting && boat.PlayerAboard && !boat.PlayerDriving;
+        }
+
+        public void Interact()
+        {
+            if (!CanInteract()) return;
+            var p = Local;
+            int i = FreeSeatNear(p.Root.position);
+            if (i < 0)
+            {
+                GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Besetzt", "Occupied"), null);
+                return;
+            }
+            SitOn(i);
+        }
+
+        /// Puts the local player on seat i (tests call it directly). False when the seat is taken / not possible.
+        public bool SitOn(int i)
+        {
+            var p = Local;
+            if (p == null || parts == null || parts.benchSeats == null || i < 0 || i >= parts.benchSeats.Length || Taken(i) || p.IsSeated) return false;
+            p.SetSeated(parts.benchSeats[i]);
+            seatedIndex = i;
+            seatedAt = Time.time;
+            BoatSynth.PlayAt(BoatSynth.Thunk, parts.benchSeats[i].position, 0.25f, 1.4f, 12f);
+            return true;
+        }
+
+        /// Stands the local player up next to the bench.
+        public void StandUp()
+        {
+            var p = Local;
+            int i = seatedIndex;
+            seatedIndex = -1;
+            leftAt = Time.time;
+            ReleasePrompt();
+            if (p == null || !p.IsSeated || parts == null || parts.benchExitLocal == null || i < 0) return;
+            p.ClearSeated(boat.transform.TransformPoint(parts.benchExitLocal[Mathf.Clamp(i, 0, parts.benchExitLocal.Length - 1)]));
+        }
+
+        string SeatedPrompt()
+        {
+            string e = GameInput.BindingLabel(GameAction.Interact), m = GameInput.BindingLabel(GameAction.Map);
+            if (seatedPrompt == null || spLang != Loc.Current || !ReferenceEquals(e, spE) || !ReferenceEquals(m, spM))
+            {
+                spLang = Loc.Current;
+                spE = e; spM = m;
+                seatedPrompt = Loc.Tr(e + " – Aufstehen · " + m + " – Karte", e + " – Get up · " + m + " – Map");
+            }
+            return seatedPrompt;
+        }
+
+        void ReleasePrompt()
+        {
+            if (seatedPrompt != null && ReferenceEquals(InteractionPrompt.Text, seatedPrompt)) InteractionPrompt.Text = null;
+        }
+
+        void Update()
+        {
+            if (seatedIndex < 0) return;
+            var p = Local;
+            bool stillHere = p != null && p.IsSeated && parts != null && parts.benchSeats != null
+                             && SeatRules.LocalPassenger && p.Root != null
+                             && (p.Root.position - parts.benchSeats[seatedIndex].position).sqrMagnitude < 0.05f;
+            if (!stillHere)
+            {
+                // teleported / fainted / sat elsewhere: forget the seat
+                seatedIndex = -1;
+                ReleasePrompt();
+                return;
+            }
+            bool input = GameManager.I != null && GameManager.I.InGame && !UIState.BlocksGameplay;
+            if (input && Time.time - seatedAt > 0.3f && (GameInput.InteractPressed || GameInput.JumpPressed))
+            {
+                StandUp();
+                return;
+            }
+            if (input && !UIState.MapOverlayOpen) InteractionPrompt.Text = SeatedPrompt();
+            else ReleasePrompt();
         }
     }
 

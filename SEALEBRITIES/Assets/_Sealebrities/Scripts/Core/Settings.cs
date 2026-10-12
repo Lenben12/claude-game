@@ -70,7 +70,8 @@ namespace Sealebrities
         public float voiceGateDb = -45f;
         /// Every cosmetic this machine has ever seen unlocked (character screen in the main menu / as a co-op guest).
         public List<string> unlockedCosmetics = new List<string>();
-        /// Achievements of THIS machine (F.6 – each machine keeps its own list).
+        /// LEGACY (F.6 per-machine list): since round 3 step 6b achievements belong to the WORLD (save slot,
+        /// GameState.achievements) – this list is no longer read or written (kept so old files stay valid).
         public List<string> achievements = new List<string>();
 
         // ---- v3 (round 2b)
@@ -80,6 +81,10 @@ namespace Sealebrities
         public bool musicWhileDiving = true;
         /// L.10 task display: 0 Normal, 1 Small (text only, 18 px), 2 Off.
         public int questDisplay;
+
+        // ---- round 3 look fields (GDD §19 „mehr Optionen“) – 0 = default, so older files need no migration
+        /// DiverLook.build / height (−2 … +2) / hair / hairColor / beard / nose / accessory.
+        public int build, height, hair, hairColor, beard, nose, accessory;
     }
 
     /// Settings in persistentDataPath/settings.json. Load + Apply run in GameManager.Awake.
@@ -330,6 +335,8 @@ namespace Sealebrities
                 playerKey = old.playerKey, introSeen = old.introSeen, normalCompleted = old.normalCompleted,
                 lastCrew = old.lastCrew, cuffColor = old.cuffColor, pattern = old.pattern, eyes = old.eyes, brows = old.brows,
                 skin = old.skin, mouth = old.mouth, maskColor = old.maskColor, finsColor = old.finsColor, snorkel = old.snorkel,
+                build = old.build, height = old.height, hair = old.hair, hairColor = old.hairColor, beard = old.beard, nose = old.nose,
+                accessory = old.accessory,
                 unlockedCosmetics = old.unlockedCosmetics, achievements = old.achievements,
             };
             Data = d;
@@ -365,7 +372,14 @@ namespace Sealebrities
                     mask = d.maskColor,
                     fins = d.finsColor,
                     snorkel = d.snorkel,
-                    sitting = false
+                    sitting = false,
+                    build = d.build,
+                    height = d.height,
+                    hair = d.hair,
+                    hairColor = d.hairColor,
+                    beard = d.beard,
+                    nose = d.nose,
+                    accessory = d.accessory
                 };
                 l.cuff = new Color(d.cuffColor.r, d.cuffColor.g, d.cuffColor.b, d.cuffColor.a);
                 l.cuff = l.ResolvedCuff;
@@ -400,6 +414,13 @@ namespace Sealebrities
             d.maskColor = l.mask;
             d.finsColor = l.fins;
             d.snorkel = l.snorkel;
+            d.build = l.build;
+            d.height = l.height;
+            d.hair = l.hair;
+            d.hairColor = l.hairColor;
+            d.beard = l.beard;
+            d.nose = l.nose;
+            d.accessory = l.accessory;
         }
 
         /// Volume helpers (already excluding master, which is applied by AudioListener.volume).
@@ -468,6 +489,13 @@ namespace Sealebrities
             d.skin = Mathf.Clamp(d.skin, 0, CosmeticsDatabase.SkinTones.Length - 1);
             d.mouth = Mathf.Clamp(d.mouth, 0, CosmeticsDatabase.MouthCount - 1);
             d.face = d.skin * 5 + d.mouth;
+            d.build = Mathf.Clamp(d.build, 0, CosmeticsDatabase.BuildCount - 1);
+            d.height = Mathf.Clamp(d.height, -2, 2);
+            d.hair = Mathf.Clamp(d.hair, 0, CosmeticsDatabase.HairCount - 1);
+            d.hairColor = Mathf.Clamp(d.hairColor, 0, CosmeticsDatabase.HairColors.Length - 1);
+            d.beard = Mathf.Clamp(d.beard, 0, CosmeticsDatabase.BeardCount - 1);
+            d.nose = Mathf.Clamp(d.nose, 0, CosmeticsDatabase.NoseCount - 1);
+            d.accessory = Mathf.Clamp(d.accessory, 0, CosmeticsDatabase.AccessoryCount - 1);
             d.questDisplay = Mathf.Clamp(d.questDisplay, 0, 2);
             if (d.bindings == null) d.bindings = new List<BindingEntry>();
             if (d.lastCrew == null) d.lastCrew = new List<DiverLook>();

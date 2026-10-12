@@ -132,18 +132,27 @@ namespace Sealebrities
 
         bool ToGo => PropQuest.WantsCarry("grilled_fish");
 
-        // the prompt names the fish the grill will take („Makrele grillen“) – cached per fish uid / language
+        /// Round 3: raw food from the backpack is cooked first (one per 4 s); without raw food the grill takes the
+        /// cheapest fish of the shared cooler as before – the cooked food goes into the BACKPACK (eat it later).
+        static bool HasRaw => Survival.RawCount > 0;
+
+        // the prompt names the fish the grill will take („Makrele grillen“) – cached per fish uid / raw item / language
         int verbUid = int.MinValue;
+        string verbRaw;
         Language verbLang;
         string verbDe = "Fisch grillen", verbEn = "Grill a fish";
 
         void RefreshVerb()
         {
-            var f = Pantry.BestGrillFish();
+            string raw = Survival.FirstRaw();
+            var f = raw == null ? Pantry.BestGrillFish() : null;
             int uid = f != null ? f.uid : int.MinValue + 1;
-            if (uid == verbUid && verbLang == Loc.Current) return;
+            if (uid == verbUid && raw == verbRaw && verbLang == Loc.Current) return;
             verbUid = uid;
+            verbRaw = raw;
             verbLang = Loc.Current;
+            var rd = ItemDatabase.Get(raw);
+            if (rd != null) { verbDe = rd.nameDe + " braten"; verbEn = "Cook " + rd.nameEn; return; }
             var k = f != null ? FishMarket.Kind(f.kindId) : null;
             if (k == null) { verbDe = "Fisch grillen"; verbEn = "Grill a fish"; return; }
             verbDe = k.nameDe + " grillen";
@@ -155,11 +164,12 @@ namespace Sealebrities
 
         void Awake() { seconds = 6f; range = 3.6f; }
 
-        protected override bool Available() => Pantry.BestGrillFish() != null && (!ToGo || !Carry.IsCarrying);
-        protected override string UnavailableHint => Pantry.BestGrillFish() == null ? PropPrompt.Text("Kühlbox leer – erst angeln", "Cooler empty – go fishing") : null;
+        protected override bool Available() => (HasRaw || Pantry.BestGrillFish() != null) && (!ToGo || !Carry.IsCarrying);
+        protected override string UnavailableHint => !HasRaw && Pantry.BestGrillFish() == null ? PropPrompt.Text("Nichts zum Braten – erst angeln", "Nothing to cook – go fishing") : null;
 
         protected override void OnStart()
         {
+            seconds = HasRaw && !ToGo ? Survival.CookSeconds : 6f;
             if (smoke != null) smoke.Play(true);
             PropMats.SetEmission(glow, glowColor);
         }
@@ -173,15 +183,26 @@ namespace Sealebrities
         protected override void Complete()
         {
             bool togo = ToGo;
+            if (!togo && HasRaw)
+            {
+                string raw = Survival.FirstRaw();
+                var rd = ItemDatabase.Get(raw);
+                if (Survival.CookOne()) GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Gebraten!", "Cooked!"), rd != null ? ItemDatabase.Get(rd.cookTo)?.Name : null);
+                return;
+            }
             // packed to go for Toni: no buff / grill-master count for the cook
-            if (!Pantry.TryGrill(out var fish, !togo)) return;
+            if (!Pantry.TryGrill(out var fish, false)) return;
             if (togo && Carry.Pick("q:grilled_fish:0"))
             {
                 GameEvents.RaiseNotify(NotifyKind.Quest, Loc.Tr("Grillfisch eingepackt", "Grilled fish packed"));
                 PropQuest.RaiseUsed("carry:grilled_fish", transform.position);
                 return;
             }
-            GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Lecker!", "Delicious!"), fish != null ? fish.weightKg.ToString("0.0", CultureInfo.InvariantCulture) + " kg" : null);
+            var rec = PlayerRecords.Local;
+            if (rec != null) { rec.grilled++; Achievements.OnLocalCounter(rec); }
+            // into the backpack (eaten right away only when it is full)
+            if (Backpack.Add(FoodDatabase.GrilledFish, 1, false) == 0) Survival.Consume(ItemDatabase.Get(FoodDatabase.GrilledFish));
+            GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Gegrillt!", "Grilled!"), fish != null ? fish.weightKg.ToString("0.0", CultureInfo.InvariantCulture) + " kg" : null);
         }
     }
 
@@ -264,7 +285,7 @@ namespace Sealebrities
         public string GetPrompt()
         {
             if (!CanInteract()) return null;
-            return Carry_ ? PropPrompt.Interact("Kokosnuss mitnehmen", "Take the coconut") : PropPrompt.Interact("Kokosnuss trinken", "Drink the coconut");
+            return Carry_ ? PropPrompt.Interact("Kokosnuss mitnehmen", "Take the coconut") : PropPrompt.Interact("Kokosnuss aufheben", "Pick up the coconut");
         }
 
         public bool CanInteract() => t >= 1f && GameManager.I != null && GameManager.I.InGame;
@@ -277,10 +298,10 @@ namespace Sealebrities
                 if (!Carry.Pick("q:coconut:0")) { GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Hände sind voll", "Hands are full")); return; }
                 PropQuest.RaiseUsed("carry:coconut", transform.position);
             }
-            else
+            else if (Backpack.Add(FoodDatabase.Coconut, 1) == 0)
             {
+                // round 3: into the backpack – drunk right away only when the backpack is full
                 Pantry.DrinkCoconut();
-                GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Kokosnuss!", "Coconut!"), Loc.Tr("Schneller schwimmen", "Swim faster"));
             }
             Destroy(gameObject);
         }
@@ -322,24 +343,21 @@ namespace Sealebrities
             if (!CanInteract()) return;
             lastUse = Time.unscaledTime;
             if (PropHooks.OpenFood != null) { PropHooks.OpenFood(kind); return; }
-            if (Kiosk) BuyFallback();
+            if (Kiosk) { BuyFallback(); Pantry.TakeAllToBackpack(); }
             else EatFallback();
         }
 
+        /// Round 3: the fridge hands its snacks over into the backpack (eat them from there / the hotbar).
         static void EatFallback()
         {
-            FoodDef best = null;
-            foreach (var f in FoodDatabase.All)
-            {
-                if (Pantry.Count(f.id) <= 0) continue;
-                if (best == null || f.value > best.value) best = f;
-            }
-            if (best == null)
+            if (Pantry.TotalCount <= 0)
             {
                 GameEvents.RaiseNotify(NotifyKind.Info, Loc.Tr("Kühlschrank leer", "Fridge empty"), Loc.Tr("Snacks im Chopper Shop", "Snacks in the Chopper Shop"));
                 return;
             }
-            if (Pantry.TryEat(best.id)) GameEvents.RaiseNotify(NotifyKind.Info, best.Name, best.Description);
+            int n = Pantry.TakeAllToBackpack();
+            if (n > 0) GameEvents.RaiseNotify(NotifyKind.Collectible, Loc.Tr("Aus dem Kühlschrank", "From the fridge"), "+" + n + Loc.Tr(" im Rucksack", " in the backpack"));
+            else GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Rucksack voll", "Backpack full"));
         }
 
         static void BuyFallback()

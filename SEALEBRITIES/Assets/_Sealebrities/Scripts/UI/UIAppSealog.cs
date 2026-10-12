@@ -70,6 +70,17 @@ namespace Sealebrities
             Phone.Refresh(false);
         }
 
+        /// Tests / AutoShot (round 3 UI step): shows a Sealog page by id (SpeciesDatabase.VolcanoPage, MemePage, a site id).
+        public bool DebugShowPage(string pageId)
+        {
+            int i = SealogPages.IndexOf(pageId);
+            if (i < 0) return false;
+            detail = null;
+            pageIndex = i;
+            Phone.Refresh(false);
+            return true;
+        }
+
         void FreePhoto()
         {
             if (photo != null) Object.Destroy(photo);
@@ -96,6 +107,7 @@ namespace Sealebrities
         static string Band(SpeciesDef s)
         {
             if (s.land) return Loc.Tr("an Land", "on land");
+            if (s.meme) return Loc.Tr("Kurios!", "Curious!");
             float a = Mathf.Max(0f, s.minDepth), b = Mathf.Max(a, s.maxDepth);
             return UIKit.DepthRange(a, b);
         }
@@ -106,12 +118,14 @@ namespace Sealebrities
         static bool PageLocked(SealogPages.Page p, out DiveSite site)
         {
             site = p.site ? DiveSites.Get(p.id) : null;
+            if (p.id == SpeciesDatabase.VolcanoPage) return !VolcanoGate.Open;   // round 3: opens with the wreck
             return site != null && !Progression.IsSiteUnlocked(site);
         }
 
         static string PageName(SealogPages.Page p)
         {
             if (p.id == Zones.FogIsle && !StoryFlags.Has(StoryKeys.FogMap)) return "???";
+            if (p.id == SpeciesDatabase.VolcanoPage && !VolcanoGate.Open) return "???";
             return p.Name;
         }
 
@@ -205,11 +219,16 @@ namespace Sealebrities
             body.Add(grid);
         }
 
+        /// Page colour: the dive site's map colour, the volcano orange, the curiosities violet.
+        static Color PageColor(SealogPages.Page page, DiveSite site)
+            => site != null ? site.mapColor : page.id == SpeciesDatabase.VolcanoPage ? UIPalette.Rgb(0xE8552E)
+             : page.id == SpeciesDatabase.MemePage ? UIPalette.Violet : UIPalette.Sky;
+
         VisualElement PageTab(SealogPages.Page page, int index)
         {
             bool sel = index == pageIndex;
             bool locked = PageLocked(page, out var site);
-            Color c = site != null ? site.mapColor : page.id == "island" ? UIPalette.Leaf : UIPalette.Sky;
+            Color c = PageColor(page, site);
             var tab = UIKit.Row();
             UIKit.Radius(tab, 999f);
             UIKit.Pad(tab, 10f, 16f, 10f, 14f);
@@ -287,7 +306,7 @@ namespace Sealebrities
             {
                 var sp = all[i];
                 var e = Entry(sp.id);
-                if (e == null || !e.discovered) continue;
+                if (e == null || !e.discovered || !sp.InSealog || sp.meme) continue;
                 shown++;
                 bool gold = FilmLegends.HasGold(sp.id);
                 float target = FilmLegends.GoldTarget(sp);
@@ -328,12 +347,22 @@ namespace Sealebrities
         VisualElement PageCard(SealogPages.Page page)
         {
             bool locked = PageLocked(page, out var site);
-            Color c = site != null ? site.mapColor : UIPalette.Sky;
+            Color c = PageColor(page, site);
+            bool volcano = page.id == SpeciesDatabase.VolcanoPage, memes = page.id == SpeciesDatabase.MemePage;
             var card = PhoneKit.Card();
             card.style.borderLeftWidth = 8f;
             card.style.borderLeftColor = c;
+            if (volcano) card.style.backgroundColor = locked ? UIPalette.Rgb(0xF1ECE6) : UIPalette.Rgb(0xFFF1E8);
+            else if (memes) card.style.backgroundColor = UIPalette.Rgb(0xF5F0FF);
 
             var r = UIKit.Row();
+            if (volcano || memes)
+            {
+                // round 3 pages: their own icon tile (smoke / sparkle) – the volcano tile is a lock until the wreck
+                var tile = UIWidgets.IconTile(locked ? UIGlyphs.Lock : volcano ? UIGlyphs.Smoke : UIGlyphs.Sparkle, locked ? UIPalette.Silhouette : c, 52f);
+                tile.style.marginRight = 12f;
+                r.Add(tile);
+            }
             var name = UIKit.Text(site != null && !locked ? site.Name : PageName(page), PhoneKit.Big, UIPalette.Ink, true);
             name.style.flexShrink = 1;
             name.style.whiteSpace = WhiteSpace.Normal;
@@ -347,6 +376,32 @@ namespace Sealebrities
                 r.Add(depth);
             }
             card.Add(r);
+            if (volcano)
+            {
+                var sub = PhoneKit.T(locked ? Loc.Tr("Öffnet mit dem Wrack", "Opens with the wreck") : Loc.Tr("Lebende Fossilien + ein Urzeit-Monster", "Living fossils + one prehistoric monster"),
+                                     PhoneKit.Small, locked ? UIPalette.SunInk : UIPalette.Rgb(0xB8431F), true);
+                sub.style.marginTop = 6f;
+                card.Add(sub);
+                if (locked)
+                {
+                    var wreck = DiveSites.Get("wreck");
+                    if (wreck != null && !Progression.SiteRequirementsMet(wreck, out string why) && !string.IsNullOrEmpty(why))
+                    {
+                        var n = UIWidgets.Notice(why, UIPalette.Sun, UIGlyphs.Lock, PhoneKit.Small);
+                        n.style.marginTop = 8f;
+                        n.style.marginBottom = 0f;
+                        card.Add(n);
+                    }
+                }
+            }
+            else if (memes)
+            {
+                var sub = UIKit.Row();
+                sub.style.marginTop = 6f;
+                sub.Add(new UIGlyph(UIGlyphs.Camera, UIPalette.Violet, 24f));
+                sub.Add(PhoneKit.T(" " + Loc.Tr("Lustige Fundstücke im Meer · Foto = Eintrag", "Funny finds in the sea · photo = entry"), PhoneKit.Small, UIPalette.Rgb(0x6B4FB0), true));
+                card.Add(sub);
+            }
 
             if (site != null && locked && !Progression.SiteRequirementsMet(site, out string reason))
             {
@@ -458,13 +513,15 @@ namespace Sealebrities
             }
             else
             {
-                var lives = UIKit.Text(Loc.Tr("Lebt in ", "Lives at ") + Band(s), PhoneKit.Tiny, UIPalette.InkSoft, true);
+                // curiosities do not "live" anywhere – they hide in the sea (round 3 page „Kuriositäten“)
+                var lives = UIKit.Text(s.meme ? Loc.Tr("Versteckt im Meer", "Hidden in the sea") : Loc.Tr("Lebt in ", "Lives at ") + Band(s), PhoneKit.Tiny, UIPalette.InkSoft, true);
                 lives.style.marginTop = 6f;
                 card.Add(lives);
             }
 
-            // bottom-left depth chip, bottom-right sightings badge
-            var depth = UIKit.Pill(Band(s), UIPalette.A(BandTeal, 0.2f), UIWidgets.Ink(BandTeal), PhoneKit.Tiny);
+            // bottom-left depth chip (a violet „Meme“ chip for the curiosities), bottom-right sightings badge
+            var chipColor = s.meme ? UIPalette.Violet : BandTeal;
+            var depth = UIKit.Pill(s.meme ? "Meme" : Band(s), UIPalette.A(chipColor, 0.2f), UIWidgets.Ink(chipColor), PhoneKit.Tiny);
             depth.style.position = Position.Absolute;
             depth.style.left = 10f; depth.style.bottom = 10f;
             card.Add(depth);
@@ -496,7 +553,7 @@ namespace Sealebrities
 
             var all = SpeciesDatabase.All;
             list.Clear();
-            for (int i = 0; i < all.Count; i++) if (!all[i].land) list.Add(all[i]);
+            for (int i = 0; i < all.Count; i++) if (!all[i].land && !all[i].meme && !(all[i].Page == SpeciesDatabase.VolcanoPage && !VolcanoGate.Open)) list.Add(all[i]);
             list.Sort((a, b) => a.PrefDepth.CompareTo(b.PrefDepth));
 
             const float RulerW = 74f, IconW = 96f, IconH = 70f, Lanes = 4f;

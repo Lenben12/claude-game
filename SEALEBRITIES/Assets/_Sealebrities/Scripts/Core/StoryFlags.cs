@@ -33,6 +33,17 @@ namespace Sealebrities
         public const string HorstOverboardSeen = "horst_overboard";
         public const string WandaThirdDelivery = "wanda_story_1987";
         public const string FinaleDone = "finale_done";
+        // ---- round 3 (GDD §19)
+        /// The hermits taught the player to sharpen spears at the grinder (npc module sets it in the hermit camp).
+        public const string GrindLearned = "hermit_grind";
+        /// All map pieces found: the treasure map is complete (MapPieces sets it on the host / finder).
+        public const string TreasureMap = "treasure_map";
+        /// The secret the treasure map points to was found (world module sets it at MapPieces.SecretSpot).
+        public const string TreasureFound = "treasure_found";
+        /// Someone of the crew stepped into the hidden hermit camp (world module, PropCamp) – the phone map shows it from now on.
+        public const string HermitCampFound = "hermit_camp_found";
+        /// Someone set foot on the volcano island (world module) – nice hook for the fauna / story steps.
+        public const string VolcanoLanded = "volcano_landed";
     }
 
     /// Shared story flags (J.3). Set → host authority (clients forward CoreCommands.StoryFlagKey and apply optimistically).

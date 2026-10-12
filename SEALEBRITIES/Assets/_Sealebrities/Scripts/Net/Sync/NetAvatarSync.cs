@@ -386,7 +386,7 @@ namespace Sealebrities
             if (a != null) a.Push(ts, s);
         }
 
-        static HoldItem ToItem(byte b) => b <= (byte)HoldItem.QuestItem ? (HoldItem)b : HoldItem.None;
+        static HoldItem ToItem(byte b) => b <= (byte)Hands.LastItem ? (HoldItem)b : HoldItem.None;
 
         // ------------------------------------------------------------------ predator bumps (host fauna → client)
         void SendBump(int playerId, float airSeconds)

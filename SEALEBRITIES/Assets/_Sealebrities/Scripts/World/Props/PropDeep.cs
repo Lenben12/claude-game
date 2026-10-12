@@ -110,7 +110,7 @@ namespace Sealebrities
                 }
                 else if (corals < 70)
                 {
-                    if (PropReef.Place(batch, rng, p, n, PropReef.RandomType(rng, 1, 1, 2, 3, 3, 0), 0.9f, -20f)) corals++;
+                    if (PropReef.Place(batch, rng, p, n, PropReef.RandomType(rng, 1, 1, 2, 3, 3, 0), 0.9f, -20f, cols)) corals++;
                 }
                 if (PropRun.Due()) yield return null;
             }
@@ -139,9 +139,9 @@ namespace Sealebrities
                     Vector3 n = PropGround.Normal(wx, wz, 1f);
                     int k = grng.Next(100);
                     bool ok;
-                    if (k < 30) ok = PropReef.Place(garden, grng, p, n, PropCoralType.Fan, PropUtil.Range(grng, 0.6f, 1.1f), -3f);
+                    if (k < 30) ok = PropReef.Place(garden, grng, p, n, PropCoralType.Fan, PropUtil.Range(grng, 0.6f, 1.1f), -3f, cols);
                     else if (k < 52) ok = PropReef.Place(garden, grng, p, n, PropCoralType.Whip, PropUtil.Range(grng, 0.7f, 1.2f), -3f);
-                    else if (k < 72) ok = PropReef.Place(garden, grng, p, n, PropCoralType.Sponge, PropUtil.Range(grng, 0.4f, 0.8f), -3f);
+                    else if (k < 72) ok = PropReef.Place(garden, grng, p, n, PropCoralType.Sponge, PropUtil.Range(grng, 0.4f, 0.8f), -3f, cols);
                     else ok = PropReefs.Colony(garden, gardenSmall, grng, k < 90 ? ReefColony.SoftPuff : ReefColony.Encrust, grng.Next(PropReefKit.Colors), p, n, PropUtil.Range(grng, 0.35f, 0.7f), -3f);
                     if (ok) placed++;
                 }
@@ -176,12 +176,13 @@ namespace Sealebrities
                 Quaternion r = Quaternion.Euler(PropUtil.Range(rng, -12f, 12f), PropUtil.Range(rng, 0f, 360f), PropUtil.Range(rng, -12f, 12f));
                 var mesh = PropRocks.Mesh(sc, rng.Next(), 1, 0.16f);
                 batch.Add(mesh, mat, Matrix4x4.TRS(pos, r, Vector3.one));
-                if (s > 1.8f) PropCol.Mesh(cols, mesh, pos, r, Vector3.one, "WallRock");
+                // round 3 (GDD §19): every formation rock is solid (was s > 1.8 only; the smallest are ≥ 1 m)
+                PropCol.Mesh(cols, mesh, pos, r, Vector3.one, "WallRock");
                 // a sea fan or sponge clinging to the formation
                 if (rng.NextDouble() < 0.6)
                 {
                     Vector3 fp = pos + new Vector3(PropUtil.Range(rng, -0.3f, 0.3f) * sc.x, sc.y * 0.7f, PropUtil.Range(rng, -0.3f, 0.3f) * sc.z);
-                    PropReef.Place(batch, rng, fp, Vector3.up, rng.NextDouble() < 0.5 ? PropCoralType.Fan : PropCoralType.Sponge, 1.1f, -20f);
+                    PropReef.Place(batch, rng, fp, Vector3.up, rng.NextDouble() < 0.5 ? PropCoralType.Fan : PropCoralType.Sponge, 1.1f, -20f, cols);
                 }
             }
         }
@@ -211,9 +212,18 @@ namespace Sealebrities
             float wyaw = PropUtil.Range(rng, 0f, 360f);
             Matrix4x4 wtrs = Matrix4x4.TRS(best + Vector3.up * 0.05f, Quaternion.Euler(0f, wyaw, 0f) * Quaternion.Euler(0f, 0f, 9f), Vector3.one);
             var skel = new PropMeshBuilder();
-            WhaleSkeleton(skel, rng);
+            var boneSegs = new List<Vector4>(96);
+            WhaleSkeleton(skel, rng, boneSegs);
             batch.B(PropMats.Bone, best).Append(skel, wtrs);
             PropCol.Capsule(cols, wtrs.MultiplyPoint3x4(new Vector3(0f, 0.7f, 8f)), 1.0f, 5f, Quaternion.Euler(0f, wyaw, 0f) * Quaternion.Euler(90f, 0f, 0f));
+            // round 3 (GDD §19): spine, ribs, jaws and the cranium are solid too (was only the skull capsule) – one capsule
+            // per bone segment, pairs of (local point, radius in w)
+            for (int i = 0; i + 1 < boneSegs.Count; i += 2)
+            {
+                Vector4 a = boneSegs[i], b = boneSegs[i + 1];
+                PropSolid.Segment(cols, wtrs.MultiplyPoint3x4(a), wtrs.MultiplyPoint3x4(b), a.w, "WhaleBone");
+            }
+            PropSolid.Box(cols, wtrs.MultiplyPoint3x4(new Vector3(0f, 0.75f, 7.2f)), new Vector3(2.4f, 1.4f, 2.3f), wtrs.rotation, "WhaleCranium");
             PropInfo.WhaleSkeleton = best;
             spacing.Add(best.x, best.z, 16f);
             if (PropRun.Due()) yield return null;
@@ -280,7 +290,13 @@ namespace Sealebrities
                     batch.Add(mesh, PropMats.Basalt, Matrix4x4.TRS(p, r, Vector3.one));
                     PropCol.Mesh(cols, mesh, p, r, Vector3.one, "Basalt");
                 }
-                else PropRocks.Build(batch.B(PropMats.Basalt, p), p, sc, r, rng.Next(), s > 1f ? 1 : 0, 0.2f);
+                else
+                {
+                    // round 3: the smaller basalt boulders (0.6–1.8) are solid too – convex hull of the same rock
+                    int bseed = rng.Next();
+                    PropRocks.Build(batch.B(PropMats.Basalt, p), p, sc, r, bseed, s > 1f ? 1 : 0, 0.2f);
+                    PropSolid.Rock(cols, p, sc, r, bseed, s > 1f ? 1 : 0, 0.2f, true, "Basalt");
+                }
             }
 
             // ---------------------------------------------------------------- bioluminescent specks
@@ -328,7 +344,7 @@ namespace Sealebrities
                     float sx = x + so.x, sz = z + so.y;
                     Vector3 sp = new Vector3(sx, G(sx, sz), sz);
                     float size = PropUtil.Range(trng, 0.45f, 1.0f);
-                    if (!PropReef.Place(batch, trng, sp, PropGround.Normal(sx, sz, 1f), PropCoralType.Sponge, size, -20f)) continue;
+                    if (!PropReef.Place(batch, trng, sp, PropGround.Normal(sx, sz, 1f), PropCoralType.Sponge, size, -20f, cols)) continue;
                     // the glowing tips (bioluminescent rim on top of the sponge)
                     int tips = 1 + trng.Next(3);
                     for (int t = 0; t < tips; t++)
@@ -368,7 +384,10 @@ namespace Sealebrities
 
         static void Vent(Transform decor, PropBatch batch, PropBatch glow, Transform cols, System.Random rng, Vector3 p)
         {
-            PropRocks.Build(batch.B(PropMats.Basalt, p), p - Vector3.up * 0.7f, new Vector3(2.8f, 1.3f, 2.5f), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), rng.Next(), 1, 0.2f);
+            Quaternion vq = Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f);
+            int vseed = rng.Next();
+            PropRocks.Build(batch.B(PropMats.Basalt, p), p - Vector3.up * 0.7f, new Vector3(2.8f, 1.3f, 2.5f), vq, vseed, 1, 0.2f);
+            PropSolid.Rock(cols, p - Vector3.up * 0.7f, new Vector3(2.8f, 1.3f, 2.5f), vq, vseed, 1, 0.2f, true, "VentMound");
             float r = PropUtil.Range(rng, 0.75f, 1.0f);
             float total = PropUtil.Range(rng, 3.5f, 7.5f);
             const int segs = 4;
@@ -412,8 +431,9 @@ namespace Sealebrities
         }
 
         /// Chunky ~20 m whale skeleton lying on the seabed. Local: z = body axis (skull at +z), y up, origin on the ground.
-        static void WhaleSkeleton(PropMeshBuilder b, System.Random rng)
+        static void WhaleSkeleton(PropMeshBuilder b, System.Random rng, List<Vector4> segs)
         {
+            void Seg(Vector3 p, Vector3 q, float r) { segs.Add(new Vector4(p.x, p.y, p.z, r)); segs.Add(new Vector4(q.x, q.y, q.z, r)); }
             // spine: vertebrae as short 6-sided drums with little spikes
             var spine = new List<Vector3>();
             for (float z = -10f; z <= 6f; z += 0.55f)
@@ -440,6 +460,13 @@ namespace Sealebrities
                     b.Rod(p, p + side * 0.5f * t, 0.06f, 0.03f, 4);
                     b.Rod(p, p - side * 0.5f * t, 0.06f, 0.03f, 4);
                 }
+            }
+            // spine colliders: one capsule per 4 vertebrae (covers the drums and most of the spikes)
+            for (int i = 0; i + 1 < spine.Count; i += 4)
+            {
+                int j = Mathf.Min(spine.Count - 1, i + 4);
+                float t = (spine[i].z + 10f) / 16f;
+                Seg(spine[i], spine[j], Mathf.Lerp(0.2f, 0.38f, t));
             }
             // ribs: 4-sided arches
             var pts = new Vector3[4];
@@ -468,6 +495,7 @@ namespace Sealebrities
                         for (int q = 0; q < 4; q++) pts[q] = new Vector3(x0 + s * q * 0.6f, 0.06f + Mathf.Sin(q * 0.9f) * 0.15f, zz + q * 0.4f);
                     }
                     b.Tube(pts, rad, 4, 1f, 1f, true);
+                    for (int q = 0; q < 3; q++) Seg(pts[q], pts[q + 1], 0.12f);
                 }
             }
             // skull: faceted cranium + 6-sided rostrum cone
@@ -487,7 +515,10 @@ namespace Sealebrities
                     jaw[q] = new Vector3(x, 0.12f + Mathf.Sin(t * Mathf.PI) * 0.15f, 6.2f + t * 5.2f + (moved ? -1.2f : 0f));
                 }
                 b.Tube(jaw, jr, 5, 1f, 1f, true);
+                for (int q = 0; q < 3; q++) Seg(jaw[q], jaw[q + 1], jr[q]);
             }
+            // rostrum beyond the old skull capsule
+            Seg(new Vector3(0f, 0.55f, 9.6f), new Vector3(0f, 0.35f, 12.0f), 0.4f);
             // flipper bones on the ground
             for (int i = 0; i < 5; i++)
             {
@@ -501,6 +532,8 @@ namespace Sealebrities
         {
             var rng = new System.Random(site.id.GetHashCode());
             var batch = new PropBatch(64f);
+            var cols = new GameObject("Colliders").transform;
+            cols.SetParent(decor, false);
             for (int i = 0; i < 60; i++)
             {
                 Vector2 o = PropUtil.InDisc(rng, site.radius);
@@ -509,7 +542,11 @@ namespace Sealebrities
                 if (-g < 4f) continue;
                 float s = PropUtil.Range(rng, 0.5f, 3f);
                 Vector3 p = new Vector3(x, g - s * 0.2f, z);
-                PropRocks.Build(batch.B(PropMats.Rock, p), p, new Vector3(s * 1.2f, s * 0.7f, s), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), rng.Next(), s > 1.2f ? 1 : 0);
+                Vector3 gsc = new Vector3(s * 1.2f, s * 0.7f, s);
+                Quaternion gq = Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f);
+                int gseed = rng.Next();
+                PropRocks.Build(batch.B(PropMats.Rock, p), p, gsc, gq, gseed, s > 1.2f ? 1 : 0);
+                PropSolid.Rock(cols, p, gsc, gq, gseed, s > 1.2f ? 1 : 0, 0.14f, true, "Rock");
                 if (rng.NextDouble() < 0.5) PropReef.Place(batch, rng, new Vector3(x + 1.5f, G(x + 1.5f, z), z), Vector3.up, PropCoralType.Whip, 1f, -3f);
                 if (PropRun.Due()) yield return null;
             }

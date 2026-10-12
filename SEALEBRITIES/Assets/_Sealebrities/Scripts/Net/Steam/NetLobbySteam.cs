@@ -8,11 +8,15 @@ namespace Sealebrities
     /// Steam parts of the "Mit Freunden" screens (see NetLobby):
     ///   Home      – "Über Steam (empfohlen)": big "Spiel hosten" tile + friends who host SEALEBRITIES right now (one
     ///               click "Beitreten"); "Per IP / Heimnetz" comes second.
-    ///   SteamHost – continue / new game + difficulty, how friends get in, "Steam-Lobby öffnen & starten"
-    ///               (SteamLobby.CreateForHosting → NetSession.StartSteamHost → the game starts).
-    ///   In game   – while the pause menu is open in a Steam session: a card with the big "Freunde einladen" button
-    ///               (Steam's invite dialog; without the Steam overlay an in-game list of online friends to invite).
-    /// Invites are only ever sent when the player clicks.
+    ///   SteamHost – which save slot (continue a world / new world in an empty slot) + difficulty, how friends get in,
+    ///               "Steam-Lobby öffnen & starten" (SteamLobby.CreateForHosting → NetSession.StartSteamHost → the game
+    ///               starts).
+    ///   In game   – only for the HOST (the creator of the world, GDD §19b – guests never get it): while the pause menu
+    ///               is open in a Steam session a card with the big "Freunde einladen" button → the in-game list of online
+    ///               friends (the Steam overlay's own dialog is the small second button).
+    /// Invites are only ever sent when the player clicks. A friend can be invited AS OFTEN AS YOU LIKE: every row's
+    /// button always says „Einladen“, never changes its text / colour / state and never gets disabled; each click sends
+    /// one invite and shows the tiny toast „Einladung gesendet“ (GDD §19b).
     public static partial class NetLobby
     {
         static VisualElement friendGamesBox, steamCard, invitePicker;
@@ -20,6 +24,10 @@ namespace Sealebrities
         static float friendRefresh;
         static int steamCardCount;
         static readonly List<SteamLobby.FriendEntry> friendTmp = new List<SteamLobby.FriendEntry>();
+        static readonly List<Button> inviteButtons = new List<Button>();
+
+        /// Test hook (AutoPlaytest): replaces the real Steam invite – tests never send one.
+        public static Func<ulong, bool> InviteSenderOverride;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetSteamStatics()
@@ -28,7 +36,15 @@ namespace Sealebrities
             steamConnecting = false; friendGamesDirty = false; steamCardDirty = false; steamInstalled = false;
             friendRefresh = 0f; steamCardCount = 0;
             friendTmp.Clear();
+            inviteButtons.Clear();
+            InviteSenderOverride = null;
         }
+
+        /// GDD §19b: only the creator of the save – the host who loaded / started the world – may invite. Guests: false.
+        public static bool InviteRoleAllowed => !Net.IsClient;
+
+        /// The invite card / list may be used right now: the host of a running Steam session that owns the lobby.
+        public static bool CanInvite => Net.IsHost && NetSession.IsSteam && SteamLobby.HasLobby && SteamLobby.IsOwner;
 
         static void InstallSteam()
         {
@@ -161,35 +177,9 @@ namespace Sealebrities
         // =================================================================== Steam host page
         static void BuildSteamHost()
         {
-            bool hasSave = GameManager.HasSave;
-            if (hasSave)
-            {
-                var seg = NetLobbyStyle.Row();
-                seg.Add(Segment(Loc.Tr("Spielstand fortsetzen", "Continue my save"), hostContinue, () => { hostContinue = true; dirty = true; }));
-                seg.Add(NetLobbyStyle.Gap(10f, true));
-                seg.Add(Segment(Loc.Tr("Neues Spiel", "New game"), !hostContinue, () => { hostContinue = false; dirty = true; }));
-                body.Add(seg);
-                body.Add(NetLobbyStyle.Gap(16f));
-            }
-            if (!hasSave || !hostContinue)
-            {
-                var cards = NetLobbyStyle.Row();
-                cards.style.alignItems = Align.Stretch;
-                var sel = DifficultySettings.Selectable;
-                for (int i = 0; i < sel.Length; i++)
-                {
-                    if (i > 0) cards.Add(NetLobbyStyle.Gap(14f, true));
-                    cards.Add(DifficultyCard(sel[i]));
-                }
-                body.Add(cards);
-                if (hasSave)
-                {
-                    var warn = NetLobbyStyle.Text(Loc.Tr("Achtung: Ein neues Spiel überschreibt deinen Spielstand.", "Warning: a new game overwrites your save."), 17f, NetLobbyStyle.Danger, true);
-                    warn.style.marginTop = 10f;
-                    body.Add(warn);
-                }
-                body.Add(NetLobbyStyle.Gap(16f));
-            }
+            // round 3 step 6b: which of the four worlds (save slots) – continue it, or a new world in an empty slot
+            BuildHostSlotPicker();
+            BuildHostDifficulty();
 
             var info = NetLobbyStyle.Col();
             info.style.backgroundColor = new Color(1f, 1f, 1f, 0.75f);
@@ -216,7 +206,7 @@ namespace Sealebrities
             bool creating = SteamLobby.Creating;
             string label = creating
                 ? Loc.Tr("Steam-Lobby wird erstellt …", "Creating the Steam lobby …")
-                : hasSave && hostContinue ? Loc.Tr("Lobby öffnen & weiterspielen", "Open lobby & continue") : Loc.Tr("Lobby öffnen & starten", "Open lobby & start");
+                : HostSlotUsed ? Loc.Tr("Lobby öffnen & weiterspielen", "Open lobby & continue") : Loc.Tr("Lobby öffnen & starten", "Open lobby & start");
             var start = NetLobbyStyle.Primary(label, OnSteamHostStart, 24f);
             start.style.minWidth = 320f;
             NetLobbyStyle.Pad(start, 14f, 30f);
@@ -243,7 +233,8 @@ namespace Sealebrities
             SaveProfile();
             // a leftover session (e.g. a cancelled join) must end BEFORE the lobby exists – ending it later would leave the lobby
             if (NetSession.Current != NetSession.Phase.Idle) NetSession.EndSession(NetEndReason.LocalLeft, null, false);
-            bool cont = hostContinue && GameManager.HasSave;
+            int slot = hostSlot;
+            bool cont = SaveSlots.Exists(slot);
             var diff = hostDifficulty;
             NetSession.ReportStatus(Loc.Tr("Steam-Lobby wird erstellt …", "Creating the Steam lobby …"), false);
             SteamLobby.CreateForHosting((ok, err) =>
@@ -268,17 +259,19 @@ namespace Sealebrities
                 }
                 SteamLobby.UpdatePresence();
                 Close();
-                StartHostedGame(cont, diff);
+                StartHostedGame(slot, cont, diff);
             });
             dirty = true;   // show the "creating" state
         }
 
-        // =================================================================== in game: invite card (pause menu)
+        // =================================================================== in game: invite card (pause menu, host only)
+        static bool debugPicker;
+
         static void TickSteamCard(float dt)
         {
             var gm = GameManager.I;
-            bool want = NetSession.IsSteam && Net.IsOnline && SteamLobby.HasLobby && UIState.PauseOpen && !UIState.MainMenuOpen
-                        && gm != null && gm.InGame;
+            // GDD §19b: only the creator of the world (the host) can invite – guests never see the card or the list
+            bool want = CanInvite && Net.IsOnline && UIState.PauseOpen && !UIState.MainMenuOpen && gm != null && gm.InGame;
             if (!want)
             {
                 if (steamCard != null)
@@ -286,7 +279,7 @@ namespace Sealebrities
                     steamCard.RemoveFromHierarchy();
                     steamCard = null;
                 }
-                if (invitePicker != null) CloseInvitePicker();
+                if (invitePicker != null && !debugPicker) CloseInvitePicker();
                 return;
             }
             if (steamCard != null && steamCard.panel != null && !steamCardDirty && steamCardCount == Net.PlayerCount) return;
@@ -321,35 +314,43 @@ namespace Sealebrities
             c.Add(p);
             c.Add(NetLobbyStyle.Gap(12f));
 
-            var invite = NetLobbyStyle.Primary(Loc.Tr("Freunde einladen", "Invite friends"), OnInviteClicked, 24f);
+            // the in-game list first: there every friend can be invited again and again (Steam's own dialog greys a
+            // friend out after one invite)
+            var invite = NetLobbyStyle.Primary(Loc.Tr("Freunde einladen", "Invite friends"), OpenInvitePicker, 24f);
             NetLobbyStyle.Pad(invite, 14f, 24f);
             c.Add(invite);
-            c.Add(NetLobbyStyle.Gap(8f));
-            bool overlay = SteamService.OverlayEnabled;
-            var pick = NetLobbyStyle.Ghost(Loc.Tr("Freund aus der Liste wählen", "Pick a friend from the list"), OpenInvitePicker, 16f);
-            pick.style.alignSelf = Align.FlexStart;
-            c.Add(pick);
-            if (!overlay)
+            if (SteamService.OverlayEnabled)
             {
-                var hint = NetLobbyStyle.Para(Loc.Tr("Steam-Overlay ist nicht aktiv – die Einladung läuft über die Liste im Spiel.",
-                                                     "The Steam overlay is not active – invites go through the in-game list."), 14f, NetLobbyStyle.Muted);
-                hint.style.marginTop = 6f;
-                c.Add(hint);
+                c.Add(NetLobbyStyle.Gap(8f));
+                var overlay = NetLobbyStyle.Ghost(Loc.Tr("Steam-Fenster öffnen", "Open the Steam window"), OnSteamDialogClicked, 16f);
+                overlay.style.alignSelf = Align.FlexStart;
+                c.Add(overlay);
             }
             return c;
         }
 
-        static void OnInviteClicked()
+        static void OnSteamDialogClicked()
         {
-            if (SteamService.OverlayEnabled && SteamLobby.OpenInviteDialog()) return;
-            OpenInvitePicker();
+            if (!CanInvite) return;
+            if (!SteamLobby.OpenInviteDialog()) OpenInvitePicker();
         }
 
         static void OpenInvitePicker()
         {
-            if (!EnsureLayer()) return;
-            CloseInvitePicker();
+            if (!CanInvite) return;   // guests (and a host without a Steam lobby) never open the invite list
             SteamLobby.OnlineFriends(friendTmp);
+            ShowInvitePicker(false);
+        }
+
+        /// Builds the invite list from friendTmp. Every row: dot, name, „im Spiel“, and the button „Einladen“ – the same
+        /// text, colour and state forever; each click sends one invite (SendInvite) and a tiny toast.
+        static void ShowInvitePicker(bool debug)
+        {
+            if (!EnsureLayer()) return;
+            if (invitePicker != null) invitePicker.RemoveFromHierarchy();
+            invitePicker = null;
+            inviteButtons.Clear();
+            debugPicker = debug;
 
             invitePicker = new VisualElement { name = "sb-net-invite" };
             NetLobbyStyle.Fill(invitePicker);
@@ -372,8 +373,8 @@ namespace Sealebrities
             NetLobbyStyle.Radius(close, 22f);
             head.Add(close);
             card.Add(head);
-            var sub = NetLobbyStyle.Para(Loc.Tr("Steam-Freunde, die online sind. Sie müssen SEALEBRITIES selbst gestartet haben und nehmen die Einladung dann im Steam-Chat an.",
-                                                "Steam friends who are online. They need to have started SEALEBRITIES and then accept the invite in the Steam chat."), 15f, NetLobbyStyle.Muted);
+            var sub = NetLobbyStyle.Para(Loc.Tr("Steam-Freunde, die online sind. Sie müssen SEALEBRITIES selbst gestartet haben und nehmen die Einladung dann im Steam-Chat an. Nicht angekommen? Einfach nochmal einladen.",
+                                                "Steam friends who are online. They need to have started SEALEBRITIES and then accept the invite in the Steam chat. Didn't arrive? Just invite again."), 15f, NetLobbyStyle.Muted);
             sub.style.marginTop = 4f;
             sub.style.marginBottom = 12f;
             card.Add(sub);
@@ -405,20 +406,13 @@ namespace Sealebrities
                 }
                 r.Add(NetLobbyStyle.Flex());
                 ulong id = f.id;
-                bool already = SteamLobby.WasInvited(id);
-                Button btn = null;
-                btn = NetLobbyStyle.Accent(already ? Loc.Tr("Eingeladen", "Invited") : Loc.Tr("Einladen", "Invite"), () =>
-                {
-                    if (SteamLobby.InviteFriend(id))
-                    {
-                        btn.text = Loc.Tr("Eingeladen", "Invited");
-                        NetLobbyStyle.Enable(btn, false);
-                    }
-                    else GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Einladung fehlgeschlagen", "Invite failed"));
-                }, 17f);
+                Action send = () => SendInvite(id);
+                var btn = NetLobbyStyle.Accent(InviteLabel, send, 17f);
+                btn.name = "sb-invite-btn";
+                btn.userData = send;   // tests click it through this (never a real Steam invite there)
                 NetLobbyStyle.Pad(btn, 6f, 16f);
-                NetLobbyStyle.Enable(btn, !already);
                 r.Add(btn);
+                inviteButtons.Add(btn);
                 scroll.Add(r);
             }
             card.Add(scroll);
@@ -426,11 +420,52 @@ namespace Sealebrities
             layer.Add(invitePicker);
         }
 
+        /// The invite button's one and only text.
+        public static string InviteLabel => Loc.Tr("Einladen", "Invite");
+
+        /// One click = one invite. The button stays exactly as it is (GDD §19b: invite again whenever you like).
+        static void SendInvite(ulong friend)
+        {
+            if (!InviteRoleAllowed) return;   // never from a guest
+            bool ok;
+            try { ok = InviteSenderOverride != null ? InviteSenderOverride(friend) : CanInvite && SteamLobby.InviteFriend(friend); }
+            catch (Exception) { ok = false; }
+            if (ok) GameEvents.RaiseToast(Loc.Tr("Einladung gesendet", "Invite sent"));
+            else GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Einladung fehlgeschlagen", "Invite failed"));
+        }
+
         static void CloseInvitePicker()
         {
             if (invitePicker != null) invitePicker.RemoveFromHierarchy();
             invitePicker = null;
+            debugPicker = false;
+            inviteButtons.Clear();
             friendTmp.Clear();
         }
+
+        // ------------------------------------------------------------------ test hooks (AutoPlaytest / AutoShot)
+        /// Shows the invite list with these (fake) friends WITHOUT Steam – refused for guests (InviteRoleAllowed).
+        /// Set InviteSenderOverride first: the buttons must never send a real invite in a test.
+        public static bool DebugShowInvitePicker(List<SteamLobby.FriendEntry> friends)
+        {
+            if (!InviteRoleAllowed) return false;
+            friendTmp.Clear();
+            if (friends != null) friendTmp.AddRange(friends);
+            ShowInvitePicker(true);
+            return invitePicker != null;
+        }
+
+        /// The real path of the „Freunde einladen“ button (refused unless CanInvite).
+        public static bool DebugTryOpenInvitePicker()
+        {
+            OpenInvitePicker();
+            return invitePicker != null;
+        }
+
+        public static bool InvitePickerOpen => invitePicker != null;
+        public static VisualElement DebugInvitePickerRoot => invitePicker;
+        /// The rows' „Einladen“ buttons of the open list (the click action is in Button.userData).
+        public static List<Button> DebugInviteButtons => inviteButtons;
+        public static void DebugCloseInvitePicker() => CloseInvitePicker();
     }
 }

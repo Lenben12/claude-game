@@ -60,6 +60,8 @@ namespace Sealebrities
 
             // underwater collectibles (wreck rooms, ledges, caves, the shells at the sites)
             yield return PropRun.Safe(PropCollect.BuildUnderwater(uw), "underwater collectibles");
+            // round 3 (fauna step, GDD §20 Q19/Q20): wrecks to explore, treasure chests, the curiosities / memes
+            yield return PropRun.Safe(SeaContent.Build(uw), "sea content");
 
             // coral variant meshes have been merged into the site chunks; free them
             foreach (var t in new[] { PropCoralType.Branching, PropCoralType.Brain, PropCoralType.Table, PropCoralType.Fan, PropCoralType.Sponge, PropCoralType.Anemone, PropCoralType.Whip })
@@ -142,6 +144,25 @@ namespace Sealebrities
             bsc.isTrigger = true;
             bsc.radius = 1.4f;
             bgo.AddComponent<PropChallengeBoard>();
+
+            // round 3 (GDD §19): the buoy is solid (it only had the board trigger) – body sphere, pole and board on a
+            // kinematic body that PropBuoy moves; boat-pass layer so a boat never snags on it (PropSolid)
+            PropSolid.Kinematic(go);
+            var bodyCol = new GameObject("BuoySolid");
+            bodyCol.transform.SetParent(t, false);
+            bodyCol.layer = PropSolid.BoatPassLayer;
+            var bsph = bodyCol.AddComponent<SphereCollider>();
+            bsph.radius = 0.52f;
+            bsph.center = new Vector3(0f, 0.02f, 0f);
+            var bpole = bodyCol.AddComponent<CapsuleCollider>();
+            bpole.direction = 1;
+            bpole.radius = 0.08f;
+            bpole.height = 1.7f;
+            bpole.center = new Vector3(0f, 1.35f, 0f);
+            var bboard = bodyCol.AddComponent<BoxCollider>();
+            bboard.center = new Vector3(0f, 0.85f, -0.52f);
+            bboard.size = new Vector3(0.62f, 0.85f, 0.08f);
+            PropSolid.Count += 3;
 
             var b = go.AddComponent<PropBuoy>();
             b.x = site.center.x;

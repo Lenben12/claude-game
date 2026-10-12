@@ -105,6 +105,7 @@ namespace Sealebrities
                     batch.W(PropMats.Rope, p).Rod(p, p + Vector3.up * 5f, 0.015f, 0.015f, 3);
                     batch.W(PropMats.BuoyOrange, p).Ico(p + Vector3.up * 5.2f, Vector3.one * 0.28f, Quaternion.identity, 0);
                     PropRocks.Build(batch.B(PropMats.Rock, p), p, new Vector3(0.5f, 0.3f, 0.5f), Quaternion.identity, 4400 + e, 0);
+                    PropSolid.Rock(cols, p, new Vector3(0.5f, 0.3f, 0.5f), Quaternion.identity, 4400 + e, 0, 0.14f, true, "TunnelRock");   // round 3
                 }
                 Vector3 mid = (a + b) * 0.5f;
                 float y = Mathf.Min(G(a.x, a.z), G(b.x, b.z)) + 4f;
@@ -130,7 +131,7 @@ namespace Sealebrities
                 {
                     Vector3 lp = g.centers[rng.Next(g.centers.Length)] + new Vector3(PropUtil.Range(rng, -2f, 2f), 4.4f, 0f);
                     Vector3 wp = g.W(lp);
-                    PropReef.Place(batch, rng, wp, Vector3.up, i % 3 == 0 ? PropCoralType.Anemone : PropCoralType.Sponge, 0.9f, -3f);
+                    PropReef.Place(batch, rng, wp, Vector3.up, i % 3 == 0 ? PropCoralType.Anemone : PropCoralType.Sponge, 0.9f, -3f, cols);
                 }
             }
 
@@ -404,6 +405,7 @@ namespace Sealebrities
             {
                 PropInfo.SetSpot("trench_camera", cp + Vector3.up * 0.2f);
                 PropRocks.Build(batch.B(PropMats.Basalt, cp), cp - Vector3.up * 0.2f, new Vector3(1.4f, 0.6f, 1.1f), Quaternion.identity, 6060, 0);
+                PropSolid.Rock(cols, cp - Vector3.up * 0.2f, new Vector3(1.4f, 0.6f, 1.1f), Quaternion.identity, 6060, 0, 0.14f, true, "CameraLedge");   // round 3
             }
             // the ledge the rivals' sub rests on (R4)
             if (PropReefs.FindSpot(c, site.radius * 0.8f, 82f, 88f, null, 4, out Vector3 lp2))

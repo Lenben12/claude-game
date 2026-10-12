@@ -9,9 +9,10 @@ namespace Sealebrities
     /// active in a hand (right or left; the model mirrors into the offhand).
     ///
     /// K.2 "just keep recording – the Sealog needs a photo" (replaces the round-1 target lock):
-    ///  • Under water the camera RECORDS BY ITSELF 0.5 s after diving in (Settings „Unter Wasser automatisch filmen“,
-    ///    default on) and stops again when you leave the water. Use (LMB) from the hip = recording on/off (also on land:
-    ///    crabs, birds, goats count). Switching it off under water keeps it off until the next dive.
+    ///  • Round 3: recording starts ONLY with Use (LMB) from the hip – entering the water does not start it any more
+    ///    (GDD §19). Use again = stop (also on land: crabs, birds, goats count).
+    ///  • Round 3: the per-animal aim brackets (four corners, "?" for unknown species) only show animals within the
+    ///    PHOTO range (FilmShotEvaluator.InPhotoRange: big enough for a Sealog photo, or nearly) – far animals get none.
     ///  • Every 0.12 s every animal visible in the viewfinder is DETECTED (FilmDetector / FilmShotEvaluator: in frame,
     ///    within visibility, big enough, not occluded). Each detected INDIVIDUAL keeps its own track; after 1.0 s it
     ///    counts as a sighting (L.2) and becomes a FootageClip (quality = average frame weight, improves up to 8 s) with
@@ -388,7 +389,8 @@ namespace Sealebrities
             EnsureRig(view);
 
             bool blocked = UIState.BlocksGameplay;
-            bool incapacitated = player.IsSeated || player.IsFainting;
+            // round 3 (Q36): a passenger on the boat bench may film; the driver's hands are on the wheel
+            bool incapacitated = (player.IsSeated && !SeatRules.LocalPassenger) || player.IsFainting;
             bool held = Hands.TryGetHeld(HoldItem.Camera, out Hand hand);
             IsHeld = held;
             if (held) HeldHand = hand;
@@ -443,7 +445,8 @@ namespace Sealebrities
                 if (nvOwned && GameInput.FlashlightPressed) ToggleNightVision();
                 if (GameInput.RecordPressed) RequestPhoto();          // LMB while aiming = photo (K.2)
             }
-            else if (GameInput.RecordPressed) ToggleRecordingManual(player);
+            // round 3: a camera in the OFFHAND leaves LMB to the main hand's weapon / food (PlayerTools)
+            else if (GameInput.RecordPressed && !(HeldHand == Hand.Left && Hands.MainHandTakesUse)) ToggleRecordingManual(player);
             if (GameInput.PhotoPressed) RequestPhoto();
         }
 
@@ -632,8 +635,12 @@ namespace Sealebrities
             GameEvents.RaiseNotify(NotifyKind.Warning, StorageFullLine, Loc.Tr("Auftauchen", "Surface"));
         }
 
-        /// K.2 auto-record: under water + camera in hand → recording starts after 0.5 s; an automatic recording stops
-        /// again 0.4 s after the player left the water (so the dive is banked as before).
+        /// Round 3 (GDD §19 „Beim Betreten des Wassers startet keine automatische Aufnahme“): recording only ever starts
+        /// with the player's own click (Use / LMB). AutoRecordEnabled stays false; the K.2 auto-start is kept behind it
+        /// only for the old setting's code path. An automatic recording (never started now) would stop 0.4 s after
+        /// leaving the water.
+        public const bool AutoRecordEnabled = false;
+
         void UpdateAutoRecord(IPlayer player, float dt)
         {
             if (!player.IsInWater)
@@ -648,7 +655,7 @@ namespace Sealebrities
                 return;
             }
             autoStopTimer = 0f;
-            bool want = !recording && usable && player.IsUnderwater && Settings.Data.autoRecordUnderwater && !autoSuppressed && tapeLeft > 0.05f;
+            bool want = AutoRecordEnabled && !recording && usable && player.IsUnderwater && Settings.Data.autoRecordUnderwater && !autoSuppressed && tapeLeft > 0.05f;
             if (!want) { autoTimer = 0f; return; }
             autoTimer += dt;
             if (autoTimer >= AutoRecordDelay)
@@ -1030,17 +1037,36 @@ namespace Sealebrities
         {
             int n = detector.Count;
             ViewfinderInfo.DetectedCount = n;
-            int nb = Mathf.Min(n, ViewfinderInfo.MaxBrackets);
-            for (int i = 0; i < nb; i++)
+            // round 3: aim brackets only for animals close enough for a photo – far animals get no frame
+            int nb = 0;
+            for (int i = 0; i < n && nb < ViewfinderInfo.MaxBrackets; i++)
             {
-                bracketCreature[i] = detector.Creature[i];
-                ViewfinderInfo.Brackets[i] = detector.Shot[i].rect;
-                ViewfinderInfo.BracketTier[i] = (byte)detector.Creature[i].Tier;
-                ViewfinderInfo.BracketNew[i] = !detector.Known[i];
+                var c = detector.Creature[i];
+                if (c == null || !FilmShotEvaluator.InPhotoRange(detector.Shot[i], c.SizeCm)) continue;
+                bracketCreature[nb] = c;
+                ViewfinderInfo.Brackets[nb] = detector.Shot[i].rect;
+                ViewfinderInfo.BracketTier[nb] = (byte)c.Tier;
+                ViewfinderInfo.BracketNew[nb] = !detector.Known[i];
+                nb++;
             }
             for (int i = nb; i < bracketCount; i++) bracketCreature[i] = null;
             bracketCount = nb;
             ViewfinderInfo.BracketCount = nb;
+            // round 3 (Q40): the distinct species in frame for the small icons of the minimal camera HUD
+            int ns = 0;
+            for (int i = 0; i < n && ns < ViewfinderInfo.MaxBrackets; i++)
+            {
+                var sp = detector.Species[i];
+                if (sp == null) continue;
+                bool dup = false;
+                for (int k = 0; k < ns; k++) if (ViewfinderInfo.DetectedSpecies[k] == sp) { dup = true; break; }
+                if (dup) continue;
+                ViewfinderInfo.DetectedSpecies[ns] = sp;
+                ViewfinderInfo.DetectedKnown[ns] = detector.Known[i];
+                ns++;
+            }
+            for (int i = ns; i < ViewfinderInfo.MaxBrackets; i++) ViewfinderInfo.DetectedSpecies[i] = null;
+            ViewfinderInfo.DetectedSpeciesCount = ns;
             ViewfinderInfo.SealogSubject = detector.Subject >= 0 ? detector.Species[detector.Subject] : null;
             ViewfinderInfo.ThumbQuality01 = detector.SubjectQuality;
             ViewHint = ComputeHint();

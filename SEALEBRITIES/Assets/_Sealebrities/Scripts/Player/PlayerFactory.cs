@@ -29,10 +29,16 @@ namespace Sealebrities
             cc.height = PlayerController.Height;
             cc.radius = PlayerController.Radius;
             cc.center = new Vector3(0f, PlayerController.Height * 0.5f, 0f);
+            // round 3 collision audit (GDD §19 „durch feste Objekte darf man nirgends laufen“): radius 0.32 / skin 0.05
+            // (≈ 15 % of the radius, Unity's recommended range) / step 0.4 / slope 50° are sound – walking through things
+            // came from colliders missing on the props (listed for the world step in docs/Runde3_Fortschritt.md) and
+            // from things moving INTO the diver (a CharacterController only collides while it moves itself): overlap
+            // recovery on + PlayerController.Depenetrate pushes the diver out every frame (boat hulls, doors, teleports)
             cc.slopeLimit = 50f;
             cc.stepOffset = 0.4f;
             cc.skinWidth = 0.05f;
             cc.minMoveDistance = 0f;
+            cc.enableOverlapRecovery = true;
 
             var head = new GameObject("Head").transform;
             head.SetParent(go.transform, false);
@@ -100,6 +106,7 @@ namespace Sealebrities
             PlayerViewModelCamera.Attach(cam);
             go.AddComponent<PlayerInteractor>().Init(pc);
             go.AddComponent<PlayerNarcosis>().Init(pc);
+            go.AddComponent<PlayerTools>().Init(pc, hands);   // round 3: stick / spears / eating / bottles on LMB
 
             Refs.Player = pc;
             return go;

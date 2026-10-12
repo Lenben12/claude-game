@@ -138,6 +138,27 @@ namespace Sealebrities
                 return LatheY(p.ToArray(), segs);
             });
 
+        /// Round 3 limbs: a tapered capsule along +Y from y = 0 (round end of radius rBottom) to y = length (round end of
+        /// radius rTop) with a straight cone between – lathe layout, so DiverLod can build its low versions.
+        public static Mesh TaperCapsule(float rBottom, float rTop, float length, int segs = 10, int capRings = 2) =>
+            Cached("tcaps" + rBottom.ToString("0.####") + "_" + rTop.ToString("0.####") + "_" + length.ToString("0.###") + "_" + segs + "_" + capRings, () =>
+            {
+                float rb = Mathf.Min(rBottom, length * 0.45f), rt = Mathf.Min(rTop, length * 0.45f);
+                var p = new List<Vector2>(capRings * 2 + 4);
+                for (int i = 0; i <= capRings; i++)
+                {
+                    float a = Mathf.PI * 0.5f * i / capRings;
+                    p.Add(new Vector2(i == 0 ? 0f : rb * Mathf.Sin(a), rb - rb * Mathf.Cos(a)));
+                }
+                p.Add(new Vector2(Mathf.Lerp(rb, rt, 0.5f), (rb + length - rt) * 0.5f));
+                for (int i = 0; i <= capRings; i++)
+                {
+                    float a = Mathf.PI * 0.5f * i / capRings;
+                    p.Add(new Vector2(i == capRings ? 0f : rt * Mathf.Cos(a), length - rt + rt * Mathf.Sin(a)));
+                }
+                return LatheY(p.ToArray(), segs);
+            });
+
         /// L.13: resamples a lathe profile (bottom → top) to `rings` points along a centripetal Catmull-Rom spline, so a
         /// hand-tuned 9–13 point profile becomes a round 18–24 ring silhouette. End points (radius 0 poles) are kept.
         public static Vector2[] Resample(Vector2[] prof, int rings)
@@ -437,6 +458,15 @@ namespace Sealebrities
             r.lightProbeUsage = LightProbeUsage.Off;
             r.reflectionProbeUsage = ReflectionProbeUsage.Off;
             return r;
+        }
+
+        /// Round 3: a tapered limb segment from the parent's origin downward (−Y) over length (radius rTop at the joint,
+        /// rBottom at the far end); the round ends overlap the joints a little so bends never open a gap.
+        public static MeshRenderer TaperLimb(Transform parent, string name, float rTop, float rBottom, float length, Material mat, int segs = 10, bool shadows = true)
+        {
+            float span = length + 0.2f * (rTop + rBottom);
+            return Part(parent, name, TaperCapsule(rBottom, rTop, span, segs, 2), mat,
+                        new Vector3(0f, -length - rBottom * 0.2f, 0f), Vector3.one, default, shadows);
         }
 
         /// A limb segment: capsule of the given radius from the parent's origin downward (−Y) over length.

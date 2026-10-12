@@ -28,7 +28,7 @@ namespace Sealebrities
                 case "sunglasses": return Loc.Tr("Horsts Sonnenbrille", "Horst's sunglasses");
                 case "drum": return Loc.Tr("Fass", "Drum");
                 case "paddle": return Loc.Tr("Gus' Paddel", "Gus's paddle");
-                case "kite": return Loc.Tr("Lios Drachen", "Lio's kite");
+                case "kite": return Loc.Tr("Horsts Drachen", "Horst's kite");
                 case "tape": return Loc.Tr("Das letzte Band", "The last tape");
                 case "selfie_stick": return Loc.Tr("Goldener Selfie-Stick", "Golden selfie stick");
                 case "coconut": return Loc.Tr("Kokosnuss", "Coconut");

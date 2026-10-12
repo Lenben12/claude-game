@@ -79,6 +79,9 @@ namespace Sealebrities
 
         bool findsTab;
 
+        /// Tests / AutoShot (round 3 UI step): switch between the fish tab and the „Funde“ tab.
+        public void DebugFindsTab(bool on) { findsTab = on; Phone.Refresh(false); }
+
         public override void Build(VisualElement body)
         {
             var s = UIKit.State;
@@ -87,7 +90,9 @@ namespace Sealebrities
 
             // K.3 tabs: Fische | Funde
             var finds = Finds.Inventory;
-            var tabs = new UISegmented(new[] { Loc.Tr("Fische", "Fish"), Loc.Tr("Funde", "Finds") + (finds.Count > 0 ? " · " + finds.Count : "") },
+            // round 3: the count includes the treasure from chests in the backpack
+            int findCount = finds.Count + ValuableStacks(out _);
+            var tabs = new UISegmented(new[] { Loc.Tr("Fische", "Fish"), Loc.Tr("Funde", "Finds") + (findCount > 0 ? " · " + findCount : "") },
                 findsTab ? 1 : 0, i => { findsTab = i == 1; Phone.Refresh(false); }, UIPalette.SunInk, PhoneKit.Small);
             tabs.style.marginBottom = 12f;
             body.Add(tabs);
@@ -147,15 +152,68 @@ namespace Sealebrities
             }
         }
 
-        /// Underwater finds and salvage (K.3): sell one / sell all.
+        /// Valuable stacks in the pouch (count of stacks) and their total worth.
+        static int ValuableStacks(out long worth)
+        {
+            worth = 0;
+            int n = 0;
+            var pouch = Backpack.Pouch;
+            if (pouch == null) return 0;
+            for (int i = 0; i < pouch.Count; i++)
+            {
+                var st = pouch[i];
+                var d = st != null ? st.Def : null;
+                if (d == null || d.category != ItemCategory.Valuable || st.count <= 0) continue;
+                n++;
+                worth += (long)d.value * st.count;
+            }
+            return n;
+        }
+
+        /// Underwater finds and salvage (K.3) + the treasure from chests (round 3): a summary on top (items · worth ·
+        /// sell everything), then the treasure, then the salvage; the hermits' barter as a hint once the camp is known.
         void BuildFinds(VisualElement body)
         {
             var list = Finds.Inventory;
+            int stacks = ValuableStacks(out long treasureWorth);
+            long total = treasureWorth + Finds.InventoryValue;
+            if (stacks + list.Count > 0)
+            {
+                var stats = UIKit.Row();
+                stats.Add(PhoneKit.Stat(UIGlyphs.Chest, UIPalette.SunInk, (stacks + list.Count).ToString()));
+                stats.Add(UIKit.HSpacer(8f));
+                stats.Add(PhoneKit.Stat(UIGlyphs.Coin, UIPalette.Sun, UIKit.Compact(total) + " $", UIPalette.LeafInk));
+                body.Add(stats);
+                if (stacks > 0 && list.Count > 0)
+                {
+                    var everything = PhoneKit.IconButton(UIGlyphs.Coin, Loc.Tr("Alles verkaufen", "Sell everything") + " · " + Loc.Money(total), () =>
+                    {
+                        long a = SeaTreasure.SellAll(), b = Finds.SellAll();
+                        if (a + b > 0) UIAudio.Pop();
+                        Phone.Refresh(true);
+                    }, UIBtnKind.Primary, PhoneKit.Body);
+                    everything.style.marginTop = 10f;
+                    body.Add(everything);
+                }
+            }
+            bool treasure = BuildValuables(body, stacks > 0 && list.Count > 0);
+            if (MapDiscovery.CampKnown && (treasure || list.Count > 0))
+            {
+                var hint = UIKit.Row();
+                hint.style.marginTop = 4f;
+                hint.style.marginBottom = 6f;
+                hint.Add(new UIGlyph(UIGlyphs.Hut, UIPalette.Rgb(0xD9762B), 26f));
+                var ht = PhoneKit.T(" " + Loc.Tr("Schätze auch im Lager tauschen", "Treasure also trades at the camp") + " (" + GameInput.BindingLabel(GameAction.Gestures) + ")", PhoneKit.Tiny, UIPalette.InkSoft, true);
+                ht.style.flexShrink = 1;
+                hint.Add(ht);
+                body.Add(hint);
+            }
             if (list.Count == 0)
             {
-                body.Add(PhoneKit.Empty(UIGlyphs.Chest, Loc.Tr("Noch keine Funde – such im Sand nach Glitzern!", "No finds yet – look for glints in the sand!")));
+                if (!treasure) body.Add(PhoneKit.Empty(UIGlyphs.Chest, Loc.Tr("Noch keine Funde – Truhen öffnen, im Sand glitzert's!", "No finds yet – open chests, look for glints!")));
                 return;
             }
+            if (treasure) body.Add(PhoneKit.Section(Loc.Tr("Bergungsgut", "Salvage"), UIGlyphs.Winch));
             var all = PhoneKit.IconButton(UIGlyphs.Coin, Loc.Tr("Alle verkaufen", "Sell all") + " · " + Loc.Money(Finds.InventoryValue), () =>
             {
                 if (Finds.SellAll() > 0) UIAudio.Pop();
@@ -195,6 +253,65 @@ namespace Sealebrities
                 row.Add(b);
                 body.Add(row);
             }
+        }
+
+        /// Round 3 (fauna step, GDD §20 Q20): treasure from sunken chests / wrecks rides in the player's backpack
+        /// (ItemCategory.Valuable) – sold here, one stack or everything. Returns true when there was any.
+        bool BuildValuables(VisualElement body, bool compact = false)
+        {
+            var pouch = Backpack.Pouch;
+            bool any = false;
+            for (int i = 0; i < pouch.Count; i++)
+            {
+                var st = pouch[i];
+                var d = st != null ? st.Def : null;
+                if (d != null && d.category == ItemCategory.Valuable && st.count > 0) { any = true; break; }
+            }
+            if (!any) return false;
+            body.Add(PhoneKit.Section(Loc.Tr("Schätze im Rucksack", "Treasure in the backpack"), UIGlyphs.Chest));
+            if (!compact)
+            {
+                var all = PhoneKit.IconButton(UIGlyphs.Coin, Loc.Tr("Alle verkaufen", "Sell all") + " · " + Loc.Money(SeaTreasure.ValuablesWorth), () =>
+                {
+                    if (SeaTreasure.SellAll() > 0) UIAudio.Pop();
+                    Phone.Refresh(true);
+                }, UIBtnKind.Primary, PhoneKit.Body);
+                all.style.marginBottom = 12f;
+                body.Add(all);
+            }
+            for (int i = 0; i < pouch.Count; i++)
+            {
+                var st = pouch[i];
+                var d = st != null ? st.Def : null;
+                if (d == null || d.category != ItemCategory.Valuable || st.count <= 0) continue;
+                var row = UIKit.Row();
+                row.style.backgroundColor = Color.white;
+                UIKit.Radius(row, 20f);
+                UIKit.Pad(row, 10f, 12f, 10f, 14f);
+                row.style.marginBottom = 8f;
+                var draw = UIGlyphs.ForItemId(d.id);
+                row.Add(UIWidgets.IconTile(draw ?? (UIGlyph.DrawFn)UIGlyphs.Chest, UIPalette.Sun, 56f));
+                var col = UIKit.Col();
+                col.style.marginLeft = 12f;
+                col.style.flexGrow = 1;
+                col.style.flexShrink = 1;
+                col.Add(PhoneKit.T(d.Name + (st.count > 1 ? "  ×" + st.count : ""), PhoneKit.Body, UIPalette.Ink, true));
+                row.Add(col);
+                var price = UIKit.Text(Loc.Money(d.value * st.count), PhoneKit.Body, UIPalette.LeafInk, true);
+                price.style.marginRight = 10f;
+                row.Add(price);
+                string id = d.id;
+                int n = st.count;
+                var b = PhoneKit.IconButton(UIGlyphs.Coin, "", () =>
+                {
+                    if (SeaTreasure.Sell(id, n) > 0) UIAudio.Pop();
+                    Phone.Refresh(true);
+                }, UIBtnKind.Primary, PhoneKit.Body);
+                UIKit.Pad(b, 12f, 16f, 12f, 16f);
+                row.Add(b);
+                body.Add(row);
+            }
+            return true;
         }
 
         static Color FishColor(FishItem f)

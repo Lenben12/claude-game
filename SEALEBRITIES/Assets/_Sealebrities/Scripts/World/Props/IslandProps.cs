@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using UnityEngine;
 
 namespace Sealebrities
@@ -7,9 +7,11 @@ namespace Sealebrities
     /// roof ladder, locker, fridge, Gus' letter), dock (berths, Horst's bench), helipad with Wanda's hangar, the
     /// lighthouse (cellar, maintenance ladder, rope ladder to the north beach, coin telescope), the points of interest
     /// (Waterfall Grotto with the root curtain and the squeeze, the alcove behind the falls, rope swing, stepping
-    /// stones, ravine ladders, tide pools, radio tower platform, hidden bay grotto), the village Altriff (L.8), the
-    /// trail network with signposts, beach life, the L.5 detail pass, the layered jungle with GPU-instanced grass, the
-    /// landmark islands (rest spots, secrets, the Fog Isle with Toni's camp) and the 94 collectibles (L.6).
+    /// stones, ravine ladders, tide pools, radio tower platform, hidden bay grotto), the south beach jetty (round 3: the
+    /// village Altriff is gone) and the hidden hermit camp (PropCamp, round 3), the trail network with signposts, beach
+    /// life, the L.5 detail pass, the layered jungle with GPU-instanced grass, the landmark islands (rest spots, secrets,
+    /// the Fog Isle with Toni's camp), the volcano island (PropVolcano, round 3), the 94 collectibles (L.6) and the round-3
+    /// survival props (campfires, daily finds, the 8 map pieces + the treasure X – PropSurvival).
     /// Called by WorldBuilder after the terrain exists: "yield return IslandProps.Build(root)".
     /// Every group is isolated (a failure is logged and the rest still builds) and work is spread over frames.
     /// All placement is deterministic (fixed seeds) so every co-op machine builds the identical island; the graphics
@@ -23,6 +25,8 @@ namespace Sealebrities
             PropInfo.PathPoints.Clear();
             PropPaths.ClearConnections();
             PropCoop.Install();
+            // round 3 world step: the map pieces, campfires and daily finds are placed by PropSurvival.PlaceMapPieces
+            MapPieces.UseDefaultPlacement = false;
             var island = PropUtil.WorldRoot("IslandProps", root);
 
             // reserve the key spots first so nothing grows into them
@@ -61,28 +65,37 @@ namespace Sealebrities
             yield return PropRun.Safe(PropPOI3.TidePools(island, excl), "tide pool extras");
             yield return PropRun.Safe(PropPOI3.HiddenBay(island, excl), "hidden bay extras");
 
-            // the village Altriff (L.8) replaces the old second beach
-            yield return PropRun.Safe(PropVillage.Build(island, excl), "village");
+            // round 3: the village Altriff is gone (only its jetty + a few canoes remain on the south beach); the hidden
+            // hermit camp lies on the far (west) side of the island
+            yield return PropRun.Safe(PropVillage.Build(island, excl), "south beach jetty");
+            yield return PropRun.Safe(PropCamp.Build(island, excl), "hermit camp");
 
             // trails, beach life, the detail pass, vegetation
             yield return PropRun.Safe(PropPaths.Build(island, excl, pathMask, skip), "paths");
             yield return PropRun.Safe(PropBeach.Build(island, excl), "beach props");
+            // round 3: Horst's corner on the beach south of the hut (his hammock between two palms – off the dock)
+            yield return PropRun.Safe(PropHorst.Build(island, excl), "horst corner");
             yield return PropRun.Safe(PropDetails.Build(island, excl), "detail pass");
             var grass = PropGrassField.Create(island, "Grass");
             yield return PropRun.Safe(PropJungle.Build(island, excl, pathMask, grass), "jungle");
 
             // landmark islands next to the outer dive sites (+ rest spots, secrets, the Fog Isle)
             yield return PropRun.Safe(PropMiniIslands.Build(island, grass), "mini islands");
+            // round 3: the volcano island (black sand, smoking crater, ferns – home of the living fossils)
+            yield return PropRun.Safe(PropVolcano.Build(island, grass), "volcano island");
             try { grass.Finish(); }
             catch (System.Exception e) { Debug.LogError("Sealebrities props: grass failed: " + e); }
 
             // optional collectibles (need every POI built)
             yield return PropRun.Safe(PropCollect.Build(island, excl), "collectibles");
+            // round 3: campfire spots, daily pickups (driftwood, whetstones, fruit), map pieces + the treasure
+            yield return PropRun.Safe(PropSurvival.BuildIsland(island, excl), "survival props");
 
             try { PublishSpots(); }
             catch (System.Exception e) { Debug.LogError("Sealebrities props: spot publishing failed: " + e); }
 
             PropJungle.ReleaseKit();
+            PropVolcanoPlants.Release();   // no-op when PropVolcano already released it (covers a failed volcano build)
             PropInfo.IslandBuilt = true;
         }
 

@@ -102,47 +102,132 @@ namespace Sealebrities
             return crouching ? 0.45f : 1f;
         }
 
-        // ------------------------------------------------------------------ lying on a co-op sleep spot (L.9)
+        // ------------------------------------------------------------------ lying on a sleep spot (L.9 + round 3)
+        // Round 3 (GDD §19, images 4/5: the avatar lay on the floor beside the hammock / bed): the diver's ROOT moves onto
+        // the spot (the pelvis contact point on the mattress / in the hammock, controller off), so the co-op avatar, the
+        // first-person eye and the host's view all agree; getting up places the diver at the spot's stand point. The
+        // camera is the eye of the lying pose (DiverPuppet.LieEye) looking along the face, mouse ±60° / −40…+50°.
+        // Solo: lying down sleeps at once – the diver lies down on the spot through the sleep fade (SleepStarted).
+        int lieSpot = -1, debugLieSpot = -1;
+        float sleepHoldUntil = -1f, lieHeadRise, lieFeetRise;
+        bool lieHammock, lieAllLying;
+        Vector3 lieRoot;
+        float lieYaw;
+
+        /// Tests (AutoPlaytest): lie down on a spot without a vote (−1 = get up again).
+        public void DebugLie(int spotIndex) => debugLieSpot = spotIndex;
+
+        /// The spot the diver lies on right now (index into PropInfo.SleepSpots, −1 = none).
+        public int LyingSpotIndex => lyingCam ? lieSpot : -1;
+
         bool LyingOnSpot(out SleepSpotInfo spot)
         {
             spot = default;
+            var spots = PropInfo.SleepSpots;
+            int i = debugLieSpot >= 0 ? debugLieSpot : SleepVote.LocalLying ? PropInfo.LocalSleepSpot : -1;
+            if (i >= 0 && i < spots.Count)
+            {
+                lieSpot = i;
+                spot = spots[i];
+                return true;
+            }
+            // keep lying through the sleep fade (the vote resets as the night is skipped; solo sleeps at once)
+            if (Time.unscaledTime < sleepHoldUntil && lieSpot >= 0 && lieSpot < spots.Count)
+            {
+                spot = spots[lieSpot];
+                return true;
+            }
+            return false;
+        }
+
+        void OnSleepStarted()
+        {
+            if (!initialized || menuMode) return;
             int i = PropInfo.LocalSleepSpot;
-            if (!SleepVote.LocalLying || i < 0 || i >= PropInfo.SleepSpots.Count) return false;
-            spot = PropInfo.SleepSpots[i];
-            return true;
+            if (i >= 0 && i < PropInfo.SleepSpots.Count) lieSpot = i;
+            if (lieSpot >= 0) sleepHoldUntil = Time.unscaledTime + 3.4f;
         }
 
         /// While lying: no walking; moving / jumping gets up. Returns true when the input was consumed.
         bool UpdateLying(bool input)
         {
-            if (!LyingOnSpot(out _))
+            if (!LyingOnSpot(out SleepSpotInfo s))
             {
-                if (lyingCam) { lyingCam = false; lieYawOff = liePitchOff = 0f; }
+                if (lyingCam)
+                {
+                    // everybody was lying → the night is being skipped: stay down through the fade
+                    if (lieAllLying && lieSpot >= 0) { sleepHoldUntil = Time.unscaledTime + 3.4f; lieAllLying = false; return true; }
+                    EndLying(true);
+                }
                 return false;
             }
-            if (!lyingCam)
+            if (!lyingCam) BeginLying(s);
+            lieAllLying = SleepVote.LocalLying && SleepVote.Total > 1 && SleepVote.Lying >= SleepVote.Total;
+            // stay on the spot (the bed / hammock does not move)
+            transform.SetPositionAndRotation(lieRoot, Quaternion.Euler(0f, lieYaw, 0f));
+            bool holding = Time.unscaledTime < sleepHoldUntil;
+            if (input && !holding && (GameInput.Move.sqrMagnitude > 0.25f || GameInput.JumpPressed))
             {
-                lyingCam = true;
-                lieYawOff = 0f;
-                liePitchOff = 0f;
-                Hands.StowAll();
-            }
-            if (input && (GameInput.Move.sqrMagnitude > 0.25f || GameInput.JumpPressed))
-            {
+                if (debugLieSpot >= 0) debugLieSpot = -1;
                 SleepVote.SetLying(false);
                 PropInfo.LocalSleepSpot = -1;
-                lyingCam = false;
+                EndLying(true);
                 return true;
             }
             return true;
         }
 
-        /// Camera pose while lying: at the head end of the spot, looking up toward the feet (mouse looks around ±60°).
+        void BeginLying(in SleepSpotInfo s)
+        {
+            lyingCam = true;
+            lieYawOff = 0f;
+            liePitchOff = 0f;
+            Hands.StowAll();
+            if (crouching) SetCrouch(false);
+            if (selfie) ExitSelfie();
+            DiverPuppet.LiePose(s, out lieRoot, out lieYaw, out lieHeadRise, out lieFeetRise, out lieHammock);
+            if (cc != null) cc.enabled = false;
+            vel = Vector3.zero;
+            platform = null;
+            platformRb = null;
+            yaw = Mathf.Repeat(lieYaw, 360f);
+            pitch = 0f;
+            transform.SetPositionAndRotation(lieRoot, Quaternion.Euler(0f, lieYaw, 0f));
+            Physics.SyncTransforms();
+            lastPosValid = false;
+            camRotValid = false;
+        }
+
+        /// Gets up: onto the spot's stand point (controller back on) – or just ends the pose (teleports, menu).
+        void EndLying(bool standUp)
+        {
+            if (!lyingCam) return;
+            lyingCam = false;
+            lieYawOff = liePitchOff = 0f;
+            int i = lieSpot;
+            lieSpot = -1;
+            sleepHoldUntil = -1f;
+            lieAllLying = false;
+            if (standUp && i >= 0 && i < PropInfo.SleepSpots.Count)
+            {
+                var s = PropInfo.SleepSpots[i];
+                Vector3 stand = s.stand != Vector3.zero ? s.stand : lieRoot + Quaternion.Euler(0f, lieYaw + 90f, 0f) * Vector3.forward * 0.9f;
+                PlaceAt(stand + Vector3.up * 0.03f, s.stand != Vector3.zero ? s.standYaw : lieYaw);
+            }
+            else if (cc != null && !seated && !menuMode) cc.enabled = true;
+        }
+
+        /// Camera pose while lying: the eye of the lying diver, looking along the face (up, a little toward the feet).
         void ApplyLyingCamera()
         {
-            if (!lyingCam || !LyingOnSpot(out SleepSpotInfo s) || camT == null) return;
-            Quaternion q = Quaternion.Euler(0f, s.yaw + lieYawOff, 0f) * Quaternion.Euler(-62f + liePitchOff, 0f, 0f);
-            camT.SetPositionAndRotation(s.lie, q);
+            if (!lyingCam || camT == null) return;
+            float scale = 1f + Mathf.Clamp(Settings.Data.height, -2, 2) * 0.04f;
+            Vector3 eye = DiverPuppet.LieEye(lieRoot, lieYaw, lieHeadRise, lieHammock, scale, out Quaternion face);
+            // the face direction as yaw + pitch, then the mouse offsets on top (never past the pillow / through the body)
+            Vector3 f = face * Vector3.forward;
+            float fp = -Mathf.Asin(Mathf.Clamp(f.y, -1f, 1f)) * Mathf.Rad2Deg;
+            Quaternion q = Quaternion.Euler(0f, lieYaw + lieYawOff, 0f) * Quaternion.Euler(Mathf.Clamp(fp + liePitchOff, -88f, 30f), 0f, 0f);
+            camT.SetPositionAndRotation(eye, q);
         }
 
         // ------------------------------------------------------------------ currents (K.3)

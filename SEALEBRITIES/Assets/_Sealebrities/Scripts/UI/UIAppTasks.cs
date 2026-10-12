@@ -105,10 +105,104 @@ namespace Sealebrities
 
             BuildMainGoals(body, s);
             BuildRunning(body, s);
+            BuildSideLog(body, s);
             BuildChallenges(body, s);
             BuildTodos(body, s);
             BuildNext(body, s);
+            BuildHermits(body, s);
+            BuildHints(body);
             BuildCollection(body);
+        }
+
+        // ------------------------------------------------------------------ round 3: side-quest log (GDD §20 Q11)
+        readonly System.Collections.Generic.List<StoryLog.Entry> offered = new System.Collections.Generic.List<StoryLog.Entry>(8);
+
+        /// Jobs on offer right now (who to ask) + how many are done – the funny filming jobs carry a camera.
+        void BuildSideLog(VisualElement body, GameState s)
+        {
+            StoryLog.Offered(offered);
+            int done = 0, total = SideQuestDatabase.All.Length;
+            for (int i = 0; i < total; i++) if (Quests.IsDone(SideQuestDatabase.All[i].id)) done++;
+            if (offered.Count == 0 && done == 0) return;
+            body.Add(PhoneKit.Section(Loc.Tr("Aufträge", "Jobs") + "  " + done + "/" + total, UIGlyphs.Camera));
+            for (int i = 0; i < offered.Count && i < 6; i++)
+            {
+                var e = offered[i];
+                var d = SideQuestDatabase.Get(e.id);
+                bool film = d != null && d.filming;
+                var row = UIKit.Row();
+                UIKit.Pad(row, 10f, 12f, 10f, 12f);
+                UIKit.Radius(row, 18f);
+                row.style.marginBottom = 6f;
+                row.style.backgroundColor = Color.white;
+                row.Add(UIWidgets.IconTile(film ? UIGlyphs.Camera : UIGlyphs.Star, film ? UIPalette.Rgb(0x4F7FAE) : UIPalette.Sun, 46f));
+                var col = UIKit.Col();
+                col.style.marginLeft = 10f;
+                col.style.flexShrink = 1;
+                col.style.flexGrow = 1;
+                col.Add(PhoneKit.T(e.title, PhoneKit.Small, UIPalette.Ink, true));
+                col.Add(PhoneKit.T(Loc.Tr("Neu bei ", "New from ") + e.giver, PhoneKit.Tiny, UIPalette.InkSoft));
+                row.Add(col);
+                row.Add(new UIGlyph(UIGlyphs.Bubble, UIWidgets.Ink(e.color), 28f));
+                body.Add(row);
+            }
+            if (offered.Count == 0)
+                body.Add(PhoneKit.Empty(UIGlyphs.Camera, Loc.Tr("Gerade keine neuen Aufträge – frag Horst in seiner Hängematte.", "No new jobs right now – ask Horst in his hammock.")));
+        }
+
+        // ------------------------------------------------------------------ round 3: the hermits (mood, respect, crafts)
+        void BuildHermits(VisualElement body, GameState s)
+        {
+            if (!StoryFlags.Has(StoryKeys.HermitCampFound)) return;
+            body.Add(PhoneKit.Section(Loc.Tr("Einsiedler", "Hermits") + "  · " + GameInput.BindingLabel(GameAction.Gestures) + Loc.Tr(" halten = Zeichen", " hold = signs"), UIGlyphs.Hand));
+            var card = PhoneKit.Card(12f);
+            for (int i = 0; i < NpcDatabase.Hermits.Length; i++)
+            {
+                string id = NpcDatabase.Hermits[i];
+                var nd = NpcDatabase.Get(id);
+                var hd = HermitDatabase.Get(id);
+                if (nd == null || hd == null) continue;
+                var hs = Hermits.Get(id);
+                bool met = hs != null && hs.met;
+                int mood = Hermits.Mood(id), band = Hermits.Band(mood);
+                var row = UIKit.Row();
+                row.style.marginTop = i == 0 ? 0f : 8f;
+                row.style.alignItems = Align.Center;
+                var name = UIKit.Col();
+                name.style.width = 150f;
+                name.Add(PhoneKit.T(met ? nd.Name : "?", PhoneKit.Small, UIPalette.Ink, true));
+                name.Add(PhoneKit.T(nd.Role, PhoneKit.Tiny, UIPalette.InkSoft));
+                row.Add(name);
+                var barCol = UIKit.Col();
+                barCol.style.flexGrow = 1;
+                barCol.style.flexShrink = 1;
+                var bar = PhoneKit.Bar(Mathf.Clamp01((mood + 100) / 200f), Hermits.BandColor(band), 10f);
+                barCol.Add(bar);
+                string info = Hermits.BandName(band);
+                if (hs != null && hs.respect > 0) info += Loc.Tr("  · Respekt ", "  · respect ") + hs.respect;
+                if (!string.IsNullOrEmpty(hd.craftFlag)) info += "  · " + hd.Craft + (StoryFlags.Has(hd.craftFlag) ? Loc.Tr(" (gelernt)", " (learned)") : "");
+                barCol.Add(PhoneKit.T(info, PhoneKit.Tiny, UIPalette.InkSoft));
+                row.Add(barCol);
+                card.Add(row);
+            }
+            card.Add(PhoneKit.T(Loc.Tr("Geschenke + richtige Zeichen heben die Laune. „Das Meer ehren“ mögen alle.", "Gifts + the right signs lift the mood. Everyone likes 'Honour the sea'."), PhoneKit.Tiny, UIPalette.InkSoft));
+            body.Add(card);
+        }
+
+        // ------------------------------------------------------------------ round 3: hints heard from NPCs (Q12)
+        readonly System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<string, string>> hints = new System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<string, string>>(16);
+
+        void BuildHints(VisualElement body)
+        {
+            NpcClues.Heard(hints);
+            if (hints.Count == 0) return;
+            body.Add(PhoneKit.Section(Loc.Tr("Hinweise", "Hints"), UIGlyphs.Question));
+            for (int i = 0; i < hints.Count && i < 8; i++)
+            {
+                var c = UIWidgets.Notice("„" + hints[i].Key + "“ – " + hints[i].Value, UIPalette.Violet, UIGlyphs.Question, PhoneKit.Tiny);
+                c.style.marginBottom = 6f;
+                body.Add(c);
+            }
         }
 
         // ------------------------------------------------------------------ K.5 main goals

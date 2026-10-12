@@ -123,7 +123,7 @@ namespace Sealebrities
                 stats.Add(UIKit.HSpacer(8f));
                 stats.Add(UIWidgets.IconStat(UIGlyphs.Person, UIPalette.Turquoise, UIKit.Compact(s.followers), UIPalette.Ink, 22f));
                 stats.Add(UIKit.HSpacer(8f));
-                stats.Add(UIWidgets.IconStat(UIGlyphs.Book, UIPalette.TurquoiseInk, Journal.DiscoveredCount + "/" + SpeciesDatabase.All.Count, UIPalette.Ink, 22f));
+                stats.Add(UIWidgets.IconStat(UIGlyphs.Book, UIPalette.TurquoiseInk, Journal.DiscoveredCount + "/" + SpeciesDatabase.Count, UIPalette.Ink, 22f));
                 panel.Add(stats);
             }
 

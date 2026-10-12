@@ -13,7 +13,10 @@ namespace Sealebrities
     /// the hut locker. Keyboard: Tab / Shift+Tab tabs, arrows + Enter pick, A/D rotate, W/S zoom, Esc cancel.
     public class UICharacterScreen
     {
-        enum TabId { Suit, Hat, Face, Gear }
+        // round 3 (GDD §19 „mehr Optionen“): + Körper (build, height, skin, hair, hair colour, beard); nose in Gesicht,
+        // accessories under the hats
+        enum TabId { Suit, Body, Face, Hat, Gear }
+        const int TabCount = 5;
 
         class Entry
         {
@@ -175,6 +178,8 @@ namespace Sealebrities
                 var suits = CosmeticsDatabase.SuitColors;
                 look.suit = suits[Rng.Next(suits.Length)];
                 look.hat = Rng.Next(0, 6);
+                look.hair = Rng.Next(0, CosmeticsDatabase.HairCount - 1);
+                look.hairColor = Rng.Next(0, 8);
             }
             original = look;
             originalCuffAuto = cuffAuto;
@@ -247,7 +252,9 @@ namespace Sealebrities
 
         static bool SameLook(DiverLook a, DiverLook b) =>
             a.suit == b.suit && a.cuff == b.cuff && a.hat == b.hat && a.skin == b.skin && a.mouth == b.mouth && a.eyes == b.eyes
-            && a.brows == b.brows && a.pattern == b.pattern && a.mask == b.mask && a.fins == b.fins && a.snorkel == b.snorkel;
+            && a.brows == b.brows && a.pattern == b.pattern && a.mask == b.mask && a.fins == b.fins && a.snorkel == b.snorkel
+            && a.build == b.build && a.height == b.height && a.hair == b.hair && a.hairColor == b.hairColor && a.beard == b.beard
+            && a.nose == b.nose && a.accessory == b.accessory;
 
         /// Esc / close button: asks before throwing changes away.
         public void RequestCancel()
@@ -316,7 +323,7 @@ namespace Sealebrities
             if (!open || UITextInput.Active) return;
             if (GameInput.PausePressed) { RequestCancel(); return; }
             bool shift = GameInput.KeyHeld(Key.LeftShift) || GameInput.KeyHeld(Key.RightShift);
-            if (GameInput.KeyDown(Key.Tab)) { SetTab((TabId)(((int)tab + (shift ? 3 : 1)) % 4)); return; }
+            if (GameInput.KeyDown(Key.Tab)) { SetTab((TabId)(((int)tab + (shift ? TabCount - 1 : 1)) % TabCount)); return; }
             if (GameInput.KeyDown(Key.LeftArrow)) MoveCursor(0, -1);
             else if (GameInput.KeyDown(Key.RightArrow)) MoveCursor(0, 1);
             else if (GameInput.KeyDown(Key.UpArrow)) MoveCursor(-1, 0);
@@ -422,6 +429,14 @@ namespace Sealebrities
             look.fins = fins == 0 ? new Color(0f, 0f, 0f, 0f) : CosmeticsDatabase.FinColors[fins];
             look.snorkel = Rng.NextDouble() < 0.7;
             look.face = look.skin * 5 + look.mouth;
+            // round 3
+            look.build = Rng.Next(CosmeticsDatabase.BuildCount);
+            look.height = Rng.Next(5) - 2;
+            look.hair = Rng.Next(CosmeticsDatabase.HairCount);
+            look.hairColor = Rng.Next(CosmeticsDatabase.HairColors.Length);
+            look.beard = Rng.NextDouble() < 0.35 ? 1 + Rng.Next(CosmeticsDatabase.BeardCount - 1) : 0;
+            look.nose = Rng.Next(CosmeticsDatabase.NoseCount);
+            look.accessory = Rng.NextDouble() < 0.5 ? Rng.Next(CosmeticsDatabase.AccessoryCount) : 0;
             Apply(PreviewFocus.Body);
         }
 
@@ -457,6 +472,7 @@ namespace Sealebrities
             lockLine.text = "";
             UIAudio.Click();
             Focus(t == TabId.Hat ? PreviewFocus.Head : t == TabId.Face ? PreviewFocus.Face : t == TabId.Gear ? PreviewFocus.Feet : PreviewFocus.Body);
+            // (Body tab: the whole diver – build / height read best from afar)
             dirty = true;
         }
 
@@ -477,6 +493,7 @@ namespace Sealebrities
             switch (tab)
             {
                 case TabId.Suit: BuildSuit(body); break;
+                case TabId.Body: BuildBody(body); break;
                 case TabId.Hat: BuildHat(body); break;
                 case TabId.Face: BuildFace(body); break;
                 default: BuildGear(body); break;
@@ -509,8 +526,9 @@ namespace Sealebrities
         {
             tabsRow.Clear();
             AddTab(TabId.Suit, UIGlyphs.Suit, Loc.Tr("Anzug", "Suit"));
-            AddTab(TabId.Hat, UIGlyphs.Hat, Loc.Tr("Hut", "Hat"));
+            AddTab(TabId.Body, UIGlyphs.Person, Loc.Tr("Körper", "Body"));
             AddTab(TabId.Face, UIGlyphs.Face, Loc.Tr("Gesicht", "Face"));
+            AddTab(TabId.Hat, UIGlyphs.Hat, Loc.Tr("Hut & Extras", "Hat & extras"));
             AddTab(TabId.Gear, UIGlyphs.Mask, Loc.Tr("Maske & Flossen", "Mask & fins"));
         }
 
@@ -751,22 +769,106 @@ namespace Sealebrities
                 ItemCard(w, g, (p, r, col) => UICosmeticIcons.Hat(p, r, idx), d.Name, look.hat == idx, d,
                     () => { look.hat = idx; Apply(PreviewFocus.Head); });
             }
+
+            // round 3: accessories (necklace, neckerchief, earrings, flower, dive watch, freckles, plaster)
+            g = NewGroup();
+            w = Section(body, UIGlyphs.Sparkle, Loc.Tr("Extras", "Extras"));
+            CosmeticsDatabase.OfKind(CosmeticsDatabase.Accessory, tmpDefs);
+            Color skinA = SkinNow();
+            for (int i = 0; i < tmpDefs.Count; i++)
+            {
+                var d = tmpDefs[i];
+                int idx = d.index;
+                ItemCard(w, g, (p, r, col) => UICosmeticIcons.Accessory(p, r, idx, skinA), d.Name, look.accessory == idx, d,
+                    () => { look.accessory = idx; Apply(idx == 5 ? PreviewFocus.Body : PreviewFocus.Head); });
+            }
         }
 
-        void BuildFace(VisualElement body)
+        Color SkinNow()
         {
+            var skins = CosmeticsDatabase.SkinTones;
+            return skins[Mathf.Clamp(look.skin, 0, skins.Length - 1)];
+        }
+
+        Color HairNow()
+        {
+            var hc = CosmeticsDatabase.HairColors;
+            return hc[Mathf.Clamp(look.hairColor, 0, hc.Length - 1)];
+        }
+
+        /// Round 3 „Körper“: build, height, skin, hair style + colour, beard.
+        void BuildBody(VisualElement body)
+        {
+            Color suit = look.suit;
             var g = NewGroup();
-            var w = Section(body, UIGlyphs.Face, Loc.Tr("Haut", "Skin"));
+            var w = Section(body, UIGlyphs.Person, Loc.Tr("Statur", "Build"));
+            CosmeticsDatabase.OfKind(CosmeticsDatabase.BodyBuild, tmpDefs);
+            for (int i = 0; i < tmpDefs.Count; i++)
+            {
+                var d = tmpDefs[i];
+                int idx = d.index;
+                ItemCard(w, g, (p, r, col) => UICosmeticIcons.Build(p, r, idx, suit), d.Name, look.build == idx, d,
+                    () => { look.build = idx; Apply(PreviewFocus.Body); });
+            }
+
+            g = NewGroup();
+            w = Section(body, UIGlyphs.Person, Loc.Tr("Größe", "Height"));
+            CosmeticsDatabase.OfKind(CosmeticsDatabase.Height, tmpDefs);
+            for (int i = 0; i < tmpDefs.Count; i++)
+            {
+                var d = tmpDefs[i];
+                int h = d.index - 2;
+                ItemCard(w, g, (p, r, col) => UICosmeticIcons.Height(p, r, h, suit), d.Name, look.height == h, d,
+                    () => { look.height = h; Apply(PreviewFocus.Body); });
+            }
+
+            g = NewGroup();
+            w = Section(body, UIGlyphs.Face, Loc.Tr("Haut", "Skin"));
             var skins = CosmeticsDatabase.SkinTones;
             for (int i = 0; i < skins.Length; i++)
             {
                 int idx = i;
                 Swatch(w, g, skins[i], look.skin == i, false, null, () => { look.skin = idx; look.face = look.skin * 5 + look.mouth; Apply(PreviewFocus.Face); }, null);
             }
-            Color skin = skins[Mathf.Clamp(look.skin, 0, skins.Length - 1)];
+            Color skin = SkinNow(), hairC = HairNow();
 
             g = NewGroup();
-            w = Section(body, UIGlyphs.Eye, Loc.Tr("Augen", "Eyes"));
+            w = Section(body, UIGlyphs.Face, Loc.Tr("Frisur", "Hair"));
+            CosmeticsDatabase.OfKind(CosmeticsDatabase.Hair, tmpDefs);
+            for (int i = 0; i < tmpDefs.Count; i++)
+            {
+                var d = tmpDefs[i];
+                int idx = d.index;
+                ItemCard(w, g, (p, r, col) => UICosmeticIcons.Hair(p, r, idx, skin, hairC), d.Name, look.hair == idx, d,
+                    () => { look.hair = idx; Apply(PreviewFocus.Head); });
+            }
+
+            g = NewGroup();
+            w = Section(body, UIGlyphs.Sparkle, Loc.Tr("Haarfarbe", "Hair colour"));
+            var hcs = CosmeticsDatabase.HairColors;
+            for (int i = 0; i < hcs.Length; i++)
+            {
+                int idx = i;
+                Swatch(w, g, hcs[i], look.hairColor == i, false, null, () => { look.hairColor = idx; Apply(PreviewFocus.Head); }, null);
+            }
+
+            g = NewGroup();
+            w = Section(body, UIGlyphs.Face, Loc.Tr("Bart", "Beard"));
+            CosmeticsDatabase.OfKind(CosmeticsDatabase.Beard, tmpDefs);
+            for (int i = 0; i < tmpDefs.Count; i++)
+            {
+                var d = tmpDefs[i];
+                int idx = d.index;
+                ItemCard(w, g, (p, r, col) => UICosmeticIcons.Beard(p, r, idx, skin, hairC), d.Name, look.beard == idx, d,
+                    () => { look.beard = idx; Apply(PreviewFocus.Face); });
+            }
+        }
+
+        void BuildFace(VisualElement body)
+        {
+            Color skin = SkinNow();
+            var g = NewGroup();
+            var w = Section(body, UIGlyphs.Eye, Loc.Tr("Augen", "Eyes"));
             CosmeticsDatabase.OfKind(CosmeticsDatabase.Eyes, tmpDefs);
             for (int i = 0; i < tmpDefs.Count; i++)
             {
@@ -774,6 +876,17 @@ namespace Sealebrities
                 int idx = d.index;
                 ItemCard(w, g, (p, r, col) => UICosmeticIcons.Face(p, r, skin, idx, look.mouth, look.brows), d.Name, look.eyes == idx, d,
                     () => { look.eyes = idx; Apply(PreviewFocus.Face); });
+            }
+
+            g = NewGroup();
+            w = Section(body, UIGlyphs.Face, Loc.Tr("Nase", "Nose"));
+            CosmeticsDatabase.OfKind(CosmeticsDatabase.Nose, tmpDefs);
+            for (int i = 0; i < tmpDefs.Count; i++)
+            {
+                var d = tmpDefs[i];
+                int idx = d.index;
+                ItemCard(w, g, (p, r, col) => UICosmeticIcons.Nose(p, r, idx, skin), d.Name, look.nose == idx, d,
+                    () => { look.nose = idx; Apply(PreviewFocus.Face); });
             }
 
             g = NewGroup();
@@ -822,6 +935,7 @@ namespace Sealebrities
 
             g = NewGroup();
             w = Section(body, UIGlyphs.Fins, Loc.Tr("Flossen", "Fins"));
+            // (round 3: 8 fin colours, 10 mask frames)
             CosmeticsDatabase.OfKind(CosmeticsDatabase.Fins, tmpDefs);
             Color finsNow = look.ResolvedFins;
             for (int i = 0; i < tmpDefs.Count; i++)
@@ -1017,11 +1131,339 @@ namespace Sealebrities
                     p.MoveTo(P(r, 0.3f, 0.56f)); p.LineTo(P(r, 0.7f, 0.56f)); p.LineTo(P(r, 0.7f, 0.62f)); p.LineTo(P(r, 0.3f, 0.62f));
                     p.ClosePath(); p.Fill();
                     break;
+                case 15:   // beanie
+                    Dome(p, r, H(0xD9603B), 0.2f, 0.8f, 0.7f, 0.12f);
+                    p.fillColor = H(0xEDE6DA);
+                    p.BeginPath();
+                    p.MoveTo(P(r, 0.18f, 0.62f)); p.LineTo(P(r, 0.82f, 0.62f)); p.LineTo(P(r, 0.82f, 0.76f)); p.LineTo(P(r, 0.18f, 0.76f));
+                    p.ClosePath(); p.Fill();
+                    Circle(p, P(r, 0.5f, 0.18f), s * 0.09f, H(0xEDE6DA));
+                    break;
+                case 16:   // baseball cap
+                    Dome(p, r, H(0xE8A23A), 0.2f, 0.8f, 0.64f, 0.2f);
+                    Brim(p, r, H(0x2E3140), 0.42f, 0.98f, 0.66f, 0.06f);
+                    Circle(p, P(r, 0.5f, 0.24f), s * 0.035f, H(0x2E3140));
+                    break;
+                case 17:   // headband
+                    p.fillColor = H(0xF4EFE6);
+                    p.BeginPath();
+                    p.MoveTo(P(r, 0.14f, 0.44f)); p.QuadraticCurveTo(P(r, 0.5f, 0.32f), P(r, 0.86f, 0.44f));
+                    p.LineTo(P(r, 0.86f, 0.6f)); p.QuadraticCurveTo(P(r, 0.5f, 0.48f), P(r, 0.14f, 0.6f));
+                    p.ClosePath(); p.Fill();
+                    p.strokeColor = H(0xE0607E);
+                    p.lineWidth = s * 0.04f;
+                    p.BeginPath(); p.MoveTo(P(r, 0.16f, 0.52f)); p.QuadraticCurveTo(P(r, 0.5f, 0.4f), P(r, 0.84f, 0.52f)); p.Stroke();
+                    break;
+                case 18:   // head scarf
+                    Dome(p, r, H(0xE0607E), 0.2f, 0.8f, 0.68f, 0.18f);
+                    Poly(p, r, H(0xC94F6E), 0.74f, 0.6f, 0.94f, 0.72f, 0.86f, 0.86f);
+                    Poly(p, r, H(0xC94F6E), 0.74f, 0.62f, 0.9f, 0.9f, 0.78f, 0.92f);
+                    break;
+                case 19:   // sun visor
+                    p.fillColor = H(0xF2C94C);
+                    p.BeginPath();
+                    p.MoveTo(P(r, 0.18f, 0.5f)); p.LineTo(P(r, 0.82f, 0.5f)); p.LineTo(P(r, 0.82f, 0.6f)); p.LineTo(P(r, 0.18f, 0.6f));
+                    p.ClosePath(); p.Fill();
+                    Brim(p, r, UIPalette.A(H(0x3FB8C4), 0.85f), 0.3f, 0.96f, 0.62f, 0.1f);
+                    break;
                 default:   // 14 paper crown
                     Poly(p, r, H(0xF4EFE6), 0.14f, 0.76f, 0.14f, 0.34f, 0.3f, 0.5f, 0.42f, 0.28f, 0.58f, 0.5f, 0.7f, 0.28f, 0.86f, 0.34f, 0.86f, 0.76f);
                     p.strokeColor = UIPalette.A(UIPalette.Ink, 0.35f);
                     p.lineWidth = s * 0.02f;
                     p.BeginPath(); p.MoveTo(P(r, 0.14f, 0.66f)); p.LineTo(P(r, 0.86f, 0.66f)); p.Stroke();
+                    break;
+            }
+        }
+
+        // ------------------------------------------------------------------ round 3 option icons
+        /// Body silhouette in the suit colour: 0 regular, 1 slim, 2 sturdy, 3 broad shoulders.
+        public static void Build(Painter2D p, Rect r, int build, Color suit)
+        {
+            float sh = build == 1 ? 0.15f : build == 2 ? 0.2f : build == 3 ? 0.25f : 0.18f;
+            float waist = build == 1 ? 0.1f : build == 2 ? 0.2f : build == 3 ? 0.13f : 0.14f;
+            Figure(p, r, 0.5f, 1f, sh, waist, suit);
+        }
+
+        /// Height: a figure scaled −2 … +2 next to a little ruler.
+        public static void Height(Painter2D p, Rect r, int height, Color suit)
+        {
+            float k = 0.78f + (height + 2) * 0.06f;
+            Figure(p, r, 0.46f, k, 0.17f, 0.13f, suit);
+            p.strokeColor = UIPalette.A(UIPalette.Ink, 0.45f);
+            p.lineWidth = S(r) * 0.025f;
+            p.BeginPath(); p.MoveTo(P(r, 0.84f, 0.92f)); p.LineTo(P(r, 0.84f, 0.92f - 0.84f * k)); p.Stroke();
+            for (int i = 0; i < 4; i++)
+            {
+                float y = 0.92f - 0.84f * k * i / 3f;
+                p.BeginPath(); p.MoveTo(P(r, 0.8f, y)); p.LineTo(P(r, 0.88f, y)); p.Stroke();
+            }
+        }
+
+        /// A little standing diver: egg head, shoulders, torso, legs (feet at 92 % of the box).
+        static void Figure(Painter2D p, Rect r, float cx, float scale, float shoulder, float waist, Color suit)
+        {
+            float H0 = 0.84f * scale, foot = 0.92f;
+            float top = foot - H0;
+            Color skin = H(0xD6A574), dark = H(0x343849);
+            float y(float f) => top + H0 * f;
+            // legs
+            p.fillColor = dark;
+            p.BeginPath();
+            p.MoveTo(P(r, cx - waist * 0.9f * scale, y(0.5f))); p.LineTo(P(r, cx - 0.02f, y(0.5f)));
+            p.LineTo(P(r, cx - 0.03f, y(1f))); p.LineTo(P(r, cx - waist * 0.8f * scale, y(1f)));
+            p.ClosePath(); p.Fill();
+            p.BeginPath();
+            p.MoveTo(P(r, cx + 0.02f, y(0.5f))); p.LineTo(P(r, cx + waist * 0.9f * scale, y(0.5f)));
+            p.LineTo(P(r, cx + waist * 0.8f * scale, y(1f))); p.LineTo(P(r, cx + 0.03f, y(1f)));
+            p.ClosePath(); p.Fill();
+            // torso: shoulders → waist
+            p.fillColor = suit;
+            p.BeginPath();
+            p.MoveTo(P(r, cx - shoulder * scale, y(0.25f)));
+            p.LineTo(P(r, cx + shoulder * scale, y(0.25f)));
+            p.LineTo(P(r, cx + waist * scale, y(0.55f)));
+            p.LineTo(P(r, cx - waist * scale, y(0.55f)));
+            p.ClosePath(); p.Fill();
+            // arms
+            p.strokeColor = dark;
+            p.lineWidth = S(r) * 0.05f * scale;
+            p.lineCap = LineCap.Round;
+            p.BeginPath(); p.MoveTo(P(r, cx - shoulder * scale, y(0.27f))); p.LineTo(P(r, cx - shoulder * scale - 0.03f, y(0.56f))); p.Stroke();
+            p.BeginPath(); p.MoveTo(P(r, cx + shoulder * scale, y(0.27f))); p.LineTo(P(r, cx + shoulder * scale + 0.03f, y(0.56f))); p.Stroke();
+            // head (egg) + neck
+            Circle(p, P(r, cx, y(0.12f)), S(r) * 0.085f * scale, skin);
+            Circle(p, P(r, cx, y(0.07f)), S(r) * 0.075f * scale, skin);
+        }
+
+        /// A face (skin) with the hair style drawn on top in the hair colour.
+        public static void Hair(Painter2D p, Rect r, int hair, Color skin, Color hairC)
+        {
+            float s = S(r);
+            Vector2 c = P(r, 0.5f, 0.56f);
+            float hr = s * 0.3f;
+            // behind the head: long hair / ponytail / bun
+            if (hair == 5) { p.fillColor = hairC; p.BeginPath(); p.MoveTo(c + new Vector2(-hr * 1.1f, -hr * 0.2f)); p.LineTo(c + new Vector2(hr * 1.1f, -hr * 0.2f)); p.LineTo(c + new Vector2(hr * 1.05f, hr * 1.25f)); p.LineTo(c + new Vector2(-hr * 1.05f, hr * 1.25f)); p.ClosePath(); p.Fill(); }
+            if (hair == 3) Circle(p, c + new Vector2(hr * 1.05f, hr * 0.15f), hr * 0.32f, hairC);
+            if (hair == 4) Circle(p, c + new Vector2(0f, -hr * 1.15f), hr * 0.38f, hairC);
+            // head
+            p.fillColor = skin;
+            p.BeginPath();
+            p.Arc(c, hr, Angle.Degrees(0f), Angle.Degrees(360f));
+            p.ClosePath(); p.Fill();
+            if (hair == CosmeticsDatabase.HairBald)
+            {
+                Circle(p, c + new Vector2(-hr * 0.35f, -hr * 0.55f), hr * 0.16f, UIPalette.A(Color.white, 0.5f));
+            }
+            else
+            {
+                // the cap: the top half of the head
+                p.fillColor = hairC;
+                p.BeginPath();
+                float hairline = hair == 2 || hair == 7 ? 0.0f : -0.12f;
+                p.Arc(c, hr * 1.06f, Angle.Degrees(180f), Angle.Degrees(360f));
+                p.LineTo(c + new Vector2(hr * 1.06f, hr * hairline));
+                p.QuadraticCurveTo(c + new Vector2(0f, -hr * 0.5f), c + new Vector2(-hr * 1.06f, hr * hairline));
+                p.ClosePath(); p.Fill();
+                switch (hair)
+                {
+                    case 1:   // spikes
+                        for (int i = 0; i < 5; i++)
+                        {
+                            float a = (200f + i * 35f) * Mathf.Deg2Rad;
+                            Vector2 b = c + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * hr * 0.95f;
+                            Vector2 tip = c + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * hr * 1.45f;
+                            Vector2 sideV = new Vector2(-Mathf.Sin(a), Mathf.Cos(a)) * hr * 0.18f;
+                            p.BeginPath(); p.MoveTo(b - sideV); p.LineTo(tip); p.LineTo(b + sideV); p.ClosePath(); p.Fill();
+                        }
+                        break;
+                    case 2:   // curls
+                    case 7:   // shaggy
+                        for (int i = 0; i < 7; i++)
+                        {
+                            float a = (180f + i * 30f) * Mathf.Deg2Rad;
+                            Circle(p, c + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * hr * 1.02f, hr * (hair == 2 ? 0.24f : 0.2f), hairC);
+                        }
+                        break;
+                    case 6:   // side part swoop
+                        p.BeginPath();
+                        p.MoveTo(c + new Vector2(-hr * 0.9f, -hr * 0.4f));
+                        p.QuadraticCurveTo(c + new Vector2(-hr * 0.1f, -hr * 0.05f), c + new Vector2(hr * 0.8f, -hr * 0.45f));
+                        p.LineTo(c + new Vector2(hr * 0.3f, -hr * 0.9f));
+                        p.ClosePath(); p.Fill();
+                        break;
+                    case 5:   // long: side locks
+                        p.BeginPath(); p.MoveTo(c + new Vector2(-hr * 1.06f, -hr * 0.1f)); p.LineTo(c + new Vector2(-hr * 0.8f, -hr * 0.1f)); p.LineTo(c + new Vector2(-hr * 0.85f, hr * 0.9f)); p.LineTo(c + new Vector2(-hr * 1.05f, hr * 0.9f)); p.ClosePath(); p.Fill();
+                        p.BeginPath(); p.MoveTo(c + new Vector2(hr * 1.06f, -hr * 0.1f)); p.LineTo(c + new Vector2(hr * 0.8f, -hr * 0.1f)); p.LineTo(c + new Vector2(hr * 0.85f, hr * 0.9f)); p.LineTo(c + new Vector2(hr * 1.05f, hr * 0.9f)); p.ClosePath(); p.Fill();
+                        break;
+                }
+            }
+            FaceDots(p, c, hr);
+        }
+
+        static void FaceDots(Painter2D p, Vector2 c, float hr)
+        {
+            Color ink = H(0x1E1B2B);
+            for (int s = -1; s <= 1; s += 2)
+            {
+                Circle(p, c + new Vector2(s * hr * 0.35f, hr * 0.12f), hr * 0.17f, Color.white);
+                Circle(p, c + new Vector2(s * hr * 0.35f, hr * 0.15f), hr * 0.08f, ink);
+            }
+            p.strokeColor = ink;
+            p.lineWidth = hr * 0.08f;
+            p.lineCap = LineCap.Round;
+            p.BeginPath();
+            p.Arc(c + new Vector2(0f, hr * 0.42f), hr * 0.22f, Angle.Degrees(25f), Angle.Degrees(155f));
+            p.Stroke();
+        }
+
+        /// Face with a beard: 0 none, 1 moustache, 2 goatee, 3 full, 4 captain's (chin curtain), 5 stubble.
+        public static void Beard(Painter2D p, Rect r, int beard, Color skin, Color hairC)
+        {
+            float s = S(r);
+            Vector2 c = P(r, 0.5f, 0.5f);
+            float hr = s * 0.34f;
+            Circle(p, c, hr, skin);
+            Color bc = beard == 5 ? Color.Lerp(skin, hairC, 0.45f) : hairC;
+            if (beard == 3 || beard == 4 || beard == 5)
+            {
+                p.fillColor = bc;
+                p.BeginPath();
+                float top = beard == 4 ? 0.48f : 0.12f;
+                p.MoveTo(c + new Vector2(-hr * 0.98f, hr * 0.05f));
+                p.QuadraticCurveTo(c + new Vector2(-hr * 0.9f, hr * 1.25f), c + new Vector2(0f, hr * 1.22f));
+                p.QuadraticCurveTo(c + new Vector2(hr * 0.9f, hr * 1.25f), c + new Vector2(hr * 0.98f, hr * 0.05f));
+                p.LineTo(c + new Vector2(hr * 0.7f, hr * 0.1f));
+                p.QuadraticCurveTo(c + new Vector2(0f, hr * (top + 0.4f)), c + new Vector2(-hr * 0.7f, hr * 0.1f));
+                p.ClosePath(); p.Fill();
+            }
+            if (beard == 2) Circle(p, c + new Vector2(0f, hr * 0.78f), hr * 0.2f, bc);
+            if (beard == 1 || beard == 2 || beard == 3)
+            {
+                p.fillColor = bc;
+                p.BeginPath();
+                p.MoveTo(c + new Vector2(-hr * 0.42f, hr * 0.42f));
+                p.QuadraticCurveTo(c + new Vector2(0f, hr * 0.22f), c + new Vector2(hr * 0.42f, hr * 0.42f));
+                p.QuadraticCurveTo(c + new Vector2(0f, hr * 0.36f), c + new Vector2(-hr * 0.42f, hr * 0.42f));
+                p.ClosePath(); p.Fill();
+            }
+            Color ink = H(0x1E1B2B);
+            for (int i = -1; i <= 1; i += 2)
+            {
+                Circle(p, c + new Vector2(i * hr * 0.35f, -hr * 0.2f), hr * 0.17f, Color.white);
+                Circle(p, c + new Vector2(i * hr * 0.35f, -hr * 0.17f), hr * 0.08f, ink);
+            }
+            p.strokeColor = ink;
+            p.lineWidth = hr * 0.07f;
+            p.lineCap = LineCap.Round;
+            p.BeginPath(); p.MoveTo(c + new Vector2(-hr * 0.2f, hr * 0.58f)); p.LineTo(c + new Vector2(hr * 0.2f, hr * 0.58f)); p.Stroke();
+        }
+
+        /// Face in profile-ish front view with the nose shape: 0 button, 1 round, 2 long, 3 pointy, 4 snub.
+        public static void Nose(Painter2D p, Rect r, int nose, Color skin)
+        {
+            float s = S(r);
+            Vector2 c = P(r, 0.5f, 0.5f);
+            float hr = s * 0.36f;
+            Circle(p, c, hr, skin);
+            Color nc = UIPalette.Darken(skin, 0.12f);
+            Vector2 n = c + new Vector2(0f, hr * 0.12f);
+            switch (nose)
+            {
+                case 1: Circle(p, n + new Vector2(0f, hr * 0.06f), hr * 0.26f, nc); break;
+                case 2:
+                    p.fillColor = nc;
+                    p.BeginPath(); p.MoveTo(n + new Vector2(-hr * 0.08f, -hr * 0.3f)); p.LineTo(n + new Vector2(hr * 0.08f, -hr * 0.3f)); p.LineTo(n + new Vector2(hr * 0.12f, hr * 0.35f)); p.LineTo(n + new Vector2(-hr * 0.12f, hr * 0.35f)); p.ClosePath(); p.Fill();
+                    Circle(p, n + new Vector2(0f, hr * 0.35f), hr * 0.13f, nc);
+                    break;
+                case 3:
+                    p.fillColor = nc;
+                    p.BeginPath(); p.MoveTo(n + new Vector2(0f, -hr * 0.25f)); p.LineTo(n + new Vector2(hr * 0.16f, hr * 0.2f)); p.LineTo(n + new Vector2(-hr * 0.16f, hr * 0.2f)); p.ClosePath(); p.Fill();
+                    break;
+                case 4:
+                    Circle(p, n + new Vector2(0f, hr * 0.02f), hr * 0.15f, nc);
+                    Circle(p, n + new Vector2(-hr * 0.06f, hr * 0.07f), hr * 0.04f, UIPalette.Darken(skin, 0.4f));
+                    Circle(p, n + new Vector2(hr * 0.06f, hr * 0.07f), hr * 0.04f, UIPalette.Darken(skin, 0.4f));
+                    break;
+                default: Circle(p, n, hr * 0.15f, nc); break;
+            }
+            Color ink = H(0x1E1B2B);
+            for (int i = -1; i <= 1; i += 2)
+            {
+                Circle(p, c + new Vector2(i * hr * 0.36f, -hr * 0.22f), hr * 0.17f, Color.white);
+                Circle(p, c + new Vector2(i * hr * 0.36f, -hr * 0.19f), hr * 0.08f, ink);
+            }
+            p.strokeColor = ink;
+            p.lineWidth = hr * 0.07f;
+            p.lineCap = LineCap.Round;
+            p.BeginPath(); p.Arc(c + new Vector2(0f, hr * 0.48f), hr * 0.2f, Angle.Degrees(25f), Angle.Degrees(155f)); p.Stroke();
+        }
+
+        /// Accessories: 0 none, 1 shell necklace, 2 neckerchief, 3 earrings, 4 flower, 5 dive watch, 6 freckles, 7 plaster.
+        public static void Accessory(Painter2D p, Rect r, int acc, Color skin)
+        {
+            float s = S(r);
+            switch (acc)
+            {
+                case 0:
+                    p.strokeColor = UIPalette.Silhouette;
+                    p.lineWidth = s * 0.07f;
+                    p.BeginPath(); p.Arc(r.center, s * 0.32f, Angle.Degrees(0f), Angle.Degrees(360f)); p.Stroke();
+                    p.BeginPath(); p.MoveTo(P(r, 0.28f, 0.72f)); p.LineTo(P(r, 0.72f, 0.28f)); p.Stroke();
+                    break;
+                case 1:
+                    p.strokeColor = H(0x8E6C50);
+                    p.lineWidth = s * 0.03f;
+                    p.BeginPath(); p.Arc(P(r, 0.5f, 0.3f), s * 0.32f, Angle.Degrees(20f), Angle.Degrees(160f)); p.Stroke();
+                    Circle(p, P(r, 0.32f, 0.52f), s * 0.07f, H(0xF4EFE6));
+                    Circle(p, P(r, 0.5f, 0.6f), s * 0.08f, H(0xF29BBE));
+                    Circle(p, P(r, 0.68f, 0.52f), s * 0.07f, H(0xF2C94C));
+                    break;
+                case 2:
+                    Poly(p, r, H(0xC94F3D), 0.16f, 0.32f, 0.84f, 0.32f, 0.5f, 0.82f);
+                    Circle(p, P(r, 0.5f, 0.32f), s * 0.08f, H(0xA83E30));
+                    break;
+                case 3:
+                    for (int i = -1; i <= 1; i += 2)
+                    {
+                        p.strokeColor = H(0xE8C65A);
+                        p.lineWidth = s * 0.05f;
+                        p.BeginPath(); p.Arc(P(r, 0.5f + i * 0.2f, 0.56f), s * 0.12f, Angle.Degrees(0f), Angle.Degrees(360f)); p.Stroke();
+                    }
+                    break;
+                case 4:
+                    for (int i = 0; i < 5; i++)
+                    {
+                        float a = i * 72f * Mathf.Deg2Rad;
+                        Circle(p, P(r, 0.5f, 0.5f) + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * s * 0.16f, s * 0.14f, H(0xE86FA0));
+                    }
+                    Circle(p, P(r, 0.5f, 0.5f), s * 0.08f, H(0xF2C94C));
+                    break;
+                case 5:
+                    p.fillColor = H(0x2E3140);
+                    p.BeginPath(); p.MoveTo(P(r, 0.38f, 0.1f)); p.LineTo(P(r, 0.62f, 0.1f)); p.LineTo(P(r, 0.62f, 0.9f)); p.LineTo(P(r, 0.38f, 0.9f)); p.ClosePath(); p.Fill();
+                    Circle(p, r.center, s * 0.22f, H(0xF2C94C));
+                    Circle(p, r.center, s * 0.16f, H(0x1E1B2B));
+                    p.strokeColor = Color.white;
+                    p.lineWidth = s * 0.03f;
+                    p.BeginPath(); p.MoveTo(r.center); p.LineTo(r.center + new Vector2(0f, -s * 0.12f)); p.Stroke();
+                    p.BeginPath(); p.MoveTo(r.center); p.LineTo(r.center + new Vector2(s * 0.08f, 0f)); p.Stroke();
+                    break;
+                case 6:
+                    Circle(p, r.center, s * 0.36f, skin);
+                    for (int i = 0; i < 4; i++)
+                        for (int k = -1; k <= 1; k += 2)
+                            Circle(p, P(r, 0.5f + k * (0.17f + (i % 2) * 0.06f), 0.52f + (i / 2) * 0.07f), s * 0.025f, UIPalette.Darken(skin, 0.35f));
+                    break;
+                default:
+                    Circle(p, r.center, s * 0.36f, skin);
+                    p.fillColor = H(0xE9C9A0);
+                    for (int k = -1; k <= 1; k += 2)
+                    {
+                        Vector2 c = r.center;
+                        float a = k * 35f * Mathf.Deg2Rad;
+                        Vector2 dx = new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * s * 0.22f, dy = new Vector2(-Mathf.Sin(a), Mathf.Cos(a)) * s * 0.07f;
+                        p.BeginPath(); p.MoveTo(c - dx - dy); p.LineTo(c + dx - dy); p.LineTo(c + dx + dy); p.LineTo(c - dx + dy); p.ClosePath(); p.Fill();
+                    }
                     break;
             }
         }
@@ -1117,6 +1559,38 @@ namespace Sealebrities
                         p.ClosePath(); p.Fill();
                     }
                     break;
+                case 8:   // camo blobs
+                {
+                    Color dark = UIPalette.Darken(baseC, 0.4f);
+                    Circle(p, new Vector2(box.xMin + box.width * 0.3f, box.yMin + box.height * 0.3f), s * 0.13f, dark);
+                    Circle(p, new Vector2(box.xMin + box.width * 0.42f, box.yMin + box.height * 0.36f), s * 0.1f, dark);
+                    Circle(p, new Vector2(box.xMin + box.width * 0.7f, box.yMin + box.height * 0.62f), s * 0.14f, dark);
+                    Circle(p, new Vector2(box.xMin + box.width * 0.28f, box.yMin + box.height * 0.76f), s * 0.09f, dark);
+                    break;
+                }
+                case 9:   // zigzag band
+                    p.lineWidth = s * 0.07f;
+                    p.BeginPath();
+                    for (int i = 0; i <= 6; i++)
+                    {
+                        var v = new Vector2(box.xMin + 6f + (box.width - 12f) * i / 6f, box.yMin + box.height * ((i & 1) == 0 ? 0.42f : 0.62f));
+                        if (i == 0) p.MoveTo(v); else p.LineTo(v);
+                    }
+                    p.Stroke();
+                    break;
+                case 10:  // stars
+                    for (int y = 0; y < 2; y++)
+                        for (int x = 0; x < 2; x++)
+                            UIGlyphs.Star(p, new Rect(box.xMin + box.width * (0.1f + x * 0.45f), box.yMin + box.height * (0.1f + y * 0.45f), box.width * 0.35f, box.height * 0.35f), accent);
+                    break;
+                case 11:  // two-tone
+                    p.BeginPath();
+                    p.MoveTo(new Vector2(box.xMin, box.yMin + 10f));
+                    p.LineTo(new Vector2(box.xMax, box.yMin + 10f));
+                    p.LineTo(new Vector2(box.xMax, box.yMin + box.height * 0.45f));
+                    p.LineTo(new Vector2(box.xMin, box.yMin + box.height * 0.45f));
+                    p.ClosePath(); p.Fill();
+                    break;
             }
         }
 
@@ -1158,21 +1632,36 @@ namespace Sealebrities
                         p.ClosePath();
                         p.Fill();
                         break;
+                    case 5:   // lashes
+                        Circle(p, c, er, Color.white);
+                        Circle(p, c + new Vector2(0f, er * 0.1f), er * 0.5f, ink);
+                        p.strokeColor = ink;
+                        p.lineWidth = s * 0.02f;
+                        for (int k = -1; k <= 1; k++)
+                        {
+                            Vector2 a = c + new Vector2(k * er * 0.55f, -er * 0.85f);
+                            p.BeginPath(); p.MoveTo(a); p.LineTo(a + new Vector2(k * er * 0.25f + side * er * 0.1f, -er * 0.45f)); p.Stroke();
+                        }
+                        break;
                     default:   // googly
                         Circle(p, c, er, Color.white);
                         Circle(p, c + new Vector2(side * er * 0.15f, er * 0.1f), er * 0.5f, ink);
                         break;
                 }
-                // brows
-                if (brows > 0)
+                // brows (round 3: 0 natural … 4 thin, 5 none)
+                if (brows != 5)
                 {
                     p.strokeColor = UIPalette.Darken(skin, 0.6f);
-                    p.lineWidth = s * 0.045f;
+                    p.lineWidth = brows == 4 ? s * 0.022f : s * 0.04f;
                     p.lineCap = LineCap.Round;
                     p.BeginPath();
                     float y = c.y - er * 1.5f;
                     switch (brows)
                     {
+                        case 0: case 4:   // natural / thin: a soft arch
+                            p.MoveTo(new Vector2(c.x - er, y + er * 0.1f));
+                            p.QuadraticCurveTo(new Vector2(c.x, y - er * 0.35f), new Vector2(c.x + er, y + er * 0.1f));
+                            break;
                         case 2:   // grumpy: slanted inward
                             p.MoveTo(new Vector2(c.x - side * er, y - er * 0.3f));
                             p.LineTo(new Vector2(c.x + side * er * 0.7f, y + er * 0.3f));

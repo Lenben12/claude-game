@@ -265,7 +265,8 @@ namespace Sealebrities
                 for (int s = -1; s <= 1; s += 2)
                 {
                     wood.Box(pc + q * new Vector3(s * 1.4f, 0.5f, 0f), new Vector3(0.06f, 0.06f, 2.6f), q);
-                    for (int f = -1; f <= 1; f += 2) PropKit.Log(batch, null, pc + q * new Vector3(s * 1.35f, -H * 0.5f, f * 1.2f), 0f, H, 0.08f, PropMats.WoodDark, false);
+                    // round 3 (GDD §19): these support logs hang at head height – now solid (PropKit.Log's own capsule)
+                    for (int f = -1; f <= 1; f += 2) PropKit.Log(batch, cols, pc + q * new Vector3(s * 1.35f, -H * 0.5f, f * 1.2f), 0f, H, 0.08f, PropMats.WoodDark, true);
                 }
                 // a torn roof cloth + Gus' old lookout chair
                 batch.W(PropMats.Flat(LowPoly.Hex("#8C8A5A")), pc).Quad2(pc + q * new Vector3(-1.4f, 1.7f, -1.2f), pc + q * new Vector3(1.4f, 1.7f, -1.2f), pc + q * new Vector3(1.4f, 1.4f, 0.8f), pc + q * new Vector3(-1.0f, 1.3f, 0.6f), Vector3.up);
@@ -324,7 +325,11 @@ namespace Sealebrities
                     if (Vector2.Distance(new Vector2(x, z), new Vector2(WorldLayout.DockEnd.x, WorldLayout.DockEnd.z)) < 30f) break;
                     if (Vector2.Distance(new Vector2(x, z), new Vector2(WorldLayout.Village.x, WorldLayout.Village.z - 26f)) < 25f) break;
                     Vector3 c = new Vector3(x, g, z);
-                    PropKit.Sandbar(batch, new Vector3(x, Waves.SeaLevel - 0.08f, z), PropUtil.Range(rng, 5f, 9f), PropUtil.Range(rng, 2.5f, 3.5f), a * Mathf.Rad2Deg + 90f, 300 + bars);
+                    float sbLen = PropUtil.Range(rng, 5f, 9f), sbWid = PropUtil.Range(rng, 2.5f, 3.5f);
+                    PropKit.Sandbar(batch, new Vector3(x, Waves.SeaLevel - 0.08f, z), sbLen, sbWid, a * Mathf.Rad2Deg + 90f, 300 + bars);
+                    // round 3 (GDD §19): one can stand on the sandbar (convex hull of the same seeded mound); boat-pass
+                    // layer so it never becomes a new trap for the boat (the 0.3–0.9 m lagoon floor already stops it)
+                    PropSolid.Sandbar(cols, new Vector3(x, Waves.SeaLevel - 0.08f, z), sbLen, sbWid, a * Mathf.Rad2Deg + 90f, 300 + bars, PropSolid.BoatPassLayer);
                     PropInfo.AddLandSpot(new Vector3(x, Waves.SeaLevel + 0.1f, z), LandSpotKind.Shore, 2f, "sandbar");
                     PropInfo.SetSpot("sandbar_" + bars, new Vector3(x, Waves.SeaLevel + 0.1f, z));
                     bars++;
@@ -339,7 +344,9 @@ namespace Sealebrities
                 Vector3 d = new Vector3(Mathf.Cos(ang[i] * Mathf.Deg2Rad), 0f, Mathf.Sin(ang[i] * Mathf.Deg2Rad));
                 if (!PropReefs.FindSpot(d * 150f, 60f, 2.4f, 3.4f, null, 700 + i, out Vector3 wp)) continue;
                 float y = PropUtil.Range(rng, 0f, 360f);
-                PropBeach.RowingBoat(batch, Matrix4x4.TRS(wp + Vector3.up * 0.1f, Quaternion.Euler(10f, y, 28f), Vector3.one), i == 0 ? PropMats.Flat(LowPoly.Hex("#3FA9A0")) : PropMats.Shutter, true);
+                var rbTrs = Matrix4x4.TRS(wp + Vector3.up * 0.1f, Quaternion.Euler(10f, y, 28f), Vector3.one);
+                PropBeach.RowingBoat(batch, rbTrs, i == 0 ? PropMats.Flat(LowPoly.Hex("#3FA9A0")) : PropMats.Shutter, true);
+                PropSolid.RowingBoat(cols, rbTrs, true);
                 PropInfo.SetSpot("wrecklet_" + wrecks, wp);
                 PropInfo.AddHabitat(wp + Vector3.up * 0.4f, 2f, HabitatKind.Overhang, "lagoon");
                 if (i == 0)
@@ -360,8 +367,17 @@ namespace Sealebrities
                 {
                     Vector3 p = sj + dir * (i * 1.8f);
                     float g = G(p);
-                    batch.W(PropMats.WoodWet, p).Cylinder(new Vector3(p.x, g - 0.3f, p.z) + Vector3.Cross(Vector3.up, dir) * 0.9f, Quaternion.Euler(PropUtil.Range(rng, -10f, 10f), 0f, PropUtil.Range(rng, -10f, 10f)), 0.12f, 0.1f, PropUtil.Range(rng, 0.8f, 1.6f), 6, false, true);
-                    batch.W(PropMats.WoodWet, p).Cylinder(new Vector3(p.x, g - 0.3f, p.z) - Vector3.Cross(Vector3.up, dir) * 0.9f, Quaternion.Euler(PropUtil.Range(rng, -10f, 10f), 0f, PropUtil.Range(rng, -10f, 10f)), 0.12f, 0.1f, PropUtil.Range(rng, 0.6f, 1.4f), 6, false, true);
+                    // same draw order as before (tilt x, tilt z, height per post); round 3: each post is a solid capsule
+                    for (int s = 0; s < 2; s++)
+                    {
+                        Vector3 pb = new Vector3(p.x, g - 0.3f, p.z) + Vector3.Cross(Vector3.up, dir) * (s == 0 ? 0.9f : -0.9f);
+                        float tx = PropUtil.Range(rng, -10f, 10f), tz = PropUtil.Range(rng, -10f, 10f);
+                        Quaternion pq = Quaternion.Euler(tx, 0f, tz);
+                        float ph = s == 0 ? PropUtil.Range(rng, 0.8f, 1.6f) : PropUtil.Range(rng, 0.6f, 1.4f);
+                        batch.W(PropMats.WoodWet, p).Cylinder(pb, pq, 0.12f, 0.1f, ph, 6, false, true);
+                        Vector3 pt = pb + pq * new Vector3(0f, ph, 0f);
+                        PropSolid.Segment(cols, pb + pq * new Vector3(0f, 0.15f, 0f), pt - pq * new Vector3(0f, 0.12f, 0f), 0.12f, "JettyPost", PropSolid.WaterLayer(pt.y));
+                    }
                     if (i % 2 == 0) batch.W(PropMats.WoodWet, p).Box(new Vector3(p.x, g + 0.08f, p.z), new Vector3(2.0f, 0.06f, 0.28f), Quaternion.LookRotation(dir) * Quaternion.Euler(0f, 90f, PropUtil.Range(rng, -12f, 12f)));
                 }
                 PropInfo.SetSpot("sunken_jetty", sj);
@@ -450,7 +466,9 @@ namespace Sealebrities
                     float yaw = PropUtil.Range(rng, 0f, 360f);
                     float s = PropUtil.Range(rng, 0.95f, 1.15f);
                     batch.Add(model, Matrix4x4.TRS(bp - Vector3.up * 0.05f, Quaternion.Euler(0f, yaw, 0f), Vector3.one * s));
-                    PropCol.Capsule(cols, bp + Vector3.up * 2.5f, 0.22f, 5f, Quaternion.identity, "PalmTrunk");
+                    // round 3 (GDD §19): capsules ALONG the leaning trunk (the old upright 5 m capsule missed the trunk
+                    // above ~1.5 m and stood in the air beside it)
+                    PropSolid.PalmTrunk(cols, 9191, bp - Vector3.up * 0.05f, yaw, s);
                     // coconut cluster + the shake interactable (trigger around the trunk)
                     Vector3 crown = bp + Vector3.up * (model.height * s * 0.92f);
                     for (int c = 0; c < 3; c++) batch.W(PropMats.Coconut, crown).Ico(crown + new Vector3(Mathf.Cos(c * 2.1f) * 0.25f, -0.35f, Mathf.Sin(c * 2.1f) * 0.25f), Vector3.one * 0.16f, Quaternion.identity, 0);

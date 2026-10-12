@@ -50,7 +50,7 @@ namespace Sealebrities
             tiles.Add(UIKit.HSpacer(8f));
             tiles.Add(PhoneKit.Stat(UIGlyphs.Play, UIPalette.Danger, s.videos.Count.ToString()));
             tiles.Add(UIKit.HSpacer(8f));
-            tiles.Add(PhoneKit.Stat(UIGlyphs.Book, UIPalette.Turquoise, Journal.DiscoveredCount + "/" + SpeciesDatabase.All.Count));
+            tiles.Add(PhoneKit.Stat(UIGlyphs.Book, UIPalette.Turquoise, Journal.DiscoveredCount + "/" + SpeciesDatabase.Count));
             body.Add(tiles);
 
             // Q50 channel ranks with badges

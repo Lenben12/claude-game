@@ -416,6 +416,7 @@ namespace Sealebrities
 
         public override void Tick(float dt)
         {
+            if (React(dt)) return;   // round 3: the nautilus / frilled shark back off into the dark
             c.desiredVel = w.Tick(c, dt, 0.6f);
             c.activityTarget = 0.2f;
             if (FaunaContext.HasPlayer && c.distToPlayer < 6f + c.lengthM)

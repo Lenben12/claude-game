@@ -39,6 +39,12 @@ namespace Sealebrities
         /// Fallback sleep vote while the Net module has no SleepVote message (L.9): "1" lying / "0" up.
         public const string SleepVoteKey = "SleepVote";
         public const string KioskKey = "Kiosk";                 // foodId                  → Pantry.HostBuyAtKiosk (spend + add, atomic)
+        // round 3
+        public const string CampfireKey = "Campfire";           // spot id                 → Survival.HostLight (shared fire)
+        public const string LootKey = "Loot";                   // loot id                 → Loot.HostTake (GameState.dailyUsed)
+        public const string TakeFishKey = "TakeFish";           // fish uid                → Pantry.HostTakeFish (cooler → a guest's backpack)
+        public const string HutKey = "Hut";                     // op, value               → HutDecor.Execute (shared hut furnishing)
+        public const string PinKey = "Pin";                     // "add" x z icon | "remove" id | "clear" → MapPins.Execute (shared map pins)
 
         static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
@@ -55,7 +61,8 @@ namespace Sealebrities
                 case AddFollowersKey: case SetQuestKey: case EatKey: case GrillKey: case CoconutKey:
                 case StoryFlagKey: case MissionKey: case ResearchKey: case AchievementKey: case CosmeticKey: case PlayerRecordKey:
                 case SightingsKey: case DealKey: case FindKey: case ChallengeKey: case QuestKey: case CarryKey: case LanternKey:
-                case ForceSleepKey: case SleepVoteKey: case KioskKey:
+                case ForceSleepKey: case SleepVoteKey: case KioskKey: case CampfireKey: case LootKey: case TakeFishKey:
+                case HutKey: case PinKey:
                     return true;
                 default: return false;
             }
@@ -111,7 +118,11 @@ namespace Sealebrities
                         if (!string.IsNullOrEmpty(csv)) thumbs = csv.Split(',');
                         bool custom = Arg(args, 3) == "1";
                         float tq = Mathf.Clamp01(F(Arg(args, 4)));
-                        return Progression.CreateUpload(style, Arg(args, 1), thumbs, null, custom, tq) != null;
+                        // round 3 (FinTube Studio, Q33): optional 6th argument = the clip order csv (older clients: none)
+                        string[] order = null;
+                        string ocsv = Arg(args, 5);
+                        if (!string.IsNullOrEmpty(ocsv) && ocsv.Length <= 2048) order = ocsv.Split(',');
+                        return Progression.CreateUpload(style, Arg(args, 1), thumbs, null, custom, tq, order) != null;
                     }
                     case NetCommand.Buy:
                     {
@@ -120,6 +131,8 @@ namespace Sealebrities
                         bool express = ex == "1" || ex == "true" || ex == "True";
                         var food = FoodDatabase.FromDeliveryId(id);
                         if (food != null) return Shop.BuyFood(food, express);
+                        var bpItem = ItemDatabase.FromDeliveryId(id);
+                        if (bpItem != null) return Shop.BuyItem(bpItem, express);
                         var item = GearDatabase.Get(id);
                         if (item == null) return false;
                         return Shop.Buy(item, express);
@@ -154,7 +167,7 @@ namespace Sealebrities
                     {
                         string id = Arg(args, 0);
                         if (string.IsNullOrEmpty(id)) return false;
-                        return Collectibles.Collect(id, (CollectibleKind)Mathf.Clamp(I(Arg(args, 1)), 0, (int)CollectibleKind.Secret));
+                        return Collectibles.Collect(id, (CollectibleKind)Mathf.Clamp(I(Arg(args, 1)), 0, (int)Collectibles.LastKind));
                     }
                     case NetCommand.AddMoney:
                         gm.AddMoney(L(Arg(args, 0)));
@@ -254,6 +267,16 @@ namespace Sealebrities
                     return true;
                 case KioskKey:
                     return Pantry.HostBuyAtKiosk(Arg(args, 1));
+                case CampfireKey:
+                    return Survival.HostLight(Arg(args, 1));
+                case LootKey:
+                    return Loot.HostTake(Arg(args, 1));
+                case TakeFishKey:
+                    return Pantry.HostTakeFish(I(Arg(args, 1), -1));
+                case HutKey:
+                    return HutDecor.Execute(Arg(args, 1), Arg(args, 2));
+                case PinKey:
+                    return MapPins.Execute(fromId, Arg(args, 1), Arg(args, 2), Arg(args, 3), Arg(args, 4));
             }
             if (key != null && CustomHandlers.TryGetValue(key, out var handler) && handler != null) return handler(fromId, args);
             return false;

@@ -38,11 +38,30 @@ namespace Sealebrities
         }
 
         /// 0..1 jungle density (denser uphill and in noise patches – the same idea as the terrain's dark-grass zones).
+        /// Round 3: open flower meadows (Meadow) break the canopy so hut, helipad and lighthouse read from afar.
         public static float JungleAt(float x, float z, float h)
         {
             float n = WorldNoise.Fbm(x * 0.012f - 4f, z * 0.012f + 6f, 2);
-            return Mathf.Clamp01(Smooth(-0.2f, 0.25f, n) * 0.75f + 0.4f * Smooth(6f, 18f, h));
+            return Mathf.Clamp01(Smooth(-0.2f, 0.25f, n) * 0.75f + 0.4f * Smooth(6f, 18f, h)) * (1f - 0.95f * Meadow(x, z));
         }
+
+        /// Round 3 (GDD §19 "übersichtlich"): 0..1 inside the open meadows – the lowland between the hut and the helipad,
+        /// the north lowland on the lighthouse trail and the slope south of the ravine. No canopy trees there (grass,
+        /// flowers, a few bushes), soft wobbly borders.
+        public static float Meadow(float x, float z)
+        {
+            float m = 0f;
+            for (int i = 0; i < MeadowX.Length; i++)
+            {
+                float dx = x - MeadowX[i], dz = z - MeadowZ[i];
+                float d = Mathf.Sqrt(dx * dx + dz * dz);
+                float r = MeadowR[i] * (1f + 0.18f * (WorldNoise.Perlin(x * 0.06f + i * 7.1f, z * 0.06f - i * 3.3f)));
+                m = Mathf.Max(m, 1f - Smooth(r * 0.7f, r, d));
+            }
+            return m;
+        }
+
+        static readonly float[] MeadowX = { 52f, 40f, 18f }, MeadowZ = { -12f, 50f, -38f }, MeadowR = { 20f, 14f, 12f };
 
         static readonly float[] ShoreDist = { 6f, 12f, 20f, 28f, 36f };
 
@@ -98,8 +117,8 @@ namespace Sealebrities
             var k = new Variants();
             for (int i = 0; i < 12; i++)
             {
-                k.palms.Add(PropPlants.Palm(1000 + i * 17, false));
-                k.palmsLite.Add(PropPlants.Palm(1000 + i * 17, true));
+                k.palms.Add(PropPlants.Palm(PalmSeed(i), false));
+                k.palmsLite.Add(PropPlants.Palm(PalmSeed(i), true));
                 if (PropRun.Due()) yield return null;
             }
             for (int i = 0; i < 8; i++)
@@ -133,6 +152,9 @@ namespace Sealebrities
 
         public static IEnumerator PrepareKit() => BuildKit();
 
+        /// Seed of palm variant i (PropPlants.Palm) – the trunk colliders replay its curve.
+        static int PalmSeed(int i) => 1000 + i * 17;
+
         public static void ReleaseKit()
         {
             if (kit == null) return;
@@ -152,7 +174,9 @@ namespace Sealebrities
         /// height (props-built mini islands).
         public static void AddPalm(PropBatch full, PropBatch lite, GameObject colHolder, System.Random rng, Vector3 groundPos, Vector3 leanDir, float groundY = float.NaN)
         {
-            var model = RandomPalm(rng, out var liteModel);
+            int palmIdx = rng.Next(kit.palms.Count);
+            var model = kit.palms[palmIdx];
+            var liteModel = kit.palmsLite[palmIdx];
             leanDir.y = 0f;
             if (leanDir.sqrMagnitude < 1e-4f)
             {
@@ -167,7 +191,9 @@ namespace Sealebrities
             var trs = Matrix4x4.TRS(new Vector3(x, y, z), rot, Vector3.one * s);
             full.Add(model, trs);
             lite.Add(liteModel, trs);
-            if (colHolder != null) PropCol.UprightCapsule(colHolder, new Vector3(x, y, z), 0.25f * s, 3.4f);
+            // round 3 (GDD §19 collisions): capsules ALONG the leaning trunk (the old upright capsule at the foot let you
+            // walk through the trunk 0.4–1.3 m above the ground)
+            if (colHolder != null) PropSolid.PalmTrunk(colHolder.transform, PalmSeed(palmIdx), new Vector3(x, y, z), rot.eulerAngles.y, s);
         }
 
         public static void AddTree(PropBatch full, PropBatch lite, GameObject colHolder, System.Random rng, Vector3 groundPos, float scale)
@@ -277,6 +303,7 @@ namespace Sealebrities
                 if (excl.Blocked(x, z, 1f) || spacing.Blocked(x, z, 2f)) continue;
                 if (PropGround.Slope(x, z, 1.5f) > 0.9f) continue;
                 if (Vector2.Distance(new Vector2(x, z), lh) < 24f) continue;
+                if (Meadow(x, z) > 0.5f) continue;
                 if (!PalmGround(x, z, g)) continue;
                 Vector3 n = PropGround.Normal(x, z, 2f);
                 AddPalm(full, lite, treeCols, rng, new Vector3(x, g, z), new Vector3(n.x, 0f, n.z));
@@ -443,6 +470,7 @@ namespace Sealebrities
                     Vector3 tp = s.pos + side * (s.halfWidth + PropUtil.Range(rng, 4.5f, 8f)) * (tries % 2 == 0 ? 1f : -1f) + s.dir * PropUtil.Range(rng, -3f, 3f);
                     float tg = G(tp.x, tp.z);
                     if (tg < 1.2f || excl.Blocked(tp.x, tp.z, 1.8f) || spacing.Blocked(tp.x, tp.z, 1f)) continue;
+                    if (Meadow(tp.x, tp.z) > 0.3f) continue;
                     if (PropGround.Slope(tp.x, tp.z, 1.5f) > 0.9f) continue;
                     if (tg < 6f ? !PalmGround(tp.x, tp.z, tg) : !GrassGround(tp.x, tp.z, tg)) continue;
                     if (tg < 6f) AddPalm(full, lite, treeCols, rng, new Vector3(tp.x, tg, tp.z), Vector3.zero);
@@ -473,23 +501,30 @@ namespace Sealebrities
             var rockBatch = new PropBatch(64f);
             var rockCols = new GameObject("RockColliders").transform;
             rockCols.SetParent(root, false);
+            // round 3 (GDD §19 "natürlicher", varied rocks): rocks lie in OUTCROPS – one big weathered boulder with 1–4
+            // smaller ones and pebbles around it (inland: on slopes and hill shoulders, mossy; coast: dark beach rocks at
+            // the waterline and on the points) – instead of single stones sprinkled evenly. Tall standing stones and flat
+            // slabs vary the silhouettes.
             int inland = 0, coastal = 0, attempts = 0;
-            while ((inland < 50 || coastal < 46) && attempts < 30000)
+            const int InlandClusters = 17, CoastClusters = 16;
+            while ((inland < InlandClusters || coastal < CoastClusters) && attempts < 30000)
             {
                 attempts++;
                 if (PropRun.Due()) yield return null;
                 float x = PropUtil.Range(rng, -ext - 10f, ext + 10f), z = PropUtil.Range(rng, -ext - 10f, ext + 10f);
                 float g = G(x, z);
-                bool isCoast = g > -1.4f && g < 1.3f;
-                bool isInland = g >= 2f && g < 70f;
-                if (isCoast && coastal >= 46) continue;
-                if (isInland && inland >= 50) continue;
+                bool isCoast = g > -1.2f && g < 1.2f;
+                bool isInland = g >= 3f && g < 70f;
+                if (isCoast && coastal >= CoastClusters) continue;
+                if (isInland && inland >= InlandClusters) continue;
                 if (!isCoast && !isInland) continue;
-                if (excl.Blocked(x, z, 1.5f)) continue;
-                float s = isCoast ? PropUtil.Range(rng, 0.7f, 2.6f) : PropUtil.Range(rng, 0.5f, 2.8f);
-                Vector3 sc = new Vector3(s * PropUtil.Range(rng, 0.9f, 1.5f), s * PropUtil.Range(rng, 0.55f, 1f), s * PropUtil.Range(rng, 0.8f, 1.2f));
-                Quaternion rot = Quaternion.Euler(PropUtil.Range(rng, -10f, 10f), PropUtil.Range(rng, 0f, 360f), PropUtil.Range(rng, -10f, 10f));
-                Vector3 p = new Vector3(x, g - sc.y * 0.35f, z);
+                if (excl.Blocked(x, z, 3f)) continue;
+                if (PropPaths.DistanceToPath(x, z) < 3.5f) continue;
+                float slope = PropGround.Slope(x, z, 2f);
+                // inland outcrops like slopes and shoulders (where rock would really break through), not flat meadows
+                if (isInland && (slope < 0.18f || slope > 1.1f)) continue;
+                int n = isCoast ? 2 + rng.Next(3) : 2 + rng.Next(4);
+                float s0 = isCoast ? PropUtil.Range(rng, 1.1f, 2.5f) : PropUtil.Range(rng, 1.2f, 2.7f);
                 Material main;
                 Material top = null;
                 if (isCoast) main = PropMats.BeachRock;
@@ -497,29 +532,55 @@ namespace Sealebrities
                 {
                     double r = rng.NextDouble();
                     main = r < 0.45 ? PropMats.Rock : r < 0.8 ? PropMats.RockMid : PropMats.RockDark;
-                    if (rng.NextDouble() < 0.3) top = PropMats.Moss;
+                    if (rng.NextDouble() < 0.55) top = PropMats.Moss;
                 }
-                int seed = rng.Next();
-                int detail = s > 0.8f ? 1 : 0;
-                PropRocks.BuildSplit(rockBatch, p, p, sc, rot, seed, detail, 0.14f, main, top, PropMats.Crevice);
-                if (s > 1.2f) PropCol.Mesh(rockCols, PropRocks.ColliderMesh(sc, seed, detail, 0.14f), p, rot, Vector3.one, "Rock");
-                if (s > 1f)
+                // downhill direction: the smaller rocks tumbled that way
+                Vector3 nrm = PropGround.Normal(x, z, 2f);
+                Vector2 down = new Vector2(nrm.x, nrm.z);
+                down = down.sqrMagnitude > 1e-4f ? down.normalized : PropUtil.InDisc(rng, 1f).normalized;
+                Vector2 at = new Vector2(x, z);
+                float s = s0;
+                for (int k = 0; k < n; k++)
                 {
-                    int pebbles = 1 + rng.Next(3);
-                    for (int k = 0; k < pebbles; k++)
+                    if (k > 0)
                     {
-                        float a = PropUtil.Range(rng, 0f, Mathf.PI * 2f), d = sc.x * PropUtil.Range(rng, 1.1f, 1.6f);
-                        float px = x + Mathf.Cos(a) * d, pz = z + Mathf.Sin(a) * d;
-                        float ps = PropUtil.Range(rng, 0.15f, 0.35f);
+                        float dist = s * PropUtil.Range(rng, 1.0f, 1.6f) + 0.3f;
+                        float ang = PropUtil.Range(rng, -1.2f, 1.2f);
+                        Vector2 dir = new Vector2(down.x * Mathf.Cos(ang) - down.y * Mathf.Sin(ang), down.x * Mathf.Sin(ang) + down.y * Mathf.Cos(ang));
+                        at += dir * dist;
+                        s *= PropUtil.Range(rng, 0.45f, 0.75f);
+                    }
+                    float rg = G(at.x, at.y);
+                    if (isCoast ? rg < -1.6f || rg > 2.5f : rg < 1.5f) break;
+                    if (k > 0 && (excl.Blocked(at.x, at.y, s) || PropPaths.DistanceToPath(at.x, at.y) < 1.5f + s)) break;
+                    // shape: mostly squat boulders, now and then a tall standing stone or a flat slab
+                    double shape = rng.NextDouble();
+                    Vector3 sc = shape < 0.15 && k == 0 && !isCoast
+                        ? new Vector3(s * PropUtil.Range(rng, 0.6f, 0.8f), s * PropUtil.Range(rng, 1.3f, 1.7f), s * PropUtil.Range(rng, 0.55f, 0.75f))
+                        : shape < 0.3
+                            ? new Vector3(s * PropUtil.Range(rng, 1.3f, 1.7f), s * PropUtil.Range(rng, 0.35f, 0.5f), s * PropUtil.Range(rng, 1.0f, 1.3f))
+                            : new Vector3(s * PropUtil.Range(rng, 0.9f, 1.4f), s * PropUtil.Range(rng, 0.6f, 0.95f), s * PropUtil.Range(rng, 0.8f, 1.2f));
+                    Quaternion rot = Quaternion.Euler(PropUtil.Range(rng, -10f, 10f), PropUtil.Range(rng, 0f, 360f), PropUtil.Range(rng, -10f, 10f));
+                    Vector3 p = new Vector3(at.x, rg - sc.y * 0.35f, at.y);
+                    int seed = rng.Next();
+                    int detail = s > 0.8f ? 1 : 0;
+                    PropRocks.BuildSplit(rockBatch, p, p, sc, rot, seed, detail, 0.14f, main, top, PropMats.Crevice);
+                    // round 3: every rock you would bump into is solid; pebbles stay passable
+                    if (s > 0.45f) PropSolid.Rock(rockCols, p, sc, rot, seed, detail, 0.14f, isCoast, "Rock");
+                    int pebbles = s > 1f ? 2 + rng.Next(3) : rng.Next(2);
+                    for (int q = 0; q < pebbles; q++)
+                    {
+                        float a = PropUtil.Range(rng, 0f, Mathf.PI * 2f), d = sc.x * PropUtil.Range(rng, 1.1f, 1.7f);
+                        float px = at.x + Mathf.Cos(a) * d, pz = at.y + Mathf.Sin(a) * d;
+                        float ps = PropUtil.Range(rng, 0.12f, 0.32f);
                         Vector3 pp = new Vector3(px, G(px, pz) - ps * 0.2f, pz);
                         PropRocks.Build(rockBatch.W(main, pp), pp, new Vector3(ps * 1.2f, ps * 0.7f, ps), Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f), rng.Next(), 0);
                     }
+                    excl.Add(at.x, at.y, s * 1.2f);
                 }
-                excl.Add(x, z, s * 1.2f);
                 if (isCoast) coastal++; else inland++;
                 if (PropRun.Due()) yield return null;
-            }
-            // rocky outcrop around the lighthouse cliff
+            }            // rocky outcrop around the lighthouse cliff
             for (int i = 0; i < 16; i++)
             {
                 float a = PropUtil.Range(rng, 0f, Mathf.PI * 2f);
@@ -534,7 +595,7 @@ namespace Sealebrities
                 Quaternion rot = Quaternion.Euler(0f, PropUtil.Range(rng, 0f, 360f), 0f);
                 int seed = rng.Next();
                 PropRocks.BuildSplit(rockBatch, p, p, sc, rot, seed, 1, 0.14f, PropMats.Cliff, PropMats.Moss, PropMats.Crevice);
-                if (s > 1.2f) PropCol.Mesh(rockCols, PropRocks.ColliderMesh(sc, seed, 1, 0.14f), p, rot, Vector3.one, "Rock");
+                PropSolid.Rock(rockCols, p, sc, rot, seed, 1, 0.14f, false, "Rock");
                 excl.Add(x, z, s);
             }
             rockBatch.Flush(root, "Rocks", ShadowCastingMode.On, 650f);

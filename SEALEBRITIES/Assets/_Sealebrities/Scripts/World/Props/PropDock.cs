@@ -119,6 +119,8 @@ namespace Sealebrities
                 batch.W(PropMats.DarkMetal).Cylinder(bp, Quaternion.identity, 0.11f, 0.09f, 0.3f, 8);
                 batch.W(PropMats.DarkMetal).Cylinder(bp + Vector3.up * 0.3f, Quaternion.identity, 0.16f, 0.16f, 0.07f, 8, true, true);
                 batch.W(PropMats.Rope).Torus(bp + Vector3.up * 0.18f, Quaternion.identity, 0.13f, 0.03f, 8, 3);
+                // round 3 (GDD §19): bollards are solid
+                PropCol.Capsule(cols, bp + Vector3.up * 0.2f, 0.16f, 0.4f, Quaternion.identity, "Bollard");
             }
 
             // benches facing the sea (south edge)
@@ -185,19 +187,20 @@ namespace Sealebrities
         static void Extras(Transform root, PropBatch batch, Transform cols, PropExclusion excl, float x0, float x1, float z0, float deck)
         {
             Vector3 ds = WorldLayout.DockStart;
-            // Horst's bench on the sand south-west of the dock start, facing the sea
-            Vector3 hb = new Vector3(ds.x - 3f, 0f, ds.z - 3f);
+            // Horst's bench, facing the sea – round 3 (player answer): NOT at the dock any more (he was in the way there);
+            // it stands in "Horst's corner" on the beach south of the hut, next to his hammock (PropHorst)
+            Vector3 hb = PropHorst.BenchSpot;
             hb.y = G(hb.x, hb.z);
-            if (hb.y < 0.25f) { hb = new Vector3(ds.x - 5f, 0f, ds.z - 2.5f); hb.y = G(hb.x, hb.z); }
-            PropKit.Bench(batch, cols, root, hb, 120f, true);
-            Quaternion bq = Quaternion.Euler(0f, 120f, 0f);
+            const float benchYaw = PropHorst.BenchYaw;
+            PropKit.Bench(batch, cols, root, hb, benchYaw, true);
+            Quaternion bq = Quaternion.Euler(0f, benchYaw, 0f);
             for (int i = 0; i < 3; i++)
                 batch.W(i == 1 ? PropMats.Paper : PropMats.White).Box(hb + bq * new Vector3(-0.4f + i * 0.35f, 0.49f, -0.05f + 0.08f * i), new Vector3(0.18f, 0.01f, 0.14f), bq * Quaternion.Euler(0f, i * 40f, 0f));
             Vector3 sp = hb + bq * new Vector3(1.4f, 0f, -0.4f);
             sp.y = G(sp.x, sp.z);
-            PropKit.Sign(batch, cols, sp, 120f + 180f, Loc.Tr("HAFENMEISTER", "HARBOUR MASTER"), LowPoly.Hex("#EDE6DA"), LowPoly.Hex("#B8454A"), 1.25f, 0.4f);
+            PropKit.Sign(batch, cols, sp, benchYaw + 180f, Loc.Tr("HAFENMEISTER", "HARBOUR MASTER"), LowPoly.Hex("#EDE6DA"), LowPoly.Hex("#B8454A"), 1.25f, 0.4f);
             PropSpots.Register("horst_bench", hb + bq * new Vector3(0f, 0f, 0.95f));
-            PropInfo.SetSpot("horst_bench", hb + Vector3.up * 0.47f, 120f);
+            PropInfo.SetSpot("horst_bench", hb + Vector3.up * 0.47f, benchYaw);
             excl.Add(hb.x, hb.z, 2.2f);
             // crab-trap stack, bait cooler and a lifebuoy on the dock (north side, away from the fishing spot)
             PropKit.CrabTrap(batch, new Vector3(x0 + 2.4f, deck, z0 + 0.7f), 10f);
@@ -244,7 +247,10 @@ namespace Sealebrities
             if (glasses != Vector3.zero) PropSpots.Register("q_sunglasses", glasses);
             PropSpots.Register("dock", new Vector3((x0 + x1) * 0.5f, deck, z0));
             // the dock ladder for the player's generic climb (L.13) – the Player module drives it (no fallback here)
-            PropInfo.AddLadder(PropInfo.DockLadderBottom, PropInfo.DockLadderTop, Vector3.right, LadderInfo.Wood);
+            // round 3: `bottom` is the foot of the RAILS (x = the rail line) – DockLadderBottom lies 0.45 m seaward of
+            // them, which put the climber 0.85 m from the rungs with the hands gripping air
+            var lb = PropInfo.DockLadderBottom;
+            PropInfo.AddLadder(new Vector3(lb.x - 0.45f, lb.y, lb.z), PropInfo.DockLadderTop, Vector3.right, LadderInfo.Wood);
             for (int i = 0; i < 3; i++) PropInfo.AddLandSpot(new Vector3(x0 + 2.5f + i * 11f, deck + 2.65f, z0 + (i % 2 == 0 ? 1f : -1f) * (1.2f - 0.1f)), LandSpotKind.Perch, 0.3f, "dock");
         }
 
@@ -292,6 +298,8 @@ namespace Sealebrities
                 // used to dangle at eye level right in front of the fishing spot)
                 d.Box(lp + new Vector3(0f, 1.3f, 0f), new Vector3(0.12f, 2.6f, 0.12f));
                 d.Box(lp + new Vector3(0f, 1.82f, -side * 0.17f), new Vector3(0.08f, 0.08f, 0.42f));
+                // round 3 (GDD §19): the lantern posts are solid (one walked through them)
+                PropCol.Box(cols, lp + new Vector3(0f, 1.3f, 0f), new Vector3(0.14f, 2.6f, 0.14f), Quaternion.identity, "LanternPost");
                 Vector3 lan = lp + new Vector3(0f, 1.55f, -side * 0.34f);
                 batch.W(PropMats.DarkMetal).Cylinder(lan + new Vector3(0f, 0.2f, 0f), Quaternion.identity, 0.12f, 0f, 0.1f, 6, true, false);
                 batch.W(PropMats.DarkMetal).Cylinder(lan - new Vector3(0f, 0.03f, 0f), Quaternion.identity, 0.1f, 0.1f, 0.04f, 6, true, true);

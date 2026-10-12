@@ -21,7 +21,7 @@ namespace Sealebrities
     /// No per-frame allocations (zone species lists are built once).
     public sealed class FaunaSpawner : MonoBehaviour, ICreatureSpawner
     {
-        public const int MaxActive = 160;
+        public const int MaxActive = 190;   // round 3: denser seas (GDD §20 Q15) – the net snapshot count byte still fits
         public const int MaxHallucinations = 6;
         public const float PopulationRadius = 80f;
         public const float CountRadius = 85f;
@@ -46,9 +46,9 @@ namespace Sealebrities
         float sightBand = 30f, sightTimer;
         /// Share of the zone target that should be inside the visible band (at most SightMax animals).
         public const float SightShare = 0.45f;
-        public const int SightMax = 12;
+        public const int SightMax = 15;
         /// Open water (open sea, Fog Isle) never looks empty: at least this many animals in the visible band.
-        public const int OpenWaterSightMin = 11;
+        public const int OpenWaterSightMin = 14;
         /// T1 reward „Hausriff +10 % Tiere“ (Tomas: "Jetzt kommen sie zurück") once the ghost net is cut.
         public const float GhostNetBonus = 1.1f;
         bool ghostNetCleared;
@@ -113,7 +113,7 @@ namespace Sealebrities
             FaunaBubbles.Install(transform);
             FaunaFx.Install(transform);
             // L.1: species lists per zone, built once (water animals only – island / beach / tide-pool life is LandFauna's)
-            string[] zones = { Zones.HouseReef, Zones.Kelp, Zones.Wreck, Zones.BlueDrop, Zones.Trench, Zones.FogIsle, Zones.Lagoon, Zones.OpenSea, Zones.DeepSea };
+            string[] zones = { Zones.HouseReef, Zones.Kelp, Zones.Wreck, Zones.BlueDrop, Zones.Trench, Zones.FogIsle, Zones.Lagoon, Zones.OpenSea, Zones.DeepSea, Zones.Volcano };
             for (int i = 0; i < zones.Length; i++)
             {
                 var l = new List<SpeciesDef>();
@@ -584,6 +584,8 @@ namespace Sealebrities
             bool locked = site != null && GameManager.I != null && !Progression.IsSiteUnlocked(site);
             float target = FaunaZones.Target(zone) * (locked ? FaunaZones.LockedDensity : 1f);
             if (locked) target = Mathf.Max(target, FaunaZones.Target(Zones.OpenSea) * FaunaZones.LockedDensity);
+            // round 3: the volcano waters before the wreck unlock are plain open sea (no living fossils yet)
+            if (zone == Zones.Volcano && GameManager.I != null && !VolcanoGate.Open) { locked = true; target = FaunaZones.Target(Zones.OpenSea); }
             if (FaunaContext.NightNow) target *= FaunaZones.NightFactor;
             if (ghostNetCleared && zone == Zones.HouseReef) target *= GhostNetBonus;
             if (multi) target = Mathf.Min(target, FaunaZones.MaxPerDiverCoop);
@@ -768,9 +770,12 @@ namespace Sealebrities
             }
             float w = s.SpawnWeight * dw;
             if (FaunaContext.DayNow != DayMask.Day) w *= s.nightWeight;
-            if (s.IsDangerous) w *= FaunaContext.PredatorCountMul;
+            if (s.IsDangerous) w *= FaunaContext.PredatorCountMul * (night ? 1.8f : 1f);   // round 3 (Q44): night dives are creepy
+            w *= FaunaWeather.SpawnMul(s);                                                  // round 3 (Q48): weather
             if (s.plan == BodyPlan.Jelly) w *= FaunaContext.JellyCountMul;
             if (surfaceOnly && s.BandMin(night) <= 1f && s.minDepth <= 2f) w *= 2f;   // flying fish, dolphins, turtles up top
+            // final test: Toni's map is a reward – the Fog Isle's own species must show up there (0 of 75 animals once)
+            if (!string.IsNullOrEmpty(s.unlockFlag) && s.homeSite == Zones.FogIsle && FaunaZones.ZoneAt(point) == Zones.FogIsle) w *= 3f;
             return w;
         }
 
@@ -855,6 +860,7 @@ namespace Sealebrities
                 if (zone == Zones.Island) continue;
                 var site = DiveSites.Get(zone);
                 bool locked = site != null && GameManager.I != null && !Progression.IsSiteUnlocked(site);
+                if (zone == Zones.Volcano && GameManager.I != null && !VolcanoGate.Open) locked = true;
 
                 // spawn depth first: 70 % near the diver's depth, 30 % anywhere in the water column (surface: top 2 m)
                 float diverDepth = Mathf.Max(0.5f, Waves.SeaLevel - diverY);
@@ -866,7 +872,7 @@ namespace Sealebrities
 
                 var list = ListFor(zone, locked, seafloor);
                 var s = Pick(list, p, depth, seafloor, surfaceOnly, schoolOnly);
-                if (s == null && (zone == Zones.DeepSea || zone == Zones.Trench) && !locked)
+                if (s == null && (zone == Zones.DeepSea || zone == Zones.Trench || zone == Zones.Volcano) && !locked)
                     s = Pick(zoneSpecies[Zones.OpenSea], p, Mathf.Min(depth, 30f), seafloor, surfaceOnly, schoolOnly);   // never empty water
                 if (s == null) continue;
 

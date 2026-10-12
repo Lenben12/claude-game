@@ -224,6 +224,9 @@ namespace Sealebrities
         public static float TitleViewMultiplier(TitleStyle t) => t == TitleStyle.Honest ? 1f : t == TitleStyle.Spicy ? 1.3f : 1.8f;
         public static float TitleConversionMultiplier(TitleStyle t) => t == TitleStyle.Honest ? 1.3f : t == TitleStyle.Spicy ? 0.9f : 0.6f;
 
+        /// Most clips (= species) in one video.
+        public const int MaxVideoClips = 12;
+
         /// Best clip per species from the banked footage, sorted by value (max 12).
         public static List<FootageClip> SelectBestClips(List<FootageClip> source)
         {
@@ -232,8 +235,85 @@ namespace Sealebrities
                 if (!best.TryGetValue(c.speciesId, out var b) || c.Value > b.Value) best[c.speciesId] = c;
             var list = new List<FootageClip>(best.Values);
             list.Sort((a, b) => b.Value.CompareTo(a.Value));
-            if (list.Count > 12) list.RemoveRange(12, list.Count - 12);
+            if (list.Count > MaxVideoClips) list.RemoveRange(MaxVideoClips, list.Count - MaxVideoClips);
             return list;
+        }
+
+        // ------------------------------------------------------------------ FinTube Studio (round 3, GDD §20 Q33)
+        /// The pool the player picks the next video's clips from: the best clip per species of today's video (one video
+        /// per day – further uploads are added to it) and of the banked footage, best value first, NOT capped. Fills
+        /// `into` (cleared first).
+        public static void VideoPool(GameState s, List<FootageClip> into)
+        {
+            into.Clear();
+            if (s == null) return;
+            var today = TodaysUpload(s);
+            if (today != null && today.clips != null)
+                for (int i = 0; i < today.clips.Count; i++) AddBest(into, today.clips[i]);
+            for (int i = 0; i < s.bankedFootage.Count; i++) AddBest(into, s.bankedFootage[i]);
+            into.Sort((a, b) => b.Value.CompareTo(a.Value));
+        }
+
+        static void AddBest(List<FootageClip> list, FootageClip c)
+        {
+            if (c == null || string.IsNullOrEmpty(c.speciesId)) return;
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (list[i].speciesId != c.speciesId) continue;
+                if (c.Value > list[i].Value) list[i] = c;
+                return;
+            }
+            list.Add(c);
+        }
+
+        /// The video in the player's order (Q33 „Clips auswählen & sortieren“): species ids → their best clip from
+        /// VideoPool (unknown / duplicate ids are skipped, max 12). Today's clips that the order leaves out are kept at
+        /// the end – they are already in the video. The first clip is the INTRO: it becomes the video's top species
+        /// (title suggestions, the big collage tile, the history card, the comments). Null when no id matched.
+        public static List<FootageClip> OrderClips(GameState s, IList<string> order)
+        {
+            if (s == null || order == null || order.Count == 0) return null;
+            var pool = new List<FootageClip>();
+            VideoPool(s, pool);
+            var today = TodaysUpload(s);
+            int required = 0;
+            if (today != null && today.clips != null)
+                for (int i = 0; i < today.clips.Count; i++)
+                    if (today.clips[i] != null && !ContainsSpecies(today.clips, today.clips[i].speciesId, i)) required++;
+            var result = new List<FootageClip>(MaxVideoClips);
+            for (int i = 0; i < order.Count && i < 64; i++)
+            {
+                string id = order[i];
+                if (string.IsNullOrEmpty(id) || ContainsSpecies(result, id, result.Count)) continue;
+                var c = FindSpecies(pool, id);
+                if (c == null) continue;
+                bool req = today != null && today.clips != null && ContainsSpecies(today.clips, id, today.clips.Count);
+                if (!req && result.Count + required >= MaxVideoClips) continue;
+                result.Add(c);
+                if (req) required--;
+            }
+            if (result.Count == 0) return null;
+            if (today != null && today.clips != null)
+                for (int i = 0; i < today.clips.Count; i++)
+                {
+                    var t = today.clips[i];
+                    if (t == null || ContainsSpecies(result, t.speciesId, result.Count)) continue;
+                    var c = FindSpecies(pool, t.speciesId);
+                    if (c != null) result.Add(c);
+                }
+            return result;
+        }
+
+        static bool ContainsSpecies(List<FootageClip> list, string id, int count)
+        {
+            for (int i = 0; i < count && i < list.Count; i++) if (list[i] != null && list[i].speciesId == id) return true;
+            return false;
+        }
+
+        static FootageClip FindSpecies(List<FootageClip> list, string id)
+        {
+            for (int i = 0; i < list.Count; i++) if (list[i] != null && list[i].speciesId == id) return list[i];
+            return null;
         }
 
         static float NoveltyFactor(FootageClip c, int day)
@@ -380,6 +460,16 @@ namespace Sealebrities
             return ((long)(views * 0.85f), (long)(views * 1.2f), f, money);
         }
 
+        /// FinTube Studio (Q33): the estimate for exactly these clips (the player's selection incl. today's clips).
+        public static (long viewsMin, long viewsMax, long followers, long money) Preview(TitleStyle style, List<FootageClip> clips)
+        {
+            var s = GameManager.I.State;
+            if (clips == null) return Preview(style);
+            var today = TodaysUpload(s);
+            float views = RawViews(clips, style, s.followers, s.day, today != null ? today.thumbQuality : 0f);
+            return ((long)(views * 0.85f), (long)(views * 1.2f), FollowersFromViews(views, s.followers, style), MoneyFromViews(views, s.followers));
+        }
+
         static float RawViews(List<FootageClip> clips, TitleStyle style, long followers, int day, float thumbQuality)
         {
             float sum = 0f;
@@ -401,7 +491,15 @@ namespace Sealebrities
         /// L.4: own title (cut to 60 characters, empty → suggestion), collage species (max 5), the local collage PNG
         /// (thumbs/day_{n}.png – stays on this machine) and the thumbnail quality (Q31: views × (1 + 0.15 × q)).
         /// Co-op: NetCommand.Upload args = style, title, thumbSpecies csv, customTitle 0/1, thumbQuality.
-        public static PendingUpload CreateUpload(TitleStyle style, string title, string[] thumbSpecies, string thumbPath, bool customTitle, float thumbQuality)
+        public static PendingUpload CreateUpload(TitleStyle style, string title, string[] thumbSpecies, string thumbPath, bool customTitle, float thumbQuality) =>
+            CreateUpload(style, title, thumbSpecies, thumbPath, customTitle, thumbQuality, null);
+
+        /// Round 3 FinTube Studio (Q33): clipOrder = the species of the video in the player's order (OrderClips – the
+        /// first one is the intro). Only the banked clips of those species are used up; the banked clips the player left
+        /// out stay banked for a later video. Null / empty = the old behaviour (every banked clip, best first).
+        /// Co-op: NetCommand.Upload args = style, title, thumbSpecies csv, customTitle 0/1, thumbQuality[, clip order csv]
+        /// – the 6th argument is optional (older clients leave it out → old behaviour; older hosts ignore it).
+        public static PendingUpload CreateUpload(TitleStyle style, string title, string[] thumbSpecies, string thumbPath, bool customTitle, float thumbQuality, string[] clipOrder)
         {
             var gm = GameManager.I;
             if (gm == null) return null;
@@ -409,8 +507,17 @@ namespace Sealebrities
             if (s.bankedFootage.Count == 0) return null;
             // one video per day: a second upload on the same day is added to today's video (best clip per species)
             var today = TodaysUpload(s);
-            List<FootageClip> clips;
-            if (today != null)
+            List<FootageClip> clips = clipOrder != null && clipOrder.Length > 0 ? OrderClips(s, clipOrder) : null;
+            bool ordered = clips != null;
+            if (ordered)
+            {
+                // nothing new from the bank in this order → nothing to upload
+                bool any = false;
+                for (int i = 0; i < s.bankedFootage.Count && !any; i++)
+                    if (s.bankedFootage[i] != null && ContainsSpecies(clips, s.bankedFootage[i].speciesId, clips.Count)) any = true;
+                if (!any) return null;
+            }
+            else if (today != null)
             {
                 var merged = new List<FootageClip>(today.clips ?? new List<FootageClip>());
                 merged.AddRange(s.bankedFootage);
@@ -424,8 +531,16 @@ namespace Sealebrities
             if (Net.IsClient)
             {
                 var inv = System.Globalization.CultureInfo.InvariantCulture;
-                Net.Command(NetCommand.Upload, ((int)style).ToString(inv), title, string.Join(",", thumbSpecies),
-                    customTitle ? "1" : "0", thumbQuality.ToString("R", inv));
+                if (ordered)
+                {
+                    var ids = new string[clips.Count];
+                    for (int i = 0; i < ids.Length; i++) ids[i] = clips[i].speciesId;
+                    Net.Command(NetCommand.Upload, ((int)style).ToString(inv), title, string.Join(",", thumbSpecies),
+                        customTitle ? "1" : "0", thumbQuality.ToString("R", inv), string.Join(",", ids));
+                }
+                else
+                    Net.Command(NetCommand.Upload, ((int)style).ToString(inv), title, string.Join(",", thumbSpecies),
+                        customTitle ? "1" : "0", thumbQuality.ToString("R", inv));
             }
             PendingUpload up;
             if (today != null)
@@ -444,7 +559,13 @@ namespace Sealebrities
             if (!string.IsNullOrEmpty(thumbPath)) up.thumbPath = thumbPath;
             up.customTitle = customTitle;
             up.thumbQuality = Mathf.Max(up.thumbQuality, thumbQuality);
-            s.bankedFootage.Clear();
+            if (ordered)
+            {
+                // only the chosen species are used up (their other clips merged into the best one); the rest stays banked
+                for (int i = s.bankedFootage.Count - 1; i >= 0; i--)
+                    if (s.bankedFootage[i] == null || ContainsSpecies(clips, s.bankedFootage[i].speciesId, clips.Count)) s.bankedFootage.RemoveAt(i);
+            }
+            else s.bankedFootage.Clear();
             GameEvents.RaiseUploadCreated(up);
             gm.Save();
             return up;
@@ -583,7 +704,7 @@ namespace Sealebrities
             new Milestone { id = "m1000", followers = 1000, titleDe = "1.000 Follower", titleEn = "1,000 Followers",
                 descDe = "KRILL.tv frei · Hochsee-Rute", descEn = "KRILL.tv live · deep-sea rod" },
             new Milestone { id = "m2500", followers = 2500, titleDe = "2.500 Follower", titleEn = "2,500 Followers",
-                descDe = "Doppelflasche · Wrack ruft", descEn = "Twin tanks · wreck calling" },
+                descDe = "Doppelflasche im Shop", descEn = "Twin tanks in the shop" },
             new Milestone { id = "m5000", followers = 5000, titleDe = "5.000 Follower", titleEn = "5,000 Followers",
                 descDe = "Sponsoren zahlen täglich", descEn = "Sponsors pay daily" },
             new Milestone { id = "m10000", followers = 10000, titleDe = "10.000 Follower", titleEn = "10,000 Followers",
@@ -593,7 +714,7 @@ namespace Sealebrities
             new Milestone { id = "m50000", followers = 50000, titleDe = "50.000 Follower", titleEn = "50,000 Followers",
                 descDe = "Ein Doku-Sender schaut zu", descEn = "A doc channel is watching" },
             new Milestone { id = "m100000", followers = 100000, titleDe = "100.000 Follower", titleEn = "100,000 Followers",
-                descDe = "Der Tiefseegraben ruft", descEn = "The deep trench is calling" },
+                descDe = "Sealebrity! Gus funkt", descEn = "Sealebrity! Gus calls" },
             new Milestone { id = "m250000", followers = 250000, titleDe = "250.000 Follower", titleEn = "250,000 Followers",
                 descDe = "Kino-Rig 6K im Shop", descEn = "6K cinema rig in the shop" },
             new Milestone { id = "m500000", followers = 500000, titleDe = "500.000 Follower", titleEn = "500,000 Followers",

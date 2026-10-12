@@ -116,6 +116,12 @@ namespace Sealebrities
                 case "horst_tent": return Land(Off(hut, 3f, -11f));
                 case "horst_campfire":
                     return PropInfo.Campfire != Vector3.zero ? Land(PropInfo.Campfire + new Vector3(1.8f, 0f, 1.2f)) : Land(Off(hut, 13f, -6f));
+                // round 3 (Q10): Horst's corner on the beach (PropHorst registers the real spots) + his tutorial stand
+                // on the sand beside the dock's landward end – never on the planks
+                case "horst_corner": case "horst_hammock": return Land(PropHorst.Corner, 0.3f, 8f);
+                case "horst_home": return Land(PropHorst.Corner - new Vector3(1.3f, 0f, 0f), 0.3f, 8f);
+                case "horst_dockside": return Land(Off(ds, -3.5f, -4.5f), 0.4f, 10f);
+                case "toni_evening": return Land(PropHorst.Corner + new Vector3(-3.2f, 0f, 3.4f), 0.3f, 8f);
                 case "horst_dockend": { var p = Off(de, -3f, 0.85f); p.y = DockY(p); return p; }
                 case "horst_dockmid": { var p = Off(ds, (de.x - ds.x) * 0.5f, 0.85f); p.y = DockY(p); return p; }
                 case "horst_dockedge": { var p = Off(de, -6f, -0.95f); p.y = DockY(p); return p; }

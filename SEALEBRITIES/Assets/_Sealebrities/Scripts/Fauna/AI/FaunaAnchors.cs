@@ -201,9 +201,10 @@ namespace Sealebrities
                 }
                 externalSpots++;
                 LandSpots.Add(new FaunaLandSpot { pos = s.position, normal = s.normal.sqrMagnitude > 1e-4f ? s.normal.normalized : Vector3.up, kind = k, radius = Mathf.Max(0.4f, s.radius), tag = s.area, valid = true });
-                // a pen or village spot also serves as walkable ground for the village animals
-                if (s.kind == LandSpotKind.Pen || (s.area == "village" && k != FaunaSpotKind.Wall && k != FaunaSpotKind.Perch))
-                    LandSpots.Add(new FaunaLandSpot { pos = s.position, normal = Vector3.up, kind = FaunaSpotKind.Ground, radius = Mathf.Max(0.4f, s.radius), tag = "village", valid = true });
+                // round 3: the goats / chickens / Truffle live in the hidden hermit camp (the village is gone) – a pen or
+                // the camp meadow also serves as walkable ground for the camp animals
+                if (s.kind == LandSpotKind.Pen || s.area == "hermit_camp")
+                    LandSpots.Add(new FaunaLandSpot { pos = s.position, normal = Vector3.up, kind = FaunaSpotKind.Ground, radius = Mathf.Max(0.4f, s.radius), tag = "camp", valid = true });
             }
             // the soaring centres are not props: lighthouse and village thermals
             Vector3 lh = WorldLayout.Lighthouse; lh.y = WorldInfo.GroundHeight(lh);
@@ -395,13 +396,12 @@ namespace Sealebrities
             vil.y = WorldInfo.GroundHeight(vil);
             AddSpot(vil + Vector3.up * 30f, Vector3.up, FaunaSpotKind.Soar, 22f, "village");
 
-            // walls for geckos: hut + village houses (horizontal casts toward the centre)
+            // walls for geckos: the hut (horizontal casts toward the centre)
             WallSpots(WorldLayout.Hut, 9f, "hut");
-            WallSpots(WorldLayout.Village, 26f, "village");
 
-            // village: pen, ground, palms (bats roost), the pig's swimming water
-            AddArea(WorldLayout.Village + new Vector3(-16f, 0f, 6f), 9f, 3f, 0.8f, 8f, FaunaSpotKind.Pen, "village_pen", 33);
-            AddArea(WorldLayout.Village, 18f, 4f, 0.8f, 6f, FaunaSpotKind.Ground, "village", 34);
+            // round 3: the hermit camp (pens, ground) – the village is gone; palms + the pig's swimming water stay on the south beach
+            AddArea(WorldLayout.HermitCamp + new Vector3(6f, 0f, -4f), 5f, 2.5f, 0.8f, 40f, FaunaSpotKind.Pen, "camp_pen", 33);
+            AddArea(WorldLayout.HermitCamp, 10f, 3.5f, 0.8f, 40f, FaunaSpotKind.Ground, "camp", 34);
             AddArea(WorldLayout.RadioTowerRuins + new Vector3(14f, 0f, 10f), 16f, 5f, 2f, 25f, FaunaSpotKind.Meadow, "radio_meadow", 35);
             for (int k = 0; k < 6; k++)
             {

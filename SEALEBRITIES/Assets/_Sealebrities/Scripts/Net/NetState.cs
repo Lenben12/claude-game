@@ -879,7 +879,7 @@ namespace Sealebrities
                 case EvFound:
                 {
                     string id = r.Str();
-                    var ck = (CollectibleKind)Mathf.Clamp(r.Int(), 0, (int)CollectibleKind.Secret);
+                    var ck = (CollectibleKind)Mathf.Clamp(r.Int(), 0, (int)Collectibles.LastKind);
                     int actor = r.Int();
                     int have = Collectibles.Count(ck) + (Collectibles.IsCollected(id) ? 0 : 1);
                     int total = Collectibles.Total(ck);
@@ -894,6 +894,7 @@ namespace Sealebrities
                     // L.9: the vote is used up – everybody gets up with the new morning
                     SleepVote.Reset();
                     Fader.FadeThrough(null, 2f);   // the new morning arrives with the next snapshot while black
+                    Survival.ApplyNight();         // round 3: the guest's own hunger / thirst after the night
                     break;
                 case EvNotify:
                 {

@@ -21,7 +21,7 @@ namespace Sealebrities
         /// Animals within this ring around a diver count for the targets.
         public const float Ring = 80f;
         /// Co-op: at most this many animals around one diver.
-        public const int MaxPerDiverCoop = 60;
+        public const int MaxPerDiverCoop = 64;
         /// Locked site: open-water species at this share of the open-sea density.
         public const float LockedDensity = 0.5f;
         public const float NightFactor = 0.85f;
@@ -40,21 +40,24 @@ namespace Sealebrities
         {
             switch (zone)
             {
-                case Zones.HouseReef: return 70;
-                case Zones.Lagoon: return 35;
-                case Zones.Kelp: return 50;
-                case Zones.Wreck: return 45;
-                case Zones.BlueDrop: return 30;
-                case Zones.Trench: return 18;
-                case Zones.FogIsle: return 60;
-                case Zones.OpenSea: return 22;
-                case Zones.DeepSea: return 10;
+                // round 3 (GDD §20 Q15 "viele, überall Leben, auch im offenen Meer"): every zone denser
+                case Zones.HouseReef: return 80;
+                case Zones.Lagoon: return 46;
+                case Zones.Kelp: return 60;
+                case Zones.Wreck: return 56;
+                case Zones.BlueDrop: return 42;
+                case Zones.Trench: return 22;
+                case Zones.FogIsle: return 62;
+                case Zones.OpenSea: return 34;
+                case Zones.DeepSea: return 16;
+                case Zones.Volcano: return 52;
                 default: return 0;
             }
         }
 
         /// Schools guaranteed on top of the target (open sea: "22 + 1 school").
-        public static int ExtraSchools(string zone) => zone == Zones.OpenSea || zone == Zones.DeepSea ? 1 : 0;
+        public static int ExtraSchools(string zone) =>
+            zone == Zones.OpenSea ? 2 : zone == Zones.DeepSea || zone == Zones.Lagoon || zone == Zones.Volcano ? 1 : 0;
 
         public static bool IsSiteZone(string zone) => DiveSites.Get(zone) != null;
 
@@ -78,6 +81,10 @@ namespace Sealebrities
             float g = WorldInfo.GroundHeight(p);
             if (g > Waves.SeaLevel) return Zones.Island;
             float depth = Waves.SeaLevel - g;
+
+            // round 3: the volcano island and its waters (living fossils + the monster's sinkhole)
+            if (Dist(p, WorldLayout.VolcanoIsland) < WorldLayout.VolcanoZoneRadius
+                || Dist(p, WorldLayout.VolcanoAbyss) < WorldLayout.VolcanoAbyssRadius + 30f) return Zones.Volcano;
 
             // dive sites (+ margin) and their landmark islands
             var all = DiveSites.All;

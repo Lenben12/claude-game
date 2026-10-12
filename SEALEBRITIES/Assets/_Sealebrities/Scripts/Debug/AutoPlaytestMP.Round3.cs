@@ -480,7 +480,7 @@ namespace Sealebrities
                 yield return Wait(1.0f);
                 bool can = KrillTv.CanGoLive(out string why);
                 Check(can, "KRILL.tv 'Live gehen' is enabled for the guest (" + (KrillTv.StartPlace() ?? "-") + (can ? "" : ": " + why) + ", " + S.followers + " followers)");
-                if (Hands.Find(HoldItem.Camera, out Hand ch, out int cs) && !Hands.IsHeld(HoldItem.Camera)) Hands.Select(ch, cs);
+                if (Hands.Find(HoldItem.Camera, out Hand ch, out int cs) && !Hands.IsHeld(HoldItem.Camera)) Hands.Select(cs);
                 int chat0 = chatCount, st0 = streamStarts;
                 bool req = KrillTv.RequestStart();
                 yield return WaitUntil(() => LiveState.IsLive, 15f);
@@ -536,7 +536,12 @@ namespace Sealebrities
             if (isHost)
             {
                 SetTime(0.45f);
-                StoryFlags.Set(StoryKeys.VillageVisited);
+                // round 3: M1 is the hermit smith's job now – the camp is known and he is a friend (no first-contact stare)
+                StoryFlags.Set(StoryKeys.HermitCampFound);
+                foreach (var hid in NpcDatabase.Hermits) { Hermits.Raise(hid, 50); var hm = Hermits.GetOrAdd(hid); if (hm != null) hm.met = true; }   // (the guard must not bonk the testers)
+                var hs = Hermits.GetOrAdd(NpcDatabase.HSmith);
+                if (hs != null) hs.met = true;
+                NetState.ForceSnapshot();
                 if (Quests.Get(qid) != null && !Quests.IsDone(qid)) Quests.Drop(qid);
                 // free a slot when the test game already has 3 side quests
                 var s = S;
@@ -548,11 +553,11 @@ namespace Sealebrities
             float tw = Time.realtimeSinceStartup;
             while (Time.realtimeSinceStartup - tw < 12f)
             {
-                mira = NpcRegistry.Find(NpcDatabase.Mira) as NpcActor;
+                mira = NpcRegistry.Find(NpcDatabase.HSmith) as NpcActor;
                 if (mira != null && mira.Present) break;
                 yield return Wait(0.5f);
             }
-            Check(mira != null && mira.Present, Role + ": Mira is in the village (" + (mira != null ? V(mira.Position) : "none") + ")");
+            Check(mira != null && mira.Present, Role + ": the smith (Amboss) is in the hermit camp (" + (mira != null ? V(mira.Position) : "none") + ")");
             if (mira == null) yield break;
             Vector3 mp = mira.Position;
             Vector3 at = FeetNear(mp, isHost ? 2.6f : 2.0f, isHost ? 20f : 200f);
@@ -564,17 +569,17 @@ namespace Sealebrities
             if (!isHost)
             {
                 string pm = InteractionPrompt.Text;
-                Check(!string.IsNullOrEmpty(pm), "the guest's crosshair prompt at Mira: '" + pm + "' (" + F(FlatDist(pc.Root.position, mira.Position), "0.0") + " m)");
+                Check(!string.IsNullOrEmpty(pm), "the guest's crosshair prompt at the smith: '" + pm + "' (" + F(FlatDist(pc.Root.position, mira.Position), "0.0") + " m)");
                 GameInput.SimTap(GameAction.Interact);
                 yield return Wait(1.2f);
                 if (npcLineCount == lines0 && !mira.InConversation)
                 {
-                    Info("E did not reach Mira – NpcDirector.LocalInteract");
+                    Info("E did not reach the smith – NpcDirector.LocalInteract");
                     mira.Interact();
                 }
                 float t0 = Time.realtimeSinceStartup;
                 while (Time.realtimeSinceStartup - t0 < 70f && !mira.HasOffer && Quests.Get(qid) == null) yield return Wait(0.25f);
-                Check(mira.HasOffer || Quests.Get(qid) != null, "after the conversation Mira offers 'Treibholz' to the guest (" + (npcLineCount - lines0) + " lines heard, " + F(Time.realtimeSinceStartup - t0, "0") + " s)");
+                Check(mira.HasOffer || Quests.Get(qid) != null, "after the signs the smith offers 'Holz für die Schleifbank' to the guest (" + (npcLineCount - lines0) + " lines heard, " + F(Time.realtimeSinceStartup - t0, "0") + " s)");
                 yield return AimAt(mira.Position + Vector3.up * 1.2f);
                 Info("prompt at the offer: '" + InteractionPrompt.Text + "'");
                 yield return Shot("client_S17_offer");
@@ -586,7 +591,7 @@ namespace Sealebrities
                     mira.Interact();
                     yield return WaitUntil(() => Quests.Get(qid) != null, 6f);
                 }
-                Check(Quests.Get(qid) != null, "the guest accepted 'Treibholz' (M1) – the quest is in the guest's state");
+                Check(Quests.Get(qid) != null, "the guest accepted the smith's job (M1) – the quest is in the guest's state");
                 Quests.Track(qid);   // the quest-line pin is per player now – the guest pins its own line
                 yield return Wait(2.5f);   // the accept line
                 SendVal("npclines", (npcLineCount - lines0).ToString(Inv) + "|" + string.Join("¦", npcTexts));
@@ -758,6 +763,7 @@ namespace Sealebrities
                 Check(g != null, "a grill near the hut (" + (g != null ? F(best, "0") + " m from the hut" : "none") + ")");
                 Buffs.Clear();   // the grill's own buff must show up by itself
                 yield return null;
+                int grilled0 = Backpack.Count(FoodDatabase.GrilledFish);
                 if (g != null)
                 {
                     Vector3 gp = g.transform.position;
@@ -787,7 +793,11 @@ namespace Sealebrities
                     yield return WaitUntil(() => !g.Running, 6f);
                     yield return Wait(0.3f);
                 }
-                Check(grill != null && Buffs.Has(grill.buff), "6 s at the grill → the guest's grilled-fish buff (" + (grill != null ? grill.buff.ToString() : "-") + ")");
+                // round 3: the grilled fish goes into the guest's own backpack – eating it gives the buff
+                Check(Backpack.Count(FoodDatabase.GrilledFish) == grilled0 + 1, "6 s at the grill → a grilled fish in the guest's backpack (" + Backpack.Count(FoodDatabase.GrilledFish) + ")");
+                Backpack.UseId(FoodDatabase.GrilledFish);
+                yield return Wait(0.3f);
+                Check(grill != null && Buffs.Has(grill.buff), "eaten from the backpack → the guest's grilled-fish buff (" + (grill != null ? grill.buff.ToString() : "-") + ")");
                 SendVal("grilled", "1");
                 yield return Wait(1.2f);
                 Check(!HasFish(uid), "the grilled fish is gone from the guest's cooler view too");
@@ -843,8 +853,9 @@ namespace Sealebrities
                     SendVal("mcrate", Vec(cp));
                 }
                 yield return WaitVal("mopened", 90f);
-                yield return WaitUntil(() => Shop.FindDelivery(itemId) == null && Pantry.Count(food.id) > pantry0, 6f);
-                Check(Shop.FindDelivery(itemId) == null && Pantry.Count(food.id) > pantry0, "the guest opened the lost crate: delivery gone, " + Pantry.Count(food.id) + " × " + food.id + " in the shared pantry");
+                // round 3: crate snacks go into the OPENER's backpack (only what does not fit lands in the shared fridge)
+                yield return WaitUntil(() => Shop.FindDelivery(itemId) == null, 6f);
+                Check(Shop.FindDelivery(itemId) == null, "the guest opened the lost crate: delivery gone (guest's backpack: " + Val("mopened") + " × " + food.id + ", shared pantry " + (Pantry.Count(food.id) - pantry0) + " new)");
                 yield return WaitUntil(() => FindCrate(itemId) == null && !HeliService.SearchActive, 4f);
                 Check(FindCrate(itemId) == null && !HeliService.SearchActive, "host: crate gone, search line cleared");
                 yield return Sync("S19c", 40f);
@@ -866,7 +877,9 @@ namespace Sealebrities
                 yield return WaitCrateDown(itemId, c => crate = c);
                 Check(crate != null && crate.Mishap == DeliveryMishap.WrongPlace, "guest: the crate fell at the wrong place (" + (crate != null ? F(FlatDist(crate.transform.position, pad), "0") + " m from the pad" : "none") + ")");
                 yield return WaitUntil(() => HeliService.SearchActive, 2f);
-                Check(HeliService.SearchActive && QuestTracker.ActiveId == "heli_search", "guest: quest line '" + QuestTracker.Line + "' (" + QuestTracker.ActiveId + ")");
+                // the search entry exists; a running tutorial line keeps priority on the quest line (L.10 order)
+                Check(HeliService.SearchActive && (QuestTracker.ActiveId == "heli_search" || QuestTracker.ActiveId == "tutorial"),
+                      "guest: search active, quest line '" + QuestTracker.Line + "' (" + QuestTracker.ActiveId + ")");
                 yield return WaitVal("mcrate", 40f);
                 if (crate == null) yield break;
                 Vector3 cp = crate.transform.position;
@@ -876,6 +889,7 @@ namespace Sealebrities
                     Check(off < 2f, "the crate lies at the same place on both machines (" + F(off, "0.00") + " m apart)");
                 }
                 int pantry0 = Pantry.Count(food.id);
+                int bp0 = Backpack.Count(food.id);
                 Vector3 dir = Flat(pad - cp);
                 Vector3 feet = SnapDown(cp + dir * 1.9f + Vector3.up * 2f);
                 yield return Stand(feet, YawTo(feet, cp));
@@ -884,14 +898,16 @@ namespace Sealebrities
                 yield return Shot("client_S19_found_crate");
                 GameInput.SimTap(GameAction.Interact);
                 yield return Wait(0.8f);
-                if (Pantry.Count(food.id) <= pantry0 && crate != null && crate.CanInteract())
+                if (Pantry.Count(food.id) <= pantry0 && Backpack.Count(food.id) <= bp0 && crate != null && crate.CanInteract())
                 {
                     Info("E did not open the crate from here – opened via the crate");
                     crate.Interact();
                     yield return Wait(0.4f);
                 }
-                Check(Pantry.Count(food.id) > pantry0, "the guest opened the crate → snacks in the pantry (" + Pantry.Count(food.id) + ")");
-                SendVal("mopened", "1");
+                yield return WaitUntil(() => Backpack.Count(food.id) > bp0 || Pantry.Count(food.id) > pantry0, 3f);
+                int gotBp = Backpack.Count(food.id) - bp0;
+                Check(gotBp > 0 || Pantry.Count(food.id) > pantry0, "the guest opened the crate → snacks in the guest's backpack (" + gotBp + ", round 3) / pantry (" + (Pantry.Count(food.id) - pantry0) + ")");
+                SendVal("mopened", gotBp.ToString(Inv));
                 yield return Wait(1.5f);
                 Check(!HeliService.SearchActive && QuestTracker.ActiveId != "heli_search", "guest: search line cleared");
                 yield return Sync("S19c", 40f);
@@ -969,7 +985,7 @@ namespace Sealebrities
             else
             {
                 // a personal change the host must keep for this machine: rod into left slot 2
-                Hands.Assign(Hand.Left, 1, HoldItem.FishingRod);
+                Hands.Assign(4, ItemIds.FishingRod, Hand.Left);
                 yield return Frames(2);
                 var r0 = PlayerRecords.CaptureLocal();
                 string hb = HotbarCsv(r0);
@@ -1008,7 +1024,7 @@ namespace Sealebrities
         static string HotbarCsv(PlayerRecord r)
         {
             if (r == null) return "-";
-            return (r.hotbarLeft != null ? string.Join(",", r.hotbarLeft) : "") + "/" + (r.hotbarRight != null ? string.Join(",", r.hotbarRight) : "");
+            return (r.hotbar != null ? string.Join(",", r.hotbar) : "") + "/" + r.hotbarOffMask;
         }
 
         static string StatsLine(PlayerRecord r)

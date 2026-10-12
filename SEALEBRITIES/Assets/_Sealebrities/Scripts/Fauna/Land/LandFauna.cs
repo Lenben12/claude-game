@@ -12,7 +12,7 @@ namespace Sealebrities
     {
         public const float SpawnRange = 60f;
         public const float DespawnDistance = 90f;
-        public const int Cap = 40;
+        public const int Cap = 52;   // round 3: more island life (birds, crabs, lizards – decoration, Q22/Q23)
 
         sealed class Slot
         {
@@ -60,12 +60,21 @@ namespace Sealebrities
             new Plan("coconut_crab", 3, FaunaSpotKind.Jungle, FaunaSpotKind.Jungle),
             new Plan("goat", 3, FaunaSpotKind.Pen, FaunaSpotKind.Pen),
             new Plan("goat", 2, FaunaSpotKind.Meadow, FaunaSpotKind.Meadow, "radio|radio_meadow"),
-            new Plan("pig", 1, FaunaSpotKind.Ground, FaunaSpotKind.Ground, "village"),
+            new Plan("pig", 1, FaunaSpotKind.Ground, FaunaSpotKind.Ground, "camp"),   // round 3: Truffle lives with the hermits
             new Plan("capuchin", 1, FaunaSpotKind.Perch, FaunaSpotKind.Jungle, "lighthouse"),
             new Plan("fruit_bat", 10, FaunaSpotKind.Roost, FaunaSpotKind.Roost),
             new Plan("ghost_crab", 12, FaunaSpotKind.Beach, FaunaSpotKind.Beach),
             new Plan("sally_crab", 6, FaunaSpotKind.TidePool, FaunaSpotKind.Rocks),
             new Plan("hermit_crab", 4, FaunaSpotKind.TidePool, FaunaSpotKind.TidePool),
+            // ---- round 3 (GDD §20 Q22: birds, crabs, lizards – decoration, no Sealog)
+            new Plan("red_crab", 8, FaunaSpotKind.Jungle, FaunaSpotKind.Meadow),
+            new Plan("skink", 6, FaunaSpotKind.Rocks, FaunaSpotKind.Meadow),
+            new Plan("booby", 4, FaunaSpotKind.Rocks, FaunaSpotKind.Perch, "volcano|north_cliffs|cliffs|blue_drop"),
+            new Plan("reef_heron", 2, FaunaSpotKind.TidePool, FaunaSpotKind.Rocks, "tide_pools|hidden_bay|tidepools"),
+            // the volcano island: iguanas on the black lava, crabs on the black sand, red crabs in the ferns
+            new Plan("marine_iguana", 5, FaunaSpotKind.Rocks, FaunaSpotKind.Beach, "volcano"),
+            new Plan("sally_crab", 5, FaunaSpotKind.Beach, FaunaSpotKind.Rocks, "volcano"),
+            new Plan("red_crab", 4, FaunaSpotKind.Meadow, FaunaSpotKind.Jungle, "volcano"),
         };
 
         readonly List<int> candidates = new List<int>(256);

@@ -61,15 +61,29 @@ namespace Sealebrities
             if (l0 != HoldItem.None && Hands.Active(Hand.Left) == HoldItem.None) handEmptiedLeft = Time.time;
         }
 
-        /// Q20: on entering the water the camera becomes the active item of its hand when that hand is empty.
+        /// Q20: on entering the water the camera becomes the active item of its hand when that hand is empty (it is only
+        /// taken into the hand – round 3: recording starts only with the player's own click).
         void AutoEquipCameraOnEntry()
         {
             if (!Hands.CanSelectNow || !Hands.Owns(HoldItem.Camera)) return;
-            if (!Hands.Find(HoldItem.Camera, out Hand h, out int slot)) return;   // not on the hotbar
+            if (!Hands.Find(HoldItem.Camera, out int slot)) return;   // not on the hotbar
+            Hand h = Hands.SlotHand(slot);
             if (Hands.ActiveSlot(h) == slot || Hands.Active(h) != HoldItem.None) return;
+            // a held spear / speargun is for the water: keep it
+            var other = Hands.Active(h == Hand.Right ? Hand.Left : Hand.Right);
+            if (other == HoldItem.SpearGun) return;
             float emptied = h == Hand.Right ? handEmptiedRight : handEmptiedLeft;
             if (Time.time - emptied < AutoEquipGrace) return;
-            Hands.Select(h, slot);
+            Hands.Select(slot);
+        }
+
+        /// Round 3 (Combat): slapstick knockback from a hit – a push (on land a little hop) and camera shake.
+        public void Knockback(Vector3 impulse, float shake)
+        {
+            if (!initialized || menuMode || seated || IsFainting) return;
+            if (float.IsNaN(impulse.x) || float.IsNaN(impulse.y) || float.IsNaN(impulse.z)) return;
+            vel += Vector3.ClampMagnitude(impulse, 9f);
+            AddShake(Mathf.Clamp01(shake));
         }
 
         /// A tiny camera dip (eating bites, small bumps). Honours the camera-shake toggle.

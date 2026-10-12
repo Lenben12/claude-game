@@ -53,6 +53,7 @@ namespace Sealebrities
             {
                 key = key, name = name,
                 hotbarRight = new[] { "Camera", "FishingRod", "None" }, hotbarLeft = new[] { "Flashlight", "None", "None" },
+                hotbar = GameState.DefaultHotbar(), hotbarOffMask = GameState.DefaultOffMask,
             };
             if (S != null && Net.HasAuthority) S.players.Add(r);
             return r;
@@ -103,8 +104,16 @@ namespace Sealebrities
             r.key = Settings.PlayerKey;
             r.name = Settings.DisplayName;
             r.look = Settings.Look;
-            r.hotbarRight = (string[])s.hotbarRight.Clone();
-            r.hotbarLeft = (string[])s.hotbarLeft.Clone();
+            if (s.hotbarRight != null) r.hotbarRight = (string[])s.hotbarRight.Clone();
+            if (s.hotbarLeft != null) r.hotbarLeft = (string[])s.hotbarLeft.Clone();
+            s.EnsureHotbar();
+            r.hotbar = (string[])s.hotbar.Clone();
+            r.hotbarOffMask = s.hotbarOffMask;
+            r.backpack = CloneStacks(s.backpack);
+            r.pouch = CloneStacks(s.pouch);
+            r.backpackInit = s.backpackInit;
+            r.hunger = s.hunger;
+            r.thirst = s.thirst;
             r.equipped = new List<string>(s.equipped);
             r.carried = s.carried;
             r.lastSeenDay = s.day;
@@ -116,18 +125,55 @@ namespace Sealebrities
         {
             var s = S;
             if (s == null || r == null) return;
-            if (r.hotbarRight != null && r.hotbarRight.Length == Hands.SlotsPerHand) s.hotbarRight = (string[])r.hotbarRight.Clone();
-            if (r.hotbarLeft != null && r.hotbarLeft.Length == Hands.SlotsPerHand) s.hotbarLeft = (string[])r.hotbarLeft.Clone();
+            if (r.hotbar != null && r.hotbar.Length == Hands.SlotCount)
+            {
+                s.hotbar = (string[])r.hotbar.Clone();
+                s.hotbarOffMask = r.hotbarOffMask;
+            }
+            else if (r.hotbarRight != null && r.hotbarRight.Length == Hands.SlotsPerHand && r.hotbarLeft != null && r.hotbarLeft.Length == Hands.SlotsPerHand)
+            {
+                // a record from a round-2 host save: migrate the 3 + 3 hotbar
+                s.hotbar = GameState.MigrateLegacyHotbar(r.hotbarRight, r.hotbarLeft);
+                s.hotbarOffMask = GameState.DefaultOffMask;
+            }
+            s.activeMain = -1;
+            s.activeOff = -1;
+            if (r.backpackInit)
+            {
+                s.backpack = CloneStacks(r.backpack);
+                s.pouch = CloneStacks(r.pouch);
+                s.backpackInit = true;
+                s.hunger = Mathf.Clamp(float.IsNaN(r.hunger) ? Survival.Max : r.hunger, 0f, Survival.Max);
+                s.thirst = Mathf.Clamp(float.IsNaN(r.thirst) ? Survival.Max : r.thirst, 0f, Survival.Max);
+                Backpack.Normalize(s.backpack);
+                Backpack.Normalize(s.pouch);
+            }
             if (r.equipped != null) s.equipped = new List<string>(r.equipped);
             s.EnsureHotbar();
+            s.EnsurePerPlayer();
+            Backpack.RaiseChanged();
             var local = Local;
             local.fishCaught = r.fishCaught; local.speciesFilmed = r.speciesFilmed; local.rescues = r.rescues;
             local.dives = r.dives; local.faints = r.faints; local.playMinutes = r.playMinutes;
             local.coconuts = r.coconuts; local.grilled = r.grilled; local.snaps = r.snaps; local.photos = r.photos;
-            if (r.achievements != null)
-                for (int i = 0; i < r.achievements.Count; i++) Achievements.ApplyLocal(r.achievements[i]);
+            // round 3 step 6b: achievements are per world – the ones this player already earned in the host's world come
+            // back silently (no notification burst on every join)
+            Achievements.RememberSilently(r.achievements);
             Hands.NotifyStateReplaced();
             GameEvents.RaiseGearChanged();
+        }
+
+        static List<InvStack> CloneStacks(List<InvStack> src)
+        {
+            var l = new List<InvStack>();
+            if (src == null) return l;
+            for (int i = 0; i < src.Count; i++)
+            {
+                var st = src[i];
+                if (st == null || st.count <= 0) continue;
+                l.Add(new InvStack { id = st.id, count = st.count, durability = st.durability, sharpness = st.sharpness });
+            }
+            return l;
         }
 
         /// Guest: sends the own record to the host.
@@ -139,7 +185,7 @@ namespace Sealebrities
             Net.Command(NetCommand.Custom, CoreCommands.PlayerRecordKey, JsonUtility.ToJson(r));
         }
 
-        /// GameManager.Update: play time + the 60 s guest push.
+        /// GameManager.Update: play time (this player's own, per world) + the 60 s guest push.
         public static void Tick(float dt)
         {
             var gm = GameManager.I;

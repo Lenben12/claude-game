@@ -31,6 +31,10 @@ namespace Sealebrities
         readonly VisualElement root;
         public readonly UIHotbar Hotbar;
         public readonly UIFoodPanel Food;
+        /// Round 3: hunger / thirst meters (+ heart when hurt).
+        public readonly UISurvivalPanel Needs;
+        /// Round 3 (GDD §20 Q31): the shared co-op map pins as small markers in the view.
+        public readonly UIHudPins Pins;
         float hotbarAlpha = 1f;
         readonly UIRankBadge rankBadge;
         readonly VisualElement camHint;
@@ -83,6 +87,8 @@ namespace Sealebrities
             root.Add(leftCol);
             diveBlock = UIKit.Col();
             leftCol.Add(diveBlock);
+            Needs = new UISurvivalPanel();
+            leftCol.Add(Needs.Root);
             Food = new UIFoodPanel();
             leftCol.Add(Food.Root);
             var diveTop = UIKit.Row();
@@ -252,6 +258,7 @@ namespace Sealebrities
             waypoint.Add(waypointLabel);
             waypoint.style.display = DisplayStyle.None;
             root.Add(waypoint);
+            Pins = new UIHudPins(root);
 
             // ---------------- F.1 unconscious: red vignette + countdown (a friend can tow you up)
             koOverlay = new VisualElement { name = "sb-ko" };
@@ -382,6 +389,10 @@ namespace Sealebrities
         /// Kept for older callers: quests now live in the phone app "Aufgaben" (notification on change).
         public void SetQuest(string text) { }
 
+        /// Tests (round 3 UI step): the dive block (air / depth / clips) is on screen; the air ring part of it.
+        public bool DiveBlockShown => diveShown;
+        public bool AirRingShown => diveShown && UIKit.IsShown(airBox);
+
         public void OnBumped(float airLost)
         {
             bumpFlash = 1f;
@@ -468,8 +479,10 @@ namespace Sealebrities
             TickDive(dt, gm);
             TickPrompt(aiming);
             TickWaypoint();
+            Pins.Tick(!UIState.BlocksGameplay && !UIState.MapOverlayOpen && !aiming);
 
             Food.Tick();
+            Needs.Tick();
 
             // Q39: the hotbar is always visible (empty hands, land, water, viewfinder, at the wheel) – hidden only while
             // the phone or a menu is open; idle after 4 s → 60 % alpha, full again on any change
@@ -500,7 +513,7 @@ namespace Sealebrities
                 }
             }
 
-            bool dot = !aiming && !UIState.BlocksGameplay;
+            bool dot = !aiming && !UIState.BlocksGameplay && !UIState.MapOverlayOpen;
             if (dot != dotShown) { dotShown = dot; UIKit.Show(centerDot, dot); }
         }
 
@@ -524,12 +537,11 @@ namespace Sealebrities
             if (boat is Object bo && bo == null) boat = null;
             bool inWater = player != null && player.IsInWater;
             bool aboard = boat != null && boat.PlayerAboard;
-            // resting on land after a dive refills the tank (Player module): keep the air ring up while it fills
-            var pcRefill = player as PlayerController;
-            bool refilling = pcRefill != null && pcRefill.RefillingAir;
             int dc = Footage.DiveCount, bc = Footage.BankedCount;
-            bool show = inWater || aboard || refilling || dc > 0 || bc > 0;
-            bool divePart = inWater || aboard || refilling;
+            // round 3 UI step (GDD §20 Q40 „HUD an Land aufgeräumt“): dive info + air only in the water; on the boat just
+            // the site name and the clip counter; on land nothing of the dive block (hunger / thirst stay below)
+            bool show = inWater || aboard;
+            bool divePart = inWater;
             if (show != diveShown)
             {
                 diveShown = show;

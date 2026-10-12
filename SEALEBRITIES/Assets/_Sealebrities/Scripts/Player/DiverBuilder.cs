@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -22,7 +23,7 @@ namespace Sealebrities
         /// Default suit colours of player 1–4 (orange, turquoise, pink, sun yellow).
         public static readonly Color[] PlayerColors = { LowPoly.Hex("#EE7F2D"), LowPoly.Hex("#3FB8C4"), LowPoly.Hex("#E0607E"), LowPoly.Hex("#F2C94C") };
         public const int MouthVariants = 5;
-        /// Hats of the character screen (CosmeticsDatabase.HatCount): 0 none … 14 paper crown.
+        /// Hats of the character screen (CosmeticsDatabase.HatCount): 0 none … 19 sun visor.
         public const int HatCount = CosmeticsDatabase.HatCount;
 
         /// Localized hat name for a character screen.
@@ -36,44 +37,126 @@ namespace Sealebrities
         public static DiverLook ForPlayer(int index, int hat, int face)
         {
             Color suit = PlayerColors[((index % 4) + 4) % 4];
-            return new DiverLook { suit = suit, cuff = Color.Lerp(suit, Color.white, 0.55f), hat = hat, face = face, snorkel = true };
+            return new DiverLook { suit = suit, cuff = Color.Lerp(suit, Color.white, 0.55f), hat = hat, face = face, snorkel = true,
+                                   hair = (index * 3 + 1) % (CosmeticsDatabase.HairCount - 1), hairColor = (index * 2 + 1) % CosmeticsDatabase.HairColors.Length };
         }
     }
 
-    /// Builds the bean diver (How to Fish proportions: 1.85 m tall bean, no neck, googly eyes, thin tube limbs, fins)
-    /// and installs DiverModels.Build. The root sits at the feet, +Z forward; it carries a DiverPuppet.
-    /// Round 2b (L.13 "much smoother characters", 1c options; LOD0 ≤ 9,000 triangles + LOD1/LOD2 proxies, DiverLod):
-    /// body 28 radial × 18 rings, head 28 × 14, smooth 12 × 6 limbs with ball joints, eyes with lids + highlight dots, 8 mouth shapes, blush; every character-screen option is
-    /// drawn: 15 hats, 8 suit patterns, 5 eye styles, 4 brows, 6 skin tones, mask colour, snorkel on/off, fin colour.
-    /// Neoprene smoothness 0.18 (soft sheen), skin 0.10. Meshes and pattern textures are built once and shared.
+    /// Builds the diver character and installs DiverModels.Build. The root sits at the feet, +Z forward; it carries a
+    /// DiverPuppet. Round 3 (GDD §19 „Figuren schöner und realistischer – weder klotzig noch zu kugelig“): How-to-Fish
+    /// bean-human proportions instead of the round bean – 1.85 m, a tall egg head on a neck, a wetsuit torso with
+    /// defined shoulders (pelvis + chest on a spine joint so the upper body can twist and lean), tapered arms and legs
+    /// with elbows / knees, mitten gloves, a readable face (eyes, lids, brows, nose, ears, mouth), hair that shows under
+    /// every hat, beards and accessories; body type and height options. Smooth shading everywhere, LOD0 ≤ 9,000
+    /// triangles incl. the biggest loadout + LOD1/LOD2 proxies (DiverLod). Meshes / pattern textures are cached.
+    /// Hierarchy: root (DiverPuppet) → Rig (height scale) → Body (pelvis pivot) → {HipL/R → Knee → Foot, Chest → {Neck,
+    /// Head → face / hair / mask / hat, ShoulderL/R → Elbow → Hand, gear}}.
     public static class DiverBuilder
     {
-        // ------------------------------------------------------------------ dimensions (character space, metres)
-        public const float PivotY = 0.95f;          // swim pivot (body centre)
-        public const float HeadY = 1.47f;           // head pivot (bottom of the head part of the bean)
-        public const float ShoulderY = 1.35f, ShoulderX = 0.245f;
-        public const float HipY = 0.78f, HipX = 0.125f;
-        public const float UpperArm = 0.33f, ForeArm = 0.30f;
-        public const float Thigh = 0.36f, Shin = 0.36f;
-        public const float EyeY = 1.62f, EyeX = 0.075f, EyeR = 0.06f, PupilR = 0.029f;
+        // ------------------------------------------------------------------ dimensions (character space, metres, height scale 1)
+        public const float PivotY = 0.98f;          // pelvis centre (swim pivot)
+        public const float ChestY = 1.10f;          // spine joint at the waist
+        public const float HeadY = 1.53f;           // head pivot (top of the neck)
+        public const float CrownY = 1.866f;
+        public const float ShoulderY = 1.40f, ShoulderX = 0.215f;
+        public const float HipY = 0.92f, HipX = 0.10f;
+        public const float UpperArm = 0.29f, ForeArm = 0.26f;
+        public const float Thigh = 0.42f, Shin = 0.42f;
+        public const float EyeY = 1.715f, EyeX = 0.047f, EyeR = 0.036f, PupilR = 0.018f;
+        public const float HatY = 1.775f, MouthY = 1.598f, NoseY = 1.655f;
+        /// Torso depth / width (the lathe is scaled by this in z; per body type in Shape).
+        public const float TorsoDepth = 0.70f;
+        /// Distance of the back surface from the pelvis axis (lying down: the pelvis pivot rests this high above the bed).
+        public const float BackDepth = 0.12f;
 
-        public const float NeopreneSmoothness = 0.18f, SkinSmoothness = 0.10f;
+        public const float NeopreneSmoothness = 0.18f, SkinSmoothness = 0.12f, HairSmoothness = 0.16f;
 
-        /// L.13 bean body profile (radius, height) bottom → top: bottom radius 0.29 with a soft belly bulge.
-        static readonly Vector2[] BodyProfile =
+        /// Width profile (radius, height) of the pelvis part (crotch → waist) and the chest part (waist → collar). They
+        /// overlap at the waist (the weight belt hides the seam); scaled per body type by ShapeScale.
+        static readonly Vector2[] PelvisProfile =
         {
-            new Vector2(0.000f, 0.655f), new Vector2(0.125f, 0.667f), new Vector2(0.208f, 0.698f), new Vector2(0.258f, 0.752f),
-            new Vector2(0.280f, 0.825f), new Vector2(0.288f, 0.905f), new Vector2(0.286f, 1.000f), new Vector2(0.274f, 1.150f),
-            new Vector2(0.256f, 1.300f), new Vector2(0.238f, 1.420f), new Vector2(0.231f, 1.478f), new Vector2(0.150f, 1.490f),
-            new Vector2(0.000f, 1.495f),
+            new Vector2(0.000f, 0.795f), new Vector2(0.078f, 0.800f), new Vector2(0.132f, 0.815f), new Vector2(0.160f, 0.850f),
+            new Vector2(0.172f, 0.900f), new Vector2(0.170f, 0.955f), new Vector2(0.160f, 1.010f), new Vector2(0.150f, 1.065f),
+            new Vector2(0.140f, 1.110f), new Vector2(0.095f, 1.140f), new Vector2(0.000f, 1.150f),
         };
 
+        static readonly Vector2[] ChestProfile =
+        {
+            new Vector2(0.000f, 1.000f), new Vector2(0.100f, 1.008f), new Vector2(0.146f, 1.030f), new Vector2(0.157f, 1.075f),
+            new Vector2(0.163f, 1.140f), new Vector2(0.178f, 1.220f), new Vector2(0.193f, 1.300f), new Vector2(0.203f, 1.365f),
+            new Vector2(0.203f, 1.415f), new Vector2(0.182f, 1.452f), new Vector2(0.132f, 1.477f), new Vector2(0.075f, 1.492f),
+            new Vector2(0.000f, 1.500f),
+        };
+
+        /// A tall egg head (How to Fish): chin 1.528 → crown 1.866, widest (r 0.125) at the temples.
         static readonly Vector2[] HeadProfile =
         {
-            new Vector2(0.000f, 1.452f), new Vector2(0.226f, 1.468f), new Vector2(0.226f, 1.520f), new Vector2(0.222f, 1.600f),
-            new Vector2(0.212f, 1.680f), new Vector2(0.190f, 1.750f), new Vector2(0.150f, 1.805f), new Vector2(0.090f, 1.838f),
-            new Vector2(0.000f, 1.850f),
+            new Vector2(0.000f, 1.528f), new Vector2(0.040f, 1.531f), new Vector2(0.075f, 1.545f), new Vector2(0.100f, 1.570f),
+            new Vector2(0.114f, 1.605f), new Vector2(0.121f, 1.645f), new Vector2(0.1245f, 1.690f), new Vector2(0.124f, 1.735f),
+            new Vector2(0.117f, 1.780f), new Vector2(0.102f, 1.818f), new Vector2(0.076f, 1.846f), new Vector2(0.040f, 1.862f),
+            new Vector2(0.000f, 1.866f),
         };
+
+        /// Body type: width factors at hips / waist / chest / shoulders, torso depth and limb thickness.
+        public struct Shape
+        {
+            public float hip, waist, chest, shoulder, depth, limb;
+        }
+
+        public static Shape ShapeOf(int build)
+        {
+            switch (build)
+            {
+                case 1: return new Shape { hip = 0.93f, waist = 0.88f, chest = 0.9f, shoulder = 0.92f, depth = 0.68f, limb = 0.88f };   // slim
+                case 2: return new Shape { hip = 1.08f, waist = 1.17f, chest = 1.1f, shoulder = 1.05f, depth = 0.8f, limb = 1.12f };    // sturdy
+                case 3: return new Shape { hip = 0.98f, waist = 0.97f, chest = 1.09f, shoulder = 1.15f, depth = 0.72f, limb = 1.08f };  // broad
+                default: return new Shape { hip = 1f, waist = 1f, chest = 1f, shoulder = 1f, depth = TorsoDepth, limb = 1f };
+            }
+        }
+
+        static float ShapeScale(float y, Shape s)
+        {
+            if (y <= 0.88f) return s.hip;
+            if (y <= 1.06f) return Mathf.Lerp(s.hip, s.waist, (y - 0.88f) / 0.18f);
+            if (y <= 1.25f) return Mathf.Lerp(s.waist, s.chest, (y - 1.06f) / 0.19f);
+            if (y <= 1.39f) return Mathf.Lerp(s.chest, s.shoulder, (y - 1.25f) / 0.14f);
+            return Mathf.Lerp(s.shoulder, 1f, Mathf.Clamp01((y - 1.39f) / 0.11f));
+        }
+
+        static float ProfileR(Vector2[] prof, float y)
+        {
+            if (y <= prof[0].y) return prof[0].x;
+            for (int i = 0; i < prof.Length - 1; i++)
+            {
+                Vector2 a = prof[i], b = prof[i + 1];
+                if (y <= b.y) return Mathf.Lerp(a.x, b.x, (y - a.y) / Mathf.Max(1e-4f, b.y - a.y));
+            }
+            return prof[prof.Length - 1].x;
+        }
+
+        /// Half width of the torso (x) at an absolute height for a body type – DiverGear places straps / tanks with it.
+        public static float TorsoRX(float y, int build = 0)
+        {
+            var s = ShapeOf(build);
+            float r = y < 1.05f ? ProfileR(PelvisProfile, y) : Mathf.Max(ProfileR(ChestProfile, y), y < 1.11f ? ProfileR(PelvisProfile, y) : 0f);
+            return r * ShapeScale(y, s);
+        }
+
+        /// Half depth of the torso (z) at an absolute height.
+        public static float TorsoRZ(float y, int build = 0) => TorsoRX(y, build) * ShapeOf(build).depth;
+
+        /// Legacy name used by older code: the side radius of the torso.
+        public static float BodyRadiusAt(float y) => TorsoRX(y);
+
+        /// Surface radius of the head at an absolute height (for face parts, hair, hats).
+        public static float HeadRadius(float y) => ProfileR(HeadProfile, y);
+
+        static Vector2[] Scaled(Vector2[] prof, Shape s)
+        {
+            var o = new Vector2[prof.Length];
+            for (int i = 0; i < prof.Length; i++) o[i] = new Vector2(prof[i].x * ShapeScale(prof[i].y, s), prof[i].y);
+            return o;
+        }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         static void Register()
@@ -90,18 +173,21 @@ namespace Sealebrities
         static Material M(Color c) => LowPoly.Mat(c);
         static Material Neo(Color c) => MaterialLibrary.Opaque(c, NeopreneSmoothness, 0f);
         static Material SkinMat(Color c) => MaterialLibrary.Opaque(c, SkinSmoothness, 0f);
+        static Material HairMat(Color c) => MaterialLibrary.Opaque(c, HairSmoothness, 0f);
 
-        /// Body surface radius at an absolute height (side of the bean) – DiverGear places straps and tanks with it.
-        public static float BodyRadiusAt(float y)
+        /// Hats that cover the top of the head (spikes / curls on top / the high bun hide under them).
+        public static bool HatCoversTop(int hat) => hat != 0 && hat != 11 && hat != 12 && hat != 14 && hat != 17 && hat != 19;
+
+        static float HairThickness(int hair)
         {
-            // piecewise linear over the side part of the profile (points 3 … 10)
-            if (y <= BodyProfile[3].y) return BodyProfile[3].x;
-            for (int i = 3; i < 10; i++)
+            switch (hair)
             {
-                Vector2 a = BodyProfile[i], b = BodyProfile[i + 1];
-                if (y <= b.y) return Mathf.Lerp(a.x, b.x, (y - a.y) / Mathf.Max(1e-4f, b.y - a.y));
+                case 2: case 7: return 0.016f;
+                case 1: return 0.009f;
+                case 5: case 6: return 0.012f;
+                case CosmeticsDatabase.HairBald: return 0f;
+                default: return 0.011f;
             }
-            return BodyProfile[10].x;
         }
 
         // ------------------------------------------------------------------ build
@@ -115,6 +201,8 @@ namespace Sealebrities
             int hat = ((look.hat % DiverStyle.HatCount) + DiverStyle.HatCount) % DiverStyle.HatCount;
             var skins = CosmeticsDatabase.SkinTones;
             Color skin = skins[Mathf.Clamp(look.skin, 0, skins.Length - 1)];
+            Color hairC = CosmeticsDatabase.HairColors[Mathf.Clamp(look.hairColor, 0, CosmeticsDatabase.HairColors.Length - 1)];
+            Shape shape = ShapeOf(look.build);
 
             var root = new GameObject("BeanDiver");
             var rt = root.transform;
@@ -124,40 +212,67 @@ namespace Sealebrities
             p.eyeStyle = Mathf.Clamp(look.eyes, 0, CosmeticsDatabase.EyesCount - 1);
             p.browStyle = Mathf.Clamp(look.brows, 0, CosmeticsDatabase.BrowsCount - 1);
             p.baseMouth = Mathf.Clamp(look.mouth, 0, CosmeticsDatabase.MouthCount - 1);
+            p.heightScale = look.HeightScale;
 
             Material neo = Neo(DiverStyle.Neoprene), suit = Neo(look.suit), cuff = Neo(cuffC), skinM = SkinMat(skin);
             Material panel = PatternMaterial(Mathf.Clamp(look.pattern, 0, CosmeticsDatabase.PatternCount - 1), look.suit, cuffC);
             Material boots = Neo(DiverStyle.Boots), white = M(DiverStyle.EyeWhite), ink = M(DiverStyle.Pupil);
+            Material hairM = HairMat(hairC);
 
-            // ---- body (bean from the hips to the collar) with the suit panel on the front and back
-            p.pivot = DiverMeshes.Node(rt, "Body", new Vector3(0f, PivotY, 0f));
-            Mesh body = DiverMeshes.Cached("bean_body_r3", BuildBodyMesh);
-            var bodyR = DiverMeshes.Part(p.pivot, "Bean", body, neo, new Vector3(0f, -PivotY, 0f), Vector3.one);
-            bodyR.sharedMaterials = new[] { neo, panel, cuff };
+            // ---- rig (height option) + pelvis
+            p.rig = DiverMeshes.Node(rt, "Rig", Vector3.zero);
+            p.rig.localScale = Vector3.one * p.heightScale;
+            p.pivot = DiverMeshes.Node(p.rig, "Body", new Vector3(0f, PivotY, 0f));
+            var pelvis = DiverMeshes.Part(p.pivot, "Pelvis", DiverMeshes.Cached("torso_pelvis_b" + look.build, () => BuildPelvisMesh(shape)), neo,
+                                          new Vector3(0f, -PivotY, 0f), new Vector3(1f, 1f, shape.depth));
+            _ = pelvis;
+            // weight belt over the waist seam + buckle
+            float beltY = 1.058f, beltR = TorsoRX(beltY, look.build) + 0.006f;
+            DiverMeshes.Part(p.pivot, "Belt", DiverMeshes.Torus(beltR, 0.017f, 14, 3), M(LowPoly.Hex("#2B2533")), new Vector3(0f, beltY - PivotY, 0f), new Vector3(1f, 1.15f, shape.depth), default, false);
+            DiverMeshes.Part(p.pivot, "Buckle", DiverMeshes.Sphere(3, 6), MaterialLibrary.Opaque(LowPoly.Hex("#B8BEC6"), 0.5f, 0.4f),
+                             new Vector3(0f, beltY - PivotY, beltR * shape.depth + 0.012f), new Vector3(0.05f, 0.036f, 0.016f), default, false);
+
+            // ---- chest (spine joint at the waist): suit colour panel, side stripes, collar
+            p.chest = DiverMeshes.Node(p.pivot, "Chest", new Vector3(0f, ChestY - PivotY, 0f));
+            var chestR = DiverMeshes.Part(p.chest, "Torso", DiverMeshes.Cached("torso_chest_b" + look.build, () => BuildChestMesh(shape)), neo,
+                                          new Vector3(0f, -ChestY, 0f), new Vector3(1f, 1f, shape.depth));
+            chestR.sharedMaterials = new[] { neo, panel, cuff };
+            // a back zip (cuff colour) – tidy suit detail
+            DiverMeshes.Part(p.chest, "Zip", DiverMeshes.SmoothCapsule(0.006f, 0.30f, 6, 1, 1), cuff,
+                             new Vector3(0f, 1.13f - ChestY, -TorsoRZ(1.28f, look.build) - 0.002f), Vector3.one, new Vector3(-6f, 0f, 0f), false);
+            // neck (skin) + wetsuit collar
+            DiverMeshes.Part(p.chest, "Neck", DiverMeshes.SmoothCapsule(0.05f, 0.16f, 12, 2, 1), skinM, new Vector3(0f, 1.435f - ChestY, -0.004f), Vector3.one, default, false);
+            DiverMeshes.Part(p.chest, "Collar", DiverMeshes.Torus(0.064f, 0.017f, 12, 3), cuff, new Vector3(0f, 1.497f - ChestY, -0.004f), Vector3.one, default, false);
             // visible gear (Q51): harness, tank(s) by tier, strap lamp / camera, dive scooter – DiverGear
             DiverGear.BuildBack(p, look, suit);
             BuildSponsorPatch(p, look);
 
-            // ---- head (top 0.38 m of the bean)
-            p.head = DiverMeshes.Node(p.pivot, "Head", new Vector3(0f, HeadY - PivotY, 0f));
-            DiverMeshes.Part(p.head, "HeadBean", DiverMeshes.Cached("bean_head_r3", BuildHeadMesh), skinM, new Vector3(0f, -HeadY, 0f), Vector3.one);
-            // the collar ring hides the head/body seam (matching radius)
-            DiverMeshes.Part(p.pivot, "Collar", DiverMeshes.Torus(0.229f, 0.024f, 20, 3), cuff, new Vector3(0f, HeadY - PivotY + 0.005f, 0f), Vector3.one);
-            BuildFace(p, look, skin, white, ink);
+            // ---- head
+            p.head = DiverMeshes.Node(p.chest, "Head", new Vector3(0f, HeadY - ChestY, 0f));
+            DiverMeshes.Part(p.head, "HeadBean", DiverMeshes.Cached("head_r3", () => DiverMeshes.LatheY(DiverMeshes.Resample(HeadProfile, 16), 18)), skinM, new Vector3(0f, -HeadY, 0f), Vector3.one);
+            BuildEars(p, skinM);
+            BuildFace(p, look, skin, hairC, white, ink);
+            BuildNose(p, look.nose, skin);
+            BuildHair(p, look.hair, hat, hairM);
+            BuildBeard(p, look.beard, skin, hairC);
             BuildMask(p, look);
-            BuildHat(p, hat);
+            BuildHat(p, hat, HairThickness(look.hair));
+            BuildAccessory(p, look, skin);
 
             // ---- arms
-            p.shoulderL = DiverMeshes.Node(p.pivot, "ShoulderL", new Vector3(-ShoulderX, ShoulderY - PivotY, 0f));
-            p.shoulderR = DiverMeshes.Node(p.pivot, "ShoulderR", new Vector3(ShoulderX, ShoulderY - PivotY, 0f));
-            BuildArm(p.shoulderL, out p.elbowL, out p.handL, neo, cuff);
-            BuildArm(p.shoulderR, out p.elbowR, out p.handR, neo, cuff);
+            float sx = ShoulderX * shape.shoulder;
+            p.shoulderL = DiverMeshes.Node(p.chest, "ShoulderL", new Vector3(-sx, ShoulderY - ChestY, 0f));
+            p.shoulderR = DiverMeshes.Node(p.chest, "ShoulderR", new Vector3(sx, ShoulderY - ChestY, 0f));
+            BuildArm(p.shoulderL, out p.elbowL, out p.handL, neo, cuff, suit, shape.limb);
+            BuildArm(p.shoulderR, out p.elbowR, out p.handR, neo, cuff, suit, shape.limb);
+            if (look.accessory == 5) BuildWatch(p.elbowL, shape.limb);
 
             // ---- legs
-            p.hipL = DiverMeshes.Node(p.pivot, "HipL", new Vector3(-HipX, HipY - PivotY, 0f));
-            p.hipR = DiverMeshes.Node(p.pivot, "HipR", new Vector3(HipX, HipY - PivotY, 0f));
-            BuildLeg(p.hipL, out p.kneeL, neo, panel, boots, look, true);
-            BuildLeg(p.hipR, out p.kneeR, neo, panel, boots, look, false);
+            float hx = HipX * Mathf.Lerp(1f, shape.hip, 0.7f);
+            p.hipL = DiverMeshes.Node(p.pivot, "HipL", new Vector3(-hx, HipY - PivotY, 0f));
+            p.hipR = DiverMeshes.Node(p.pivot, "HipR", new Vector3(hx, HipY - PivotY, 0f));
+            BuildLeg(p.hipL, out p.kneeL, out p.footL, neo, panel, boots, look, true, shape.limb);
+            BuildLeg(p.hipR, out p.kneeR, out p.footR, neo, panel, boots, look, false, shape.limb);
 
             p.InitRig();
             // L.13: LOD1 (~12 m) / LOD2 (~35 m) proxies on the same bones – a crowd of avatars / NPCs stays cheap
@@ -165,83 +280,212 @@ namespace Sealebrities
             return root;
         }
 
-        /// K.7 / Q90: the sponsor's logo patch on the left shoulder (look.sponsor = DiverSponsor.CurrentIndex, 0 = none).
+        static Mesh BuildPelvisMesh(Shape s) => DiverMeshes.LatheY(DiverMeshes.Resample(Scaled(PelvisProfile, s), 12), 18);
+
+        static Mesh BuildChestMesh(Shape s)
+        {
+            // submeshes: 0 neoprene (lower back, side stripes), 1 suit colour / pattern (chest + back panel), 2 cuff (collar band)
+            const int segs = 18;
+            var prof = DiverMeshes.Resample(Scaled(ChestProfile, s), 16);
+            return DiverMeshes.LatheY(prof, segs, 3, (i, j) =>
+            {
+                float y = (prof[i].y + prof[Mathf.Min(prof.Length - 1, i + 1)].y) * 0.5f;
+                if (y < 1.085f) return 0;
+                if (y >= 1.47f) return 2;
+                float a = (j + 0.5f) / segs * Mathf.PI * 2f;
+                return Mathf.Abs(Mathf.Cos(a)) > 0.95f ? 0 : 1;
+            });
+        }
+
+        /// K.7 / Q90: the sponsor's logo patch on the left chest (look.sponsor = DiverSponsor.CurrentIndex, 0 = none).
         static void BuildSponsorPatch(DiverPuppet p, DiverLook look)
         {
             var sp = DiverSponsor.Def(look.sponsor);
             if (sp == null) return;
-            const float y = 1.27f;
-            // on the bean's surface, left side a bit to the front; slightly proud of it so the flat patch never sinks in
-            Vector3 dir = new Vector3(-0.82f, 0f, 0.57f).normalized;
-            Vector3 pos = dir * (BodyRadiusAt(y) + 0.005f) + new Vector3(0f, y - PivotY, 0f);
-            // the quad faces −Z: turn −Z outward, tilt with the narrowing bean (surface normal ~10° up)
-            Quaternion rot = Quaternion.LookRotation(-dir, Vector3.up) * Quaternion.Euler(10f, 0f, 0f);
-            var r = DiverMeshes.Part(p.pivot, "SponsorPatch", DiverMeshes.Quad("sponsor_patch", 0.075f, 0.075f), DiverSponsor.Material(sp), pos, Vector3.one, default, false);
+            const float y = 1.31f;
+            float rx = TorsoRX(y, look.build), rz = TorsoRZ(y, look.build);
+            // a point on the elliptical cross-section, left side toward the front; normal of the ellipse there
+            float ang = 145f * Mathf.Deg2Rad;   // from +X toward +Z: left-front
+            Vector3 pt = new Vector3(Mathf.Cos(ang) * rx, 0f, Mathf.Sin(ang) * rz);
+            Vector3 n = new Vector3(pt.x / (rx * rx), 0f, pt.z / (rz * rz)).normalized;
+            Vector3 pos = pt + n * 0.005f + new Vector3(0f, y - ChestY, 0f);
+            Quaternion rot = Quaternion.LookRotation(-n, Vector3.up) * Quaternion.Euler(8f, 0f, 0f);
+            var r = DiverMeshes.Part(p.chest, "SponsorPatch", DiverMeshes.Quad("sponsor_patch", 0.07f, 0.07f), DiverSponsor.Material(sp), pos, Vector3.one, default, false);
             r.transform.localRotation = rot;
         }
 
-        static Mesh BuildBodyMesh()
+        // ------------------------------------------------------------------ head surface helpers
+        /// A point on the head surface (head-pivot space) at an azimuth (0 = front, + = toward the diver's left… the
+        /// model's +X) and absolute height, pushed out along the surface normal by `out`.
+        static Vector3 HeadPoint(float azDeg, float y, float outward = 0f)
         {
-            // L.13 LOD0 budget (≤ 9,000 incl. the biggest loadout): 28 radial × 18 rings – smooth normals keep it round
-            const int segs = 28;
-            var prof = DiverMeshes.Resample(BodyProfile, 18);
-            // submeshes: 0 neoprene (hips + side panels), 1 suit colour / pattern (front + back panel), 2 cuff (collar band)
-            return DiverMeshes.LatheY(prof, segs, 3, (i, j) =>
+            EnsureHeadArc();
+            float s = ArcAtY(y);
+            HeadAt(s, out Vector2 pt, out Vector2 n);
+            float a = azDeg * Mathf.Deg2Rad;
+            float rr = pt.x + n.x * outward;
+            return new Vector3(Mathf.Sin(a) * rr, pt.y + n.y * outward - HeadY, Mathf.Cos(a) * rr);
+        }
+
+        static Vector3 HeadNormal(float azDeg, float y)
+        {
+            EnsureHeadArc();
+            HeadAt(ArcAtY(y), out _, out Vector2 n);
+            float a = azDeg * Mathf.Deg2Rad;
+            return new Vector3(Mathf.Sin(a) * n.x, n.y, Mathf.Cos(a) * n.x).normalized;
+        }
+
+        static Vector2[] hp;
+        static float[] hpArc;
+        static float hpLen;
+
+        static void EnsureHeadArc()
+        {
+            if (hp != null) return;
+            hp = DiverMeshes.Resample(HeadProfile, 40);
+            hpArc = new float[hp.Length];
+            for (int i = 1; i < hp.Length; i++) hpArc[i] = hpArc[i - 1] + Vector2.Distance(hp[i], hp[i - 1]);
+            hpLen = hpArc[hp.Length - 1];
+        }
+
+        static float ArcAtY(float y)
+        {
+            if (y <= hp[0].y) return 0f;
+            for (int i = 1; i < hp.Length; i++)
             {
-                float y = (prof[i].y + prof[Mathf.Min(prof.Length - 1, i + 1)].y) * 0.5f;
-                if (y < 0.83f) return 0;
-                if (y >= 1.415f) return 2;
-                float a = (j + 0.5f) / segs * Mathf.PI * 2f;
-                return Mathf.Abs(Mathf.Cos(a)) > 0.866f ? 0 : 1;
-            });
+                if (hp[i].y >= y)
+                {
+                    float t = (y - hp[i - 1].y) / Mathf.Max(1e-5f, hp[i].y - hp[i - 1].y);
+                    return Mathf.Lerp(hpArc[i - 1], hpArc[i], t);
+                }
+            }
+            return hpLen;
         }
 
-        static Mesh BuildHeadMesh() => DiverMeshes.LatheY(DiverMeshes.Resample(HeadProfile, 14), 28);
-
-        /// Surface radius of the head at an absolute height (for placing face parts).
-        static float HeadRadius(float y)
+        static void HeadAt(float s, out Vector2 pt, out Vector2 n)
         {
-            if (y < 1.52f) return 0.226f;
-            if (y < 1.60f) return Mathf.Lerp(0.226f, 0.222f, (y - 1.52f) / 0.08f);
-            if (y < 1.68f) return Mathf.Lerp(0.222f, 0.212f, (y - 1.60f) / 0.08f);
-            if (y < 1.75f) return Mathf.Lerp(0.212f, 0.190f, (y - 1.68f) / 0.07f);
-            return Mathf.Lerp(0.190f, 0.150f, Mathf.Clamp01((y - 1.75f) / 0.055f));
+            s = Mathf.Clamp(s, 0f, hpLen);
+            int i = 1;
+            while (i < hp.Length - 1 && hpArc[i] < s) i++;
+            float t = (s - hpArc[i - 1]) / Mathf.Max(1e-6f, hpArc[i] - hpArc[i - 1]);
+            pt = Vector2.Lerp(hp[i - 1], hp[i], t);
+            Vector2 tg = hp[i] - hp[i - 1];
+            n = new Vector2(tg.y, -tg.x);
+            if (n.sqrMagnitude < 1e-12f) n = Vector2.up;
+            n.Normalize();
+            if (s >= hpLen - 1e-4f) n = Vector2.up;
         }
 
-        // ------------------------------------------------------------------ face (eyes, lids, brows, mouths, blush)
-        static void BuildFace(DiverPuppet p, DiverLook look, Color skin, Material white, Material ink)
+        /// A shell over the head surface (hair cap, beard): columns over the azimuth range, rows from the lower edge
+        /// (height low(az)) to the upper edge (height high(az); ≥ CrownY = the crown pole). Thickness tapers to `edge`
+        /// at the lower rim. Smooth analytic normals. Head-pivot space.
+        static Mesh Shell(int cols, float azMin, float azMax, bool wrap, Func<float, float> low, Func<float, float> high, float thick, float edge, int rows = 7)
+        {
+            EnsureHeadArc();
+            int cc = wrap ? cols : cols + 1;
+            var v = new List<Vector3>((rows + 1) * cc);
+            var nr = new List<Vector3>(v.Capacity);
+            for (int i = 0; i <= rows; i++)
+            {
+                float t = i / (float)rows;
+                for (int j = 0; j < cc; j++)
+                {
+                    float az = Mathf.Lerp(azMin, azMax, j / (float)cols);
+                    float s0 = ArcAtY(low(az)), s1 = high(az) >= CrownY ? hpLen : ArcAtY(high(az));
+                    float s = Mathf.Lerp(s0, s1, t);
+                    HeadAt(s, out Vector2 pt, out Vector2 n);
+                    float th = thick * Mathf.Lerp(edge, 1f, Mathf.SmoothStep(0f, 1f, t / 0.25f));
+                    if (!wrap) th *= Mathf.Lerp(edge, 1f, Mathf.SmoothStep(0f, 1f, Mathf.Min(j, cols - j) / 2f));
+                    float a = az * Mathf.Deg2Rad;
+                    float rr = pt.x + n.x * th;
+                    v.Add(new Vector3(Mathf.Sin(a) * rr, pt.y + n.y * th - HeadY, Mathf.Cos(a) * rr));
+                    nr.Add(new Vector3(Mathf.Sin(a) * n.x, n.y, Mathf.Cos(a) * n.x).normalized);
+                }
+            }
+            var tris = new List<int>(rows * cols * 6);
+            for (int i = 0; i < rows; i++)
+            {
+                for (int j = 0; j < cols; j++)
+                {
+                    int j1 = wrap ? (j + 1) % cols : j + 1;
+                    int a = i * cc + j, b = i * cc + j1, c = (i + 1) * cc + j, d = (i + 1) * cc + j1;
+                    AddTri(tris, v, nr, a, b, c);
+                    AddTri(tris, v, nr, b, d, c);
+                }
+            }
+            var m = new Mesh();
+            m.SetVertices(v);
+            m.SetNormals(nr);
+            m.SetTriangles(tris, 0);
+            m.RecalculateBounds();
+            return m;
+        }
+
+        static void AddTri(List<int> t, List<Vector3> v, List<Vector3> n, int a, int b, int c)
+        {
+            Vector3 f = Vector3.Cross(v[b] - v[a], v[c] - v[a]);
+            if (f.sqrMagnitude < 1e-14f) return;   // degenerate (crown pole)
+            if (Vector3.Dot(f, n[a] + n[b] + n[c]) < 0f) { t.Add(a); t.Add(c); t.Add(b); }
+            else { t.Add(a); t.Add(b); t.Add(c); }
+        }
+
+        static float Hairline(float az, float front, float side, float back)
+        {
+            float c = Mathf.Cos(az * Mathf.Deg2Rad);
+            return c >= 0f ? Mathf.Lerp(side, front, Mathf.Pow(c, 1.6f)) : Mathf.Lerp(side, back, -c);
+        }
+
+        // ------------------------------------------------------------------ ears, face, nose
+        static void BuildEars(DiverPuppet p, Material skinM)
+        {
+            Mesh ear = DiverMeshes.Sphere(4, 6);
+            for (int s = -1; s <= 1; s += 2)
+            {
+                float y = 1.685f;
+                float r = HeadRadius(y);
+                var e = DiverMeshes.Part(p.head, s < 0 ? "EarL" : "EarR", ear, skinM, new Vector3(s * (r - 0.004f), y - HeadY, -0.008f),
+                                         new Vector3(0.024f, 0.05f, 0.036f), new Vector3(0f, s * 12f, 0f), false);
+                if (s < 0) p.earL = e.transform; else p.earR = e.transform;
+            }
+        }
+
+        static void BuildFace(DiverPuppet p, DiverLook look, Color skin, Color hairC, Material white, Material ink)
         {
             float rs = HeadRadius(EyeY);
             float zs = Mathf.Sqrt(Mathf.Max(0.0001f, rs * rs - EyeX * EyeX));
-            float ez = zs + 0.03f - EyeR;
-            Mesh eyeMesh = DiverMeshes.Sphere(8, 12);
-            Mesh pupilMesh = DiverMeshes.Sphere(5, 8);
-            Mesh lidMesh = DiverMeshes.Cached("eyelid_cap_r3", () => DiverMeshes.LatheY(HemisphereProfile(6), 12));
+            float ez = zs + 0.018f - EyeR;
+            Mesh eyeMesh = DiverMeshes.Sphere(6, 10);
+            Mesh pupilMesh = DiverMeshes.Sphere(4, 8);
+            Mesh lidMesh = DiverMeshes.Cached("eyelid_cap_r3c", () => DiverMeshes.LatheY(HemisphereProfile(4), 8));
             Material lidM = SkinMat(Color.Lerp(skin, Color.black, 0.06f));
             Material shine = MaterialLibrary.Unlit(new Color(1f, 1f, 1f, 1f));
+            bool bald = look.hair == CosmeticsDatabase.HairBald;
+            Color browC = bald ? Color.Lerp(skin, DiverStyle.Pupil, 0.7f) : Color.Lerp(hairC, DiverStyle.Pupil, 0.25f);
+            Material browM = M(browC);
             for (int s = -1; s <= 1; s += 2)
             {
                 bool leftEye = s < 0;
                 var eye = DiverMeshes.Node(p.head, leftEye ? "EyeL" : "EyeR", new Vector3(s * EyeX, EyeY - HeadY, ez));
                 DiverMeshes.Part(eye, "White", eyeMesh, white, Vector3.zero, Vector3.one * (EyeR * 2f), default, false);
                 // pupils: googly (slightly outward), cross-eyed (toward the nose)
-                Vector3 pupilEuler = leftEye ? new Vector3(-7f, -9f, 0f) : new Vector3(5f, 13f, 0f);
+                Vector3 pupilEuler = leftEye ? new Vector3(-6f, -8f, 0f) : new Vector3(4f, 11f, 0f);
                 if (p.eyeStyle == 2) pupilEuler = new Vector3(4f, -s * 22f, 0f);
+                if (p.eyeStyle == 5) pupilEuler = new Vector3(-2f, -s * 3f, 0f);
                 var pivot = DiverMeshes.Node(eye, "PupilPivot", Vector3.zero, pupilEuler);
                 switch (p.eyeStyle)
                 {
                     case 3:   // stars
-                        DiverMeshes.Part(pivot, "Star", DiverMeshes.Plate("eye_star", StarOutline(0.034f, 0.015f), 0.006f),
-                            M(LowPoly.Hex("#F2C94C")), new Vector3(0f, 0f, EyeR - 0.002f), Vector3.one, new Vector3(0f, 180f, 0f), false);
+                        DiverMeshes.Part(pivot, "Star", DiverMeshes.Plate("eye_star_r3", StarOutline(0.021f, 0.009f), 0.004f),
+                            M(LowPoly.Hex("#F2C94C")), new Vector3(0f, 0f, EyeR - 0.001f), Vector3.one, new Vector3(0f, 180f, 0f), false);
                         break;
                     case 4:   // hearts
-                        DiverMeshes.Part(pivot, "Heart", DiverMeshes.Plate("eye_heart", HeartOutline(0.03f), 0.006f),
-                            M(LowPoly.Hex("#E0607E")), new Vector3(0f, 0f, EyeR - 0.002f), Vector3.one, new Vector3(0f, 180f, 0f), false);
+                        DiverMeshes.Part(pivot, "Heart", DiverMeshes.Plate("eye_heart_r3", HeartOutline(0.018f), 0.004f),
+                            M(LowPoly.Hex("#E0607E")), new Vector3(0f, 0f, EyeR - 0.001f), Vector3.one, new Vector3(0f, 180f, 0f), false);
                         break;
                     default:
                         DiverMeshes.Part(pivot, "Pupil", pupilMesh, ink, new Vector3(0f, 0f, EyeR - PupilR * 0.35f), new Vector3(PupilR * 2f, PupilR * 2f, PupilR * 0.8f), default, false);
                         // white highlight dot (upper outer side of the pupil)
-                        DiverMeshes.Part(pivot, "Shine", DiverMeshes.Sphere(3, 4), shine, new Vector3(s * -0.009f, 0.011f, EyeR + 0.0005f), Vector3.one * 0.024f, default, false);
+                        DiverMeshes.Part(pivot, "Shine", DiverMeshes.Sphere(3, 4), shine, new Vector3(s * -0.0055f, 0.0065f, EyeR + 0.0004f), Vector3.one * 0.0145f, default, false);
                         break;
                 }
                 if (leftEye) { p.pupilL = pivot; p.eyeL = eye; } else { p.pupilR = pivot; p.eyeR = eye; }
@@ -249,42 +493,55 @@ namespace Sealebrities
                 // upper eyelid: a skin-coloured half sphere just outside the eye white, rotated over the eye to blink
                 var lid = DiverMeshes.Node(eye, "Lid", Vector3.zero, new Vector3(-55f, 0f, 0f));
                 DiverMeshes.Part(lid, "LidCap", lidMesh, lidM, Vector3.zero, Vector3.one * (EyeR * 2.12f), default, false);
+                if (p.eyeStyle == 5)
+                {
+                    // lashes ride on the lid rim (they blink with it)
+                    for (int k = 0; k < 3; k++)
+                    {
+                        float a = (-35f + k * 35f) * Mathf.Deg2Rad;
+                        var lash = DiverMeshes.Node(lid, "Lash", new Vector3(Mathf.Sin(a) * EyeR * 1.04f, 0f, Mathf.Cos(a) * EyeR * 1.04f), new Vector3(-60f, a * Mathf.Rad2Deg + s * 8f * (k - 1), 0f));
+                        DiverMeshes.Part(lash, "M", DiverMeshes.SmoothCapsule(0.0022f, 0.014f, 4, 1, 1), ink, Vector3.zero, Vector3.one, default, false);
+                    }
+                }
                 if (leftEye) p.lidL = lid; else p.lidR = lid;
 
-                // brows (1c): bushy, grumpy (inner end down), surprised (high arch)
-                if (p.browStyle > 0)
+                // brows: natural, bushy, grumpy (inner end down), surprised (high arch), thin, none
+                if (p.browStyle != 5)
                 {
-                    float by = EyeY + 0.083f + (p.browStyle == 3 ? 0.018f : 0f);
+                    float by = EyeY + 0.05f + (p.browStyle == 3 ? 0.012f : 0f);
                     float br = HeadRadius(by);
-                    float bz = Mathf.Sqrt(Mathf.Max(0.0001f, br * br - EyeX * EyeX)) + 0.004f;
-                    float tilt = p.browStyle == 2 ? s * 18f : p.browStyle == 3 ? -s * 10f : 0f;
-                    // tangent to the head: yaw toward the side, pitched up with the narrowing top of the head (~17°)
-                    var brow = DiverMeshes.Node(p.head, leftEye ? "BrowL" : "BrowR", new Vector3(s * EyeX, by - HeadY, bz),
-                        new Vector3(-17f, s * Mathf.Asin(Mathf.Clamp01(EyeX / Mathf.Max(0.05f, br))) * Mathf.Rad2Deg, tilt));
-                    float rad = p.browStyle == 1 ? 0.017f : 0.011f;
-                    float len = p.browStyle == 1 ? 0.085f : 0.07f;
-                    DiverMeshes.Part(brow, "Brow", DiverMeshes.SmoothCapsule(rad, len, 6, 2, 1),
-                        M(Color.Lerp(skin, DiverStyle.Pupil, 0.75f)), new Vector3(-len * 0.5f, 0f, 0f), Vector3.one, new Vector3(0f, 0f, -90f), false);
+                    float bx = EyeX + 0.002f;
+                    float bz = Mathf.Sqrt(Mathf.Max(0.0001f, br * br - bx * bx)) + 0.003f;
+                    float tilt = p.browStyle == 2 ? s * 18f : p.browStyle == 3 ? -s * 10f : -s * 4f;
+                    // tangent to the head: yaw toward the side, pitched up with the narrowing forehead
+                    var brow = DiverMeshes.Node(p.head, leftEye ? "BrowL" : "BrowR", new Vector3(s * bx, by - HeadY, bz),
+                        new Vector3(-18f, s * Mathf.Asin(Mathf.Clamp01(bx / Mathf.Max(0.05f, br))) * Mathf.Rad2Deg, tilt));
+                    float rad = p.browStyle == 1 ? 0.0105f : p.browStyle == 4 ? 0.0045f : 0.0072f;
+                    float len = p.browStyle == 1 ? 0.052f : 0.046f;
+                    DiverMeshes.Part(brow, "Brow", DiverMeshes.SmoothCapsule(rad, len, 6, 2, 1), browM, new Vector3(-len * 0.5f, 0f, 0f), Vector3.one, new Vector3(0f, 0f, -90f), false);
                     if (leftEye) p.browL = brow; else p.browR = brow;
                 }
 
                 // cheek blush (shown while happy)
-                float cy = 1.545f;
+                float cy = 1.632f;
                 float cr = HeadRadius(cy);
-                float cx = 0.135f;
-                float cz = Mathf.Sqrt(Mathf.Max(0.0001f, cr * cr - cx * cx)) + 0.002f;
+                float cx = 0.07f;
+                float cz = Mathf.Sqrt(Mathf.Max(0.0001f, cr * cr - cx * cx)) + 0.0015f;
                 var blush = DiverMeshes.Node(p.head, leftEye ? "BlushL" : "BlushR", new Vector3(s * cx, cy - HeadY, cz), new Vector3(0f, 180f + s * Mathf.Asin(Mathf.Clamp01(cx / cr)) * Mathf.Rad2Deg, 0f));
-                var br2 = DiverMeshes.Part(blush, "Disc", DiverMeshes.Plate("blush", Ellipse(0.032f, 0.02f, 16), 0.002f),
+                var br2 = DiverMeshes.Part(blush, "Disc", DiverMeshes.Plate("blush_r3", Ellipse(0.02f, 0.013f, 14), 0.0015f),
                     MaterialLibrary.Transparent(DiverStyle.Blush, 0.1f, false), Vector3.zero, Vector3.one, default, false);
                 br2.receiveShadows = false;
                 blush.gameObject.SetActive(false);
                 if (leftEye) p.blushL = blush; else p.blushR = blush;
             }
 
-            // mouth (faces +Z after the 180° turn of the pivot; the meshes face -Z): 8 shapes, one shown at a time
-            const float mouthY = 1.522f;
-            float mz = HeadRadius(mouthY) - 0.001f;
-            p.mouth = DiverMeshes.Node(p.head, "Mouth", new Vector3(0f, mouthY - HeadY, mz), new Vector3(-8f, 180f, 0f));
+            // mouth (faces +Z after the 180° turn of the pivot; the meshes face -Z): 8 shapes, one shown at a time; a
+            // full / captain's beard / stubble covers the chin, so the mouth sits on top of it
+            bool beardCovers = look.beard == 3 || look.beard == 4 || look.beard == 5;
+            float mz = HeadRadius(MouthY) - 0.001f + (beardCovers ? (look.beard == 5 ? 0.004f : 0.019f) : 0f);
+            p.mouth = DiverMeshes.Node(p.head, "Mouth", new Vector3(0f, MouthY - HeadY, mz), new Vector3(-8f, 180f, 0f));
+            p.mouth.localScale = Vector3.one * 0.6f;
+            p.mouthBaseScale = 0.6f;
             Material mm = M(DiverStyle.Mouth);
             p.mouths = new Transform[DiverPuppet.MouthShapes];
             for (int i = 0; i < DiverPuppet.MouthShapes; i++)
@@ -298,6 +555,40 @@ namespace Sealebrities
                 t.gameObject.SetActive(i == p.baseMouth);
                 p.mouths[i] = t;
             }
+        }
+
+        /// Noses: 0 button, 1 round (How to Fish), 2 long, 3 pointy, 4 snub. Skin a touch warmer.
+        static void BuildNose(DiverPuppet p, int nose, Color skin)
+        {
+            Material m = SkinMat(Color.Lerp(skin, LowPoly.Hex("#E0607E"), 0.1f));
+            float y = NoseY;
+            float z = HeadRadius(y);
+            var n = DiverMeshes.Node(p.head, "Nose", new Vector3(0f, y - HeadY, z - 0.004f));
+            Mesh sph = DiverMeshes.Sphere(5, 8);
+            switch (nose)
+            {
+                case 1:   // big round bulb
+                    DiverMeshes.Part(n, "Bulb", sph, m, new Vector3(0f, -0.006f, 0.016f), new Vector3(0.05f, 0.044f, 0.046f), default, false);
+                    DiverMeshes.Part(n, "Bridge", sph, m, new Vector3(0f, 0.018f, 0.006f), new Vector3(0.026f, 0.04f, 0.026f), default, false);
+                    break;
+                case 2:   // long, pointing a little down
+                    DiverMeshes.Part(n, "Bridge", DiverMeshes.SmoothCapsule(0.0135f, 0.062f, 8, 2, 1), m, new Vector3(0f, 0.022f, 0f), Vector3.one, new Vector3(108f, 0f, 0f), false);
+                    DiverMeshes.Part(n, "Tip", sph, m, new Vector3(0f, -0.006f, 0.05f), new Vector3(0.03f, 0.026f, 0.028f), default, false);
+                    break;
+                case 3:   // pointy
+                    DiverMeshes.Part(n, "Cone", DiverMeshes.Cached("nose_pointy", () => DiverMeshes.LatheY(new[] { new Vector2(0f, 0f), new Vector2(0.019f, 0.004f), new Vector2(0.017f, 0.02f), new Vector2(0.009f, 0.038f), new Vector2(0f, 0.05f) }, 8)),
+                        m, new Vector3(0f, 0.002f, 0f), Vector3.one, new Vector3(80f, 0f, 0f), false);
+                    break;
+                case 4:   // snub (tipped up)
+                    DiverMeshes.Part(n, "Tip", sph, m, new Vector3(0f, -0.002f, 0.011f), new Vector3(0.036f, 0.028f, 0.03f), new Vector3(-18f, 0f, 0f), false);
+                    DiverMeshes.Part(n, "Bridge", sph, m, new Vector3(0f, 0.014f, 0.004f), new Vector3(0.02f, 0.03f, 0.02f), default, false);
+                    break;
+                default:  // button
+                    DiverMeshes.Part(n, "Tip", sph, m, new Vector3(0f, -0.002f, 0.01f), new Vector3(0.034f, 0.03f, 0.032f), default, false);
+                    DiverMeshes.Part(n, "Bridge", sph, m, new Vector3(0f, 0.016f, 0.003f), new Vector3(0.02f, 0.032f, 0.02f), default, false);
+                    break;
+            }
+            p.noseT = n;
         }
 
         /// Mouth shapes: 0 smile, 1 open, 2 o, 3 flat, 4 grin, 5 wow-O, 6 scared (wavy), 7 kissy.
@@ -391,6 +682,146 @@ namespace Sealebrities
             return pts;
         }
 
+        // ------------------------------------------------------------------ hair (shows under every hat)
+        /// 0 short, 1 spiky, 2 curls, 3 ponytail, 4 bun, 5 long, 6 side part, 7 shaggy, 8 bald. A shell over the head
+        /// from the hairline (front high, sides above the ears, back at the nape) to the crown plus style parts. Parts on
+        /// the top of the head hide under hats that cover it (the cap itself stays inside the hat).
+        static void BuildHair(DiverPuppet p, int hair, int hat, Material m)
+        {
+            if (hair == CosmeticsDatabase.HairBald) return;
+            bool covered = HatCoversTop(hat);
+            float front, side, back;
+            switch (hair)
+            {
+                case 2: front = 1.79f; side = 1.70f; back = 1.63f; break;
+                case 5: front = 1.80f; side = 1.685f; back = 1.60f; break;
+                case 6: front = 1.785f; side = 1.712f; back = 1.645f; break;
+                case 7: front = 1.775f; side = 1.69f; back = 1.62f; break;
+                case 3: case 4: front = 1.80f; side = 1.712f; back = 1.66f; break;
+                default: front = 1.80f; side = 1.715f; back = 1.645f; break;
+            }
+            float th = HairThickness(hair);
+            var h = DiverMeshes.Node(p.head, "Hair", Vector3.zero);
+            string key = "hair_cap_" + hair;
+            float f = front, sd = side, bk = back;
+            DiverMeshes.Part(h, "Cap", DiverMeshes.Cached(key, () => Shell(22, -180f, 180f, true, az => Hairline(az, f, sd, bk), az => CrownY + 1f, th, 0.45f, 7)), m, Vector3.zero, Vector3.one);
+            Mesh sph = DiverMeshes.Sphere(4, 6);
+            switch (hair)
+            {
+                case 0:   // short: a fringe + sideburns
+                    Tuft(h, sph, m, 0f, front + 0.004f, th + 0.004f, new Vector3(0.11f, 0.028f, 0.03f), -28f);
+                    for (int s = -1; s <= 1; s += 2) Tuft(h, sph, m, s * 78f, 1.69f, 0.003f, new Vector3(0.012f, 0.042f, 0.02f), 0f);
+                    break;
+                case 1:   // spiky: cones on the top and front
+                    for (int s = -1; s <= 1; s += 2) Tuft(h, sph, m, s * 78f, 1.695f, 0.003f, new Vector3(0.012f, 0.04f, 0.02f), 0f);
+                    if (!covered)
+                    {
+                        float[] az = { 0f, -32f, 32f, 0f, -70f, 70f, 180f, -125f, 125f };
+                        float[] yy = { 1.815f, 1.83f, 1.83f, 1.86f, 1.8f, 1.8f, 1.82f, 1.81f, 1.81f };
+                        Mesh cone = DiverMeshes.Cached("hair_spike", () => DiverMeshes.LatheY(new[] { new Vector2(0f, 0f), new Vector2(0.024f, 0.002f), new Vector2(0.015f, 0.03f), new Vector2(0f, 0.058f) }, 6));
+                        for (int i = 0; i < az.Length; i++)
+                        {
+                            Vector3 pos = HeadPoint(az[i], yy[i], th * 0.5f);
+                            Vector3 n = (HeadNormal(az[i], yy[i]) + Vector3.up * 0.4f - Mathf.Cos(az[i] * Mathf.Deg2Rad) * Vector3.forward * 0.3f).normalized;
+                            var r = DiverMeshes.Part(h, "Spike", cone, m, pos, Vector3.one, default, false);
+                            r.transform.localRotation = Quaternion.FromToRotation(Vector3.up, n);
+                        }
+                    }
+                    break;
+                case 2:   // curls: little balls along the hairline (+ on top without a hat)
+                {
+                    Mesh curl = DiverMeshes.Sphere(3, 6);
+                    for (int i = 0; i < 12; i++)
+                    {
+                        float az = -150f + i * 27.3f;
+                        if (Mathf.Abs(Mathf.DeltaAngle(az, 0f)) < 35f) continue;
+                        float y = Hairline(az, front, side, back) + 0.012f;
+                        var r = DiverMeshes.Part(h, "Curl", curl, m, HeadPoint(az, y, th), Vector3.one * 0.042f, default, false);
+                        _ = r;
+                    }
+                    for (int i = -1; i <= 1; i++) DiverMeshes.Part(h, "Curl", curl, m, HeadPoint(i * 22f, front + 0.006f, th), Vector3.one * 0.04f, default, false);
+                    if (!covered)
+                        for (int i = 0; i < 6; i++) DiverMeshes.Part(h, "Curl", curl, m, HeadPoint(i * 60f + 15f, 1.835f, th * 0.8f), Vector3.one * 0.044f, default, false);
+                    break;
+                }
+                case 3:   // ponytail with a band
+                {
+                    Tuft(h, sph, m, 0f, front + 0.004f, th + 0.003f, new Vector3(0.1f, 0.022f, 0.026f), -28f);
+                    Vector3 at = HeadPoint(180f, 1.70f, th + 0.006f);
+                    var tail = DiverMeshes.Node(h, "Tail", at, new Vector3(-155f, 0f, 0f));
+                    DiverMeshes.Part(tail, "Band", DiverMeshes.Torus(0.017f, 0.006f, 10, 3), M(LowPoly.Hex("#E0607E")), new Vector3(0f, 0.012f, 0f), Vector3.one, default, false);
+                    DiverMeshes.Part(tail, "Lock", DiverMeshes.TaperCapsule(0.012f, 0.028f, 0.2f, 8, 2), m, new Vector3(0f, 0.015f, 0f), Vector3.one, default, false);
+                    break;
+                }
+                case 4:   // bun: high on the back of the head, low at the nape under a hat
+                {
+                    Tuft(h, sph, m, 0f, front + 0.004f, th + 0.003f, new Vector3(0.1f, 0.022f, 0.026f), -28f);
+                    Vector3 at = covered ? HeadPoint(180f, 1.675f, th + 0.026f) : HeadPoint(180f, 1.81f, th + 0.03f);
+                    DiverMeshes.Part(h, "Bun", DiverMeshes.Sphere(6, 10), m, at, new Vector3(0.068f, 0.064f, 0.062f), default, false);
+                    break;
+                }
+                case 5:   // long: a back curtain + side locks over the ears
+                    DiverMeshes.Part(h, "Back", DiverMeshes.Sphere(6, 12), m, new Vector3(0f, 1.6f - HeadY, -0.072f), new Vector3(0.235f, 0.27f, 0.12f), default, false);
+                    for (int s = -1; s <= 1; s += 2)
+                        DiverMeshes.Part(h, "Lock", DiverMeshes.Sphere(5, 10), m, new Vector3(s * 0.108f, 1.64f - HeadY, -0.006f), new Vector3(0.042f, 0.17f, 0.075f), new Vector3(0f, 0f, s * 4f), false);
+                    Tuft(h, sph, m, -12f, front + 0.003f, th + 0.003f, new Vector3(0.12f, 0.024f, 0.028f), -30f);
+                    break;
+                case 6:   // side part: a swoop over the forehead
+                    Tuft(h, DiverMeshes.Sphere(6, 10), m, -18f, front + 0.008f, th + 0.008f, new Vector3(0.115f, 0.03f, 0.045f), -22f, 14f);
+                    for (int s = -1; s <= 1; s += 2) Tuft(h, sph, m, s * 78f, 1.695f, 0.003f, new Vector3(0.012f, 0.04f, 0.02f), 0f);
+                    break;
+                case 7:   // shaggy: tufts all around the hairline
+                    for (int i = 0; i < 11; i++)
+                    {
+                        float az = -160f + i * 32f;
+                        float y = Hairline(az, front, side, back) + 0.006f;
+                        Tuft(h, sph, m, az, y, th, new Vector3(0.05f, 0.03f, 0.03f), -10f, (i % 3 - 1) * 14f);
+                    }
+                    if (!covered)
+                        for (int i = 0; i < 4; i++) Tuft(h, sph, m, i * 90f + 30f, 1.84f, th, new Vector3(0.06f, 0.03f, 0.05f), 0f, i * 20f);
+                    break;
+            }
+        }
+
+        /// A hair tuft (ellipsoid) on the head surface at an azimuth / height, rotated with the surface.
+        static void Tuft(Transform parent, Mesh m, Material mat, float azDeg, float y, float outward, Vector3 size, float pitch, float roll = 0f)
+        {
+            Vector3 pos = HeadPoint(azDeg, y, outward);
+            var r = DiverMeshes.Part(parent, "Tuft", m, mat, pos, size, default, false);
+            r.transform.localRotation = Quaternion.Euler(0f, azDeg, 0f) * Quaternion.Euler(pitch, 0f, roll);
+        }
+
+        // ------------------------------------------------------------------ beards
+        /// 1 moustache, 2 goatee, 3 full beard, 4 captain's beard (chin curtain), 5 stubble.
+        static void BuildBeard(DiverPuppet p, int beard, Color skin, Color hairC)
+        {
+            if (beard <= 0) return;
+            var b = DiverMeshes.Node(p.head, "Beard", Vector3.zero);
+            Material m = HairMat(beard == 5 ? Color.Lerp(skin, hairC, 0.42f) : hairC);
+            Mesh sph = DiverMeshes.Sphere(5, 8);
+            bool moustache = beard == 1 || beard == 2 || beard == 3;
+            if (beard == 3 || beard == 4 || beard == 5)
+            {
+                float th = beard == 5 ? 0.0035f : beard == 4 ? 0.016f : 0.02f;
+                float topFront = beard == 4 ? 1.565f : beard == 5 ? 1.615f : 1.618f;
+                float topSide = beard == 5 ? 1.655f : 1.665f;
+                float tf = topFront, ts = topSide;
+                DiverMeshes.Part(b, "Jaw", DiverMeshes.Cached("beard_jaw_" + beard, () => Shell(14, -105f, 105f, false,
+                    az => 1.531f, az => Mathf.Lerp(ts, tf, Mathf.Pow(Mathf.Max(0f, Mathf.Cos(az * Mathf.Deg2Rad)), 2f)), th, 0.5f, 5)), m, Vector3.zero, Vector3.one);
+                if (beard != 5)
+                    DiverMeshes.Part(b, "Chin", sph, m, new Vector3(0f, 1.546f - HeadY, 0.058f), beard == 4 ? new Vector3(0.12f, 0.085f, 0.1f) : new Vector3(0.13f, 0.09f, 0.1f), new Vector3(-12f, 0f, 0f), false);
+            }
+            if (beard == 2)
+                DiverMeshes.Part(b, "Goatee", sph, m, new Vector3(0f, 1.562f - HeadY, HeadRadius(1.562f) - 0.004f), new Vector3(0.045f, 0.05f, 0.032f), new Vector3(-10f, 0f, 0f), false);
+            if (moustache)
+            {
+                float y = 1.622f;
+                float z = HeadRadius(y) + (beard == 3 ? 0.012f : 0.003f);
+                for (int s = -1; s <= 1; s += 2)
+                    DiverMeshes.Part(b, "Stache", sph, m, new Vector3(s * 0.021f, y - HeadY, z), new Vector3(0.042f, 0.017f, 0.022f), new Vector3(0f, s * 12f, s * -14f), false);
+            }
+        }
+
         // ------------------------------------------------------------------ mask + snorkel
         static void BuildMask(DiverPuppet p, DiverLook look)
         {
@@ -398,31 +829,37 @@ namespace Sealebrities
             Color fc = look.ResolvedMask;
             bool gold = (fc - CosmeticsDatabase.MaskColors[6]).maxColorComponent < 0.02f && (CosmeticsDatabase.MaskColors[6] - fc).maxColorComponent < 0.02f;
             Material frame = MaterialLibrary.Opaque(fc, gold ? 0.6f : 0.3f, gold ? 0.4f : 0f);
-            // the strap's front half runs inside the head / eyes, only the sides and the back show
-            DiverMeshes.Part(p.maskPivot, "Strap", DiverMeshes.Torus(0.226f, 0.011f, 16, 3), frame, new Vector3(0f, 0.01f, -0.03f), new Vector3(1f, 1f, 0.92f), default, false);
-            // frame + skirt + glass in front of the eyes
-            var front = DiverMeshes.Node(p.maskPivot, "Front", new Vector3(0f, 0f, 0.247f));
-            DiverMeshes.Part(front, "Frame", DiverMeshes.Torus(0.13f, 0.017f, 20, 4), frame, Vector3.zero, new Vector3(1f, 1f, 0.55f), new Vector3(90f, 0f, 0f), false);
-            DiverMeshes.Part(front, "Skirt", DiverMeshes.Taper(0.5f, 0.45f, 16, false), frame, Vector3.zero, new Vector3(0.27f, 0.075f, 0.145f), new Vector3(-90f, 0f, 0f), false);
-            var glass = DiverMeshes.Part(front, "Glass", DiverMeshes.Plate("mask_glass_r2b", Ellipse(0.128f, 0.068f, 28), 0.002f),
+            float th = HairThickness(look.hair);
+            // the strap: an ellipse whose front runs inside the face (behind the eyes), sides and back over the hair
+            var strap = DiverMeshes.Part(p.maskPivot, "Strap", DiverMeshes.Torus(0.128f + th, 0.008f, 16, 3), frame, new Vector3(0f, 0.012f, -0.022f), new Vector3(1f, 1f, 0.9f), default, false);
+            p.maskStrap = strap.transform;
+            // frame + skirt + glass in front of the eyes, a nose pocket below
+            var front = DiverMeshes.Node(p.maskPivot, "Front", new Vector3(0f, 0f, 0.152f));
+            DiverMeshes.Part(front, "Frame", DiverMeshes.Torus(0.088f, 0.011f, 16, 3), frame, Vector3.zero, new Vector3(1f, 1f, 0.58f), new Vector3(90f, 0f, 0f), false);
+            DiverMeshes.Part(front, "Skirt", DiverMeshes.Taper(0.5f, 0.45f, 16, false), frame, Vector3.zero, new Vector3(0.176f, 0.042f, 0.102f), new Vector3(-90f, 0f, 0f), false);
+            var glass = DiverMeshes.Part(front, "Glass", DiverMeshes.Plate("mask_glass_r3", Ellipse(0.085f, 0.048f, 20), 0.002f),
                                          MaterialLibrary.Transparent(DiverStyle.MaskGlass, 0.6f, true), new Vector3(0f, 0f, 0.002f), Vector3.one, default, false);
             glass.receiveShadows = false;
+            DiverMeshes.Part(front, "Pocket", DiverMeshes.Sphere(5, 8), frame, new Vector3(0f, -0.05f, -0.012f), new Vector3(0.046f, 0.04f, 0.04f), default, false);
             // snorkel on the left side (1c: on / off; legacy looks always had it)
             if (look.snorkel || look.lookVersion < 1)
             {
                 Material snork = Neo(look.ResolvedCuff);
-                DiverMeshes.Part(p.maskPivot, "Snorkel", DiverMeshes.SmoothCapsule(0.016f, 0.36f, 8, 2, 1), snork, new Vector3(-0.235f, -0.1f, 0.06f), Vector3.one, new Vector3(0f, 0f, -6f), false);
-                // SmoothCapsule spans y 0 → length from its origin: tube origin + axis (0.1045, 0.9945) × 0.33 – the 6 cm cap
-                // overlaps the tube's last 3 cm and sticks out 3 cm (it floated 3.5 cm beside the tube before)
-                DiverMeshes.Part(p.maskPivot, "SnorkelTip", DiverMeshes.SmoothCapsule(0.02f, 0.06f, 8, 2, 1), frame, new Vector3(-0.2005f, 0.228f, 0.06f), Vector3.one, new Vector3(0f, 0f, -6f), false);
+                float sx = -(0.128f + th + 0.012f);
+                DiverMeshes.Part(p.maskPivot, "Snorkel", DiverMeshes.SmoothCapsule(0.012f, 0.27f, 8, 2, 1), snork, new Vector3(sx, -0.085f, 0.045f), Vector3.one, new Vector3(0f, 0f, -6f), false);
+                DiverMeshes.Part(p.maskPivot, "SnorkelTip", DiverMeshes.SmoothCapsule(0.015f, 0.045f, 8, 2, 1), frame,
+                                 new Vector3(sx + Mathf.Sin(6f * Mathf.Deg2Rad) * 0.245f, -0.085f + Mathf.Cos(6f * Mathf.Deg2Rad) * 0.245f, 0.045f), Vector3.one, new Vector3(0f, 0f, -6f), false);
             }
         }
 
-        // ------------------------------------------------------------------ hats (CosmeticsDatabase order 0 … 14)
-        static void BuildHat(DiverPuppet p, int hat)
+        // ------------------------------------------------------------------ hats (CosmeticsDatabase order 0 … 19)
+        /// The hats are modelled for a head of radius ~0.205 (round-2 units) and scaled onto the round-3 head (+ hair).
+        static void BuildHat(DiverPuppet p, int hat, float hairThick)
         {
             if (hat == 0) return;
-            var h = DiverMeshes.Node(p.head, "Hat", new Vector3(0f, 1.72f - HeadY, 0f));
+            float hs = (HeadRadius(HatY) + hairThick + 0.004f) / 0.205f;
+            var h = DiverMeshes.Node(p.head, "Hat", new Vector3(0f, HatY - HeadY, 0f));
+            h.localScale = Vector3.one * hs;
             p.hatT = h;
             switch (hat)
             {
@@ -435,7 +872,7 @@ namespace Sealebrities
                         new Vector2(0.17f, 0.0f), new Vector2(0.31f, -0.045f), new Vector2(0.335f, -0.04f), new Vector2(0.25f, 0.015f),
                         new Vector2(0.215f, 0.03f), new Vector2(0.205f, 0.15f), new Vector2(0.17f, 0.19f), new Vector2(0.0f, 0.2f),
                     };
-                    DiverMeshes.Part(h, "Bucket", DiverMeshes.Cached("hat_bucket_r3", () => DiverMeshes.LatheY(DiverMeshes.Resample(prof, 12), 24)), m, Vector3.zero, Vector3.one);
+                    DiverMeshes.Part(h, "Bucket", DiverMeshes.Cached("hat_bucket_r3b", () => DiverMeshes.LatheY(DiverMeshes.Resample(prof, 11), 20)), m, Vector3.zero, Vector3.one);
                     DiverMeshes.Part(h, "Band", DiverMeshes.Torus(0.212f, 0.014f, 16, 3), M(LowPoly.Hex(goldHat ? "#B8902E" : "#7A4448")), new Vector3(0f, 0.045f, 0f), Vector3.one, default, false);
                     if (hat == 10)
                     {
@@ -532,10 +969,10 @@ namespace Sealebrities
                 case 11:   // seagull nest „Günther“
                 {
                     Material straw = M(LowPoly.Hex("#8E6C50")), white = M(LowPoly.Hex("#EDE6DA")), yellow = M(LowPoly.Hex("#F2C94C"));
-                    DiverMeshes.Part(h, "Nest", DiverMeshes.Torus(0.18f, 0.05f, 16, 5), straw, new Vector3(0f, 0.02f, 0f), new Vector3(1f, 0.8f, 1f));
+                    DiverMeshes.Part(h, "Nest", DiverMeshes.Torus(0.18f, 0.05f, 16, 5), straw, new Vector3(0f, 0.04f, 0f), new Vector3(1f, 0.8f, 1f));
                     for (int i = 0; i < 6; i++)
-                        DiverMeshes.Part(h, "Twig", DiverMeshes.SmoothCapsule(0.006f, 0.12f, 4, 2, 1), straw, new Vector3(Mathf.Cos(i * 1.1f) * 0.2f, 0.03f, Mathf.Sin(i * 1.1f) * 0.2f), Vector3.one, new Vector3(70f, i * 60f, 0f), false);
-                    var gull = DiverMeshes.Node(h, "Gull", new Vector3(0f, 0.09f, 0f));
+                        DiverMeshes.Part(h, "Twig", DiverMeshes.SmoothCapsule(0.006f, 0.12f, 4, 2, 1), straw, new Vector3(Mathf.Cos(i * 1.1f) * 0.2f, 0.05f, Mathf.Sin(i * 1.1f) * 0.2f), Vector3.one, new Vector3(70f, i * 60f, 0f), false);
+                    var gull = DiverMeshes.Node(h, "Gull", new Vector3(0f, 0.11f, 0f));
                     Mesh sph = DiverMeshes.Sphere(6, 10);
                     DiverMeshes.Part(gull, "Body", sph, white, Vector3.zero, new Vector3(0.16f, 0.13f, 0.24f));
                     DiverMeshes.Part(gull, "Wing", sph, M(LowPoly.Hex("#A9AEB4")), new Vector3(0f, 0.03f, -0.02f), new Vector3(0.17f, 0.06f, 0.18f), default, false);
@@ -568,12 +1005,54 @@ namespace Sealebrities
                     DiverMeshes.Part(h, "Flower", DiverMeshes.Sphere(4, 6), M(LowPoly.Hex("#E86FA0")), new Vector3(0.15f, 0.04f, 0.14f), Vector3.one * 0.045f, default, false);
                     break;
                 }
-                default:   // 14 paper crown
+                case 14:   // paper crown
                 {
                     var paper = MaterialLibrary.Opaque(LowPoly.Hex("#F4EFE6"), 0.05f, 0f);
                     var pr = DiverMeshes.Part(h, "Paper", DiverMeshes.Cached("hat_paper_crown", PaperCrown), paper, Vector3.zero, Vector3.one);
                     pr.sharedMaterial = paper;
                     DiverMeshes.Part(h, "Line", DiverMeshes.Torus(0.214f, 0.004f, 16, 3), M(LowPoly.Hex("#C9B48A")), new Vector3(0f, 0.03f, 0f), Vector3.one, default, false);
+                    break;
+                }
+                case 15:   // beanie with a folded cuff and a bobble
+                {
+                    Material knit = MaterialLibrary.Opaque(LowPoly.Hex("#D9603B"), 0.08f, 0f), cream = MaterialLibrary.Opaque(LowPoly.Hex("#EDE6DA"), 0.08f, 0f);
+                    DiverMeshes.Part(h, "Dome", DiverMeshes.Cached("hat_beanie", () => DiverMeshes.LatheY(DiverMeshes.Resample(new[] { new Vector2(0.208f, -0.03f), new Vector2(0.21f, 0.06f), new Vector2(0.19f, 0.14f), new Vector2(0.13f, 0.2f), new Vector2(0.06f, 0.225f), new Vector2(0f, 0.23f) }, 10), 20)), knit, Vector3.zero, Vector3.one);
+                    DiverMeshes.Part(h, "Cuff", DiverMeshes.Cached("hat_beanie_cuff", () => DiverMeshes.LatheY(new[] { new Vector2(0.2f, -0.045f), new Vector2(0.222f, -0.04f), new Vector2(0.226f, 0.02f), new Vector2(0.214f, 0.035f) }, 20)), cream, Vector3.zero, Vector3.one, default, false);
+                    DiverMeshes.Part(h, "Bobble", DiverMeshes.Sphere(6, 10), cream, new Vector3(0f, 0.25f, 0f), Vector3.one * 0.09f, default, false);
+                    break;
+                }
+                case 16:   // baseball cap
+                {
+                    Material crown = MaterialLibrary.Opaque(LowPoly.Hex("#E8A23A"), 0.15f, 0f), dark = M(LowPoly.Hex("#2E3140"));
+                    DiverMeshes.Part(h, "Crown", DiverMeshes.Cached("hat_basecap", () => DiverMeshes.LatheY(DiverMeshes.Resample(new[] { new Vector2(0.212f, -0.02f), new Vector2(0.212f, 0.05f), new Vector2(0.19f, 0.13f), new Vector2(0.12f, 0.18f), new Vector2(0f, 0.195f) }, 9), 20)), crown, Vector3.zero, Vector3.one);
+                    DiverMeshes.Part(h, "Visor", DiverMeshes.Plate("basecap_visor", HalfDisc(0.17f, 0.17f, 14), 0.014f), dark, new Vector3(0f, -0.01f, 0.19f), Vector3.one, new Vector3(-82f, 0f, 0f), false);
+                    DiverMeshes.Part(h, "Button", DiverMeshes.Sphere(3, 6), dark, new Vector3(0f, 0.195f, 0f), Vector3.one * 0.03f, default, false);
+                    DiverMeshes.Part(h, "Logo", DiverMeshes.Sphere(4, 6), M(LowPoly.Hex("#EDE6DA")), new Vector3(0f, 0.08f, 0.2f), new Vector3(0.07f, 0.05f, 0.012f), new Vector3(-14f, 0f, 0f), false);
+                    break;
+                }
+                case 17:   // headband (terry cloth, the hair top stays free)
+                {
+                    DiverMeshes.Part(h, "Band", DiverMeshes.Cached("hat_headband", () => DiverMeshes.LatheY(new[] { new Vector2(0.203f, -0.005f), new Vector2(0.215f, 0.0f), new Vector2(0.218f, 0.035f), new Vector2(0.21f, 0.055f), new Vector2(0.196f, 0.058f) }, 20)),
+                        MaterialLibrary.Opaque(LowPoly.Hex("#F4EFE6"), 0.05f, 0f), new Vector3(0f, 0.02f, 0f), Vector3.one, default, false);
+                    DiverMeshes.Part(h, "Stripe", DiverMeshes.Torus(0.218f, 0.008f, 20, 3), M(LowPoly.Hex("#E0607E")), new Vector3(0f, 0.045f, 0f), Vector3.one, default, false);
+                    break;
+                }
+                case 18:   // head scarf with the knot at the back
+                {
+                    Material cloth = MaterialLibrary.Opaque(LowPoly.Hex("#E0607E"), 0.1f, 0f);
+                    DiverMeshes.Part(h, "Scarf", DiverMeshes.Cached("hat_scarf", () => DiverMeshes.LatheY(DiverMeshes.Resample(new[] { new Vector2(0.209f, -0.035f), new Vector2(0.212f, 0.05f), new Vector2(0.18f, 0.13f), new Vector2(0.1f, 0.18f), new Vector2(0f, 0.19f) }, 9), 20)), cloth, Vector3.zero, Vector3.one);
+                    DiverMeshes.Part(h, "Knot", DiverMeshes.Sphere(5, 8), cloth, new Vector3(0f, 0.0f, -0.215f), new Vector3(0.07f, 0.06f, 0.06f), default, false);
+                    for (int s = -1; s <= 1; s += 2)
+                        DiverMeshes.Part(h, "Tail", DiverMeshes.Plate("scarf_tail", new[] { new Vector2(-0.03f, 0f), new Vector2(0.03f, 0f), new Vector2(0.02f, -0.15f), new Vector2(-0.025f, -0.13f) }, 0.01f),
+                            cloth, new Vector3(s * 0.025f, -0.01f, -0.23f), Vector3.one, new Vector3(-20f, 180f, s * 14f), false);
+                    break;
+                }
+                default:   // 19 sun visor (no crown – the hair shows on top)
+                {
+                    Material band = MaterialLibrary.Opaque(LowPoly.Hex("#F2C94C"), 0.2f, 0f);
+                    DiverMeshes.Part(h, "Band", DiverMeshes.Cached("hat_visor_band", () => DiverMeshes.LatheY(new[] { new Vector2(0.206f, -0.005f), new Vector2(0.216f, 0.0f), new Vector2(0.216f, 0.045f), new Vector2(0.206f, 0.05f) }, 20)), band, Vector3.zero, Vector3.one, default, false);
+                    DiverMeshes.Part(h, "Visor", DiverMeshes.Plate("visor_shield", HalfDisc(0.2f, 0.19f, 16), 0.012f), MaterialLibrary.Transparent(new Color(0.24f, 0.72f, 0.77f, 0.75f), 0.6f, true),
+                        new Vector3(0f, 0.01f, 0.19f), Vector3.one, new Vector3(-80f, 0f, 0f), false);
                     break;
                 }
             }
@@ -626,40 +1105,135 @@ namespace Sealebrities
             return m;
         }
 
-        // ------------------------------------------------------------------ limbs
-        static void BuildArm(Transform shoulder, out Transform elbow, out Transform hand, Material neo, Material cuff)
+        // ------------------------------------------------------------------ accessories
+        /// 1 shell necklace, 2 neckerchief, 3 earrings, 4 flower behind the ear, 5 dive watch (BuildWatch, on the left
+        /// forearm), 6 freckles, 7 a plaster on the cheek.
+        static void BuildAccessory(DiverPuppet p, DiverLook look, Color skin)
         {
-            DiverMeshes.Limb(shoulder, "UpperArm", 0.062f, UpperArm, neo);
-            elbow = DiverMeshes.Node(shoulder, "Elbow", new Vector3(0f, -UpperArm, 0f));
-            // ball joint (radius = limb radius × 1.08): bends never show a gap
-            DiverMeshes.Part(elbow, "Joint", DiverMeshes.Sphere(4, 6), neo, Vector3.zero, Vector3.one * (0.062f * 1.08f * 2f), default, false);
-            DiverMeshes.Limb(elbow, "ForeArm", 0.056f, ForeArm, neo);
-            DiverMeshes.Part(elbow, "Cuff", DiverMeshes.Torus(0.056f, 0.014f, 16, 3), cuff, new Vector3(0f, -ForeArm + 0.02f, 0f), Vector3.one, default, false);
-            hand = DiverMeshes.Node(elbow, "Hand", new Vector3(0f, -ForeArm - 0.05f, 0f));
-            // neoprene gloves everywhere (Q1/Q2): a bit lighter than the suit, never skin-coloured
-            Material glove = Neo(DiverGear.Glove);
-            DiverMeshes.Part(hand, "Mitten", DiverMeshes.Sphere(7, 12), glove, new Vector3(0f, -0.02f, 0.005f), new Vector3(0.12f, 0.15f, 0.095f));
-            DiverMeshes.Part(hand, "Thumb", DiverMeshes.SmoothCapsule(0.022f, 0.07f, 8, 2, 1), glove, new Vector3(0f, -0.01f, 0.04f), Vector3.one, new Vector3(150f, 0f, 0f), false);
+            switch (look.accessory)
+            {
+                case 1:
+                {
+                    // a cord ring around the neck that drapes down onto the chest (an ellipse tilted forward)
+                    float depth = (TorsoRZ(1.41f, look.build) + 0.009f - 0.02f) / 0.906f;   // ÷ cos 25°
+                    var n = DiverMeshes.Node(p.chest, "Necklace", new Vector3(0f, 1.47f - ChestY, 0.02f), new Vector3(-25f, 0f, 0f));
+                    float zs = depth / 0.088f;
+                    DiverMeshes.Part(n, "Cord", DiverMeshes.Torus(0.088f, 0.0035f, 18, 3), M(LowPoly.Hex("#8E6C50")), Vector3.zero, new Vector3(1f, 1f, zs), default, false);
+                    string[] cols = { "#F4EFE6", "#F29BBE", "#F2C94C" };
+                    for (int i = 0; i < 3; i++)
+                    {
+                        float a = (-20f + i * 20f) * Mathf.Deg2Rad;
+                        DiverMeshes.Part(n, "Shell", DiverMeshes.Cached("acc_shell", () => DiverMeshes.LatheY(new[] { new Vector2(0f, 0f), new Vector2(0.016f, 0.004f), new Vector2(0.012f, 0.014f), new Vector2(0f, 0.024f) }, 6)),
+                            M(LowPoly.Hex(cols[i])), new Vector3(Mathf.Sin(a) * 0.088f, -0.006f, Mathf.Cos(a) * depth + 0.006f), Vector3.one, new Vector3(100f, a * Mathf.Rad2Deg, 0f), false);
+                    }
+                    break;
+                }
+                case 2:
+                {
+                    // a fat knotted neckerchief roll + the triangle lying on the upper chest
+                    Material cloth = MaterialLibrary.Opaque(LowPoly.Hex("#C94F3D"), 0.1f, 0f);
+                    float fz = TorsoRZ(1.43f, look.build);
+                    DiverMeshes.Part(p.chest, "Scarf", DiverMeshes.Torus(0.078f, 0.022f, 16, 4), cloth, new Vector3(0f, 1.48f - ChestY, 0.012f), new Vector3(1f, 1f, 1.5f), new Vector3(-12f, 0f, 0f), false);
+                    DiverMeshes.Part(p.chest, "ScarfTip", DiverMeshes.Plate("acc_scarf_tip", new[] { new Vector2(-0.07f, 0f), new Vector2(0.07f, 0f), new Vector2(0f, -0.1f) }, 0.012f),
+                        cloth, new Vector3(0f, 1.455f - ChestY, fz + 0.01f), Vector3.one, new Vector3(-16f, 0f, 0f), false);
+                    break;
+                }
+                case 3:
+                    if (p.earL != null && p.earR != null)
+                    {
+                        Material gold = MaterialLibrary.Opaque(LowPoly.Hex("#E8C65A"), 0.6f, 0.45f);
+                        for (int s = -1; s <= 1; s += 2)
+                        {
+                            float r = HeadRadius(1.66f);
+                            DiverMeshes.Part(p.head, "Earring", DiverMeshes.Torus(0.011f, 0.0022f, 10, 3), gold, new Vector3(s * (r + 0.004f), 1.645f - HeadY, -0.006f), Vector3.one, new Vector3(0f, 0f, 90f), false);
+                        }
+                    }
+                    break;
+                case 4:
+                {
+                    var f = DiverMeshes.Node(p.head, "Flower", HeadPoint(-82f, 1.725f, 0.012f), new Vector3(0f, -82f, 0f));
+                    Material petal = M(LowPoly.Hex("#E86FA0")), heart = M(LowPoly.Hex("#F2C94C"));
+                    for (int i = 0; i < 5; i++)
+                    {
+                        float a = i * 72f * Mathf.Deg2Rad;
+                        DiverMeshes.Part(f, "Petal", DiverMeshes.Sphere(4, 6), petal, new Vector3(Mathf.Cos(a) * 0.018f, Mathf.Sin(a) * 0.018f, 0f), new Vector3(0.026f, 0.026f, 0.008f), default, false);
+                    }
+                    DiverMeshes.Part(f, "Heart", DiverMeshes.Sphere(3, 6), heart, new Vector3(0f, 0f, 0.004f), Vector3.one * 0.012f, default, false);
+                    break;
+                }
+                case 6:
+                {
+                    Material dot = M(Color.Lerp(skin, LowPoly.Hex("#8E4A30"), 0.45f));
+                    Mesh sph = DiverMeshes.Sphere(3, 4);
+                    for (int s = -1; s <= 1; s += 2)
+                        for (int i = 0; i < 4; i++)
+                        {
+                            float az = s * (22f + (i % 2) * 9f + i * 3f);
+                            float y = 1.648f + (i / 2) * 0.012f - (i % 2) * 0.004f;
+                            DiverMeshes.Part(p.head, "Freckle", sph, dot, HeadPoint(az, y, 0.0005f), Vector3.one * 0.0065f, default, false);
+                        }
+                    break;
+                }
+                case 7:
+                {
+                    Material tape = MaterialLibrary.Opaque(LowPoly.Hex("#E9C9A0"), 0.1f, 0f);
+                    var pl = DiverMeshes.Node(p.head, "Plaster", HeadPoint(28f, 1.64f, 0.002f), new Vector3(0f, 28f, 0f));
+                    for (int k = 0; k < 2; k++)
+                        DiverMeshes.Part(pl, "Strip", DiverMeshes.RoundedSlab("acc_plaster", 0.045f, 0.013f, 0.003f, 0.005f, 2), tape, Vector3.zero, Vector3.one, new Vector3(0f, 0f, k == 0 ? 35f : -35f), false)
+                            .sharedMaterials = new[] { tape, tape };
+                    break;
+                }
+            }
         }
 
-        static void BuildLeg(Transform hip, out Transform knee, Material neo, Material stripe, Material boots, DiverLook look, bool left)
+        /// Accessory 5: a chunky dive watch on the left forearm, just above the cuff.
+        static void BuildWatch(Transform elbow, float limb)
         {
-            DiverMeshes.Limb(hip, "Thigh", 0.11f, Thigh, neo);
+            var w = DiverMeshes.Node(elbow, "Watch", new Vector3(0f, -ForeArm + 0.06f, 0f));
+            float r = 0.04f * limb;
+            DiverMeshes.Part(w, "Strap", DiverMeshes.Torus(r + 0.003f, 0.007f, 14, 3), M(LowPoly.Hex("#2E3140")), Vector3.zero, Vector3.one, default, false);
+            var face = DiverMeshes.Part(w, "Face", DiverMeshes.RoundedSlab("acc_watch", 0.034f, 0.034f, 0.012f, 0.012f, 3), M(LowPoly.Hex("#F2C94C")),
+                                        new Vector3(0f, 0f, r + 0.006f), Vector3.one, new Vector3(0f, 180f, 0f), false);
+            face.sharedMaterials = new[] { M(LowPoly.Hex("#1E1B2B")), M(LowPoly.Hex("#F2C94C")) };
+        }
+
+        // ------------------------------------------------------------------ limbs
+        static void BuildArm(Transform shoulder, out Transform elbow, out Transform hand, Material neo, Material cuff, Material suit, float limb)
+        {
+            // shoulder cap in the suit colour: defined shoulders that read from afar
+            DiverMeshes.Part(shoulder, "ShoulderCap", DiverMeshes.Sphere(4, 8), suit, new Vector3(0f, -0.01f, 0f), Vector3.one * (0.13f * limb), default, false);
+            DiverMeshes.TaperLimb(shoulder, "UpperArm", 0.05f * limb, 0.044f * limb, UpperArm, neo);
+            elbow = DiverMeshes.Node(shoulder, "Elbow", new Vector3(0f, -UpperArm, 0f));
+            // ball joint: bends never show a gap
+            DiverMeshes.Part(elbow, "Joint", DiverMeshes.Sphere(3, 6), neo, Vector3.zero, Vector3.one * (0.046f * limb * 2f), default, false);
+            DiverMeshes.TaperLimb(elbow, "ForeArm", 0.044f * limb, 0.037f * limb, ForeArm, neo, 8);
+            DiverMeshes.Part(elbow, "Cuff", DiverMeshes.Torus(0.039f * limb, 0.01f, 10, 3), cuff, new Vector3(0f, -ForeArm + 0.02f, 0f), Vector3.one, default, false);
+            hand = DiverMeshes.Node(elbow, "Hand", new Vector3(0f, -ForeArm - 0.045f, 0f));
+            // neoprene gloves everywhere (Q1/Q2): a mitten with a thumb, a bit lighter than the suit, never skin-coloured
+            Material glove = Neo(DiverGear.Glove);
+            DiverMeshes.Part(hand, "Mitten", DiverMeshes.Sphere(6, 10), glove, new Vector3(0f, -0.012f, 0.004f), new Vector3(0.082f, 0.11f, 0.058f));
+            DiverMeshes.Part(hand, "Thumb", DiverMeshes.SmoothCapsule(0.016f, 0.055f, 8, 2, 1), glove, new Vector3(0f, 0.004f, 0.026f), Vector3.one, new Vector3(150f, 0f, 0f), false);
+        }
+
+        static void BuildLeg(Transform hip, out Transform knee, out Transform foot, Material neo, Material stripe, Material boots, DiverLook look, bool left, float limb)
+        {
+            DiverMeshes.TaperLimb(hip, "Thigh", 0.078f * limb, 0.06f * limb, Thigh, neo);
+            DiverMeshes.Part(hip, "Stripe", DiverMeshes.Torus(0.071f * limb, 0.012f, 10, 3), stripe, new Vector3(0f, -0.2f, 0f), Vector3.one, default, false);
             knee = DiverMeshes.Node(hip, "Knee", new Vector3(0f, -Thigh, 0f));
-            DiverMeshes.Part(knee, "Joint", DiverMeshes.Sphere(4, 6), neo, Vector3.zero, Vector3.one * (0.1f * 1.08f * 2f), default, false);
-            DiverMeshes.Limb(knee, "Shin", 0.1f, Shin - 0.04f, neo);
-            DiverMeshes.Part(knee, "Stripe", DiverMeshes.Torus(0.101f, 0.016f, 16, 3), stripe, new Vector3(0f, -0.07f, 0f), Vector3.one, default, false);
-            var foot = DiverMeshes.Node(knee, "Foot", new Vector3(0f, -Shin + 0.02f, 0f));
-            DiverMeshes.Part(foot, "Pocket", DiverMeshes.SmoothCapsule(0.088f, 0.25f, 10, 3, 1), boots, new Vector3(0f, -0.005f, -0.06f), Vector3.one, new Vector3(90f, 0f, 0f));
+            DiverMeshes.Part(knee, "Joint", DiverMeshes.Sphere(3, 6), neo, Vector3.zero, Vector3.one * (0.06f * limb * 2f), default, false);
+            DiverMeshes.TaperLimb(knee, "Shin", 0.058f * limb, 0.046f * limb, Shin - 0.03f, neo);
+            foot = DiverMeshes.Node(knee, "Foot", new Vector3(0f, -Shin, 0f));
+            DiverMeshes.Part(foot, "Pocket", DiverMeshes.SmoothCapsule(0.05f, 0.22f, 8, 2, 1), boots, new Vector3(0f, -0.035f, -0.065f), Vector3.one, new Vector3(90f, 0f, 0f));
             // fins by tier (Q51) or the colour picked on the character screen – DiverGear
             DiverGear.BuildFin(foot, look, boots, left);
         }
 
-        // ------------------------------------------------------------------ suit patterns (1c, 8 options)
+        // ------------------------------------------------------------------ suit patterns (12 options)
         static readonly Dictionary<string, Material> patternMats = new Dictionary<string, Material>();
 
         /// The material of the suit panel: plain suit colour (pattern 0) or a small procedural pattern texture in suit +
-        /// accent colour (stripes, dots, shark teeth, herringbone, waves, gold, lighthouse). Cached per combination.
+        /// accent colour (stripes, dots, shark teeth, herringbone, waves, gold, lighthouse, camo, zigzag, stars,
+        /// two-tone). Cached per combination.
         public static Material PatternMaterial(int pattern, Color suit, Color accentHint)
         {
             if (pattern <= 0) return Neo(suit);
@@ -678,6 +1252,7 @@ namespace Sealebrities
         {
             if (pattern == 7) return LowPoly.Hex("#C94F3D");
             if (pattern == 6) return LowPoly.Hex("#FFF1B8");
+            if (pattern == 8) return Color.Lerp(baseC, LowPoly.Hex("#2B2533"), 0.45f);
             // the cuff colour when it contrasts enough, else a light / dark version of the suit
             float lb = baseC.r * 0.3f + baseC.g * 0.59f + baseC.b * 0.11f;
             float lc = cuff.r * 0.3f + cuff.g * 0.59f + cuff.b * 0.11f;
@@ -685,11 +1260,11 @@ namespace Sealebrities
             return lb > 0.55f ? Color.Lerp(baseC, Color.black, 0.38f) : Color.Lerp(baseC, Color.white, 0.6f);
         }
 
-        /// 256 × 160 texture over the body UVs (u = angle around the bean ≈ 1.76 m, v = profile arc ≈ 1.36 m).
+        /// 256 × 160 texture over the chest UVs (u = angle around the torso ≈ 1.0 m, v = profile arc ≈ 0.75 m).
         static Texture2D PatternTexture(int pattern, Color baseC, Color accent)
         {
             const int W = 256, H = 160;
-            const float Lu = 1.76f, Lv = 1.36f;
+            const float Lu = 1.0f, Lv = 0.75f;
             var px = new Color32[W * H];
             float pix = Lu / W;   // metres per pixel (horizontal)
             for (int y = 0; y < H; y++)
@@ -698,7 +1273,7 @@ namespace Sealebrities
                 for (int x = 0; x < W; x++)
                 {
                     float X = (x + 0.5f) / W * Lu;
-                    float cover = Coverage(pattern, X, Y, pix);
+                    float cover = Coverage(pattern, X, Y, pix, Lv);
                     Color c = Color.Lerp(baseC, accent, cover);
                     c.a = 1f;
                     px[y * W + x] = c;
@@ -713,53 +1288,76 @@ namespace Sealebrities
         static float Edge(float d, float pix) => Mathf.Clamp01(0.5f - d / (pix * 1.5f));
 
         /// 0..1 accent coverage of a pattern at body-surface metres (X around, Y up along the profile).
-        static float Coverage(int pattern, float X, float Y, float pix)
+        static float Coverage(int pattern, float X, float Y, float pix, float Lv)
         {
             switch (pattern)
             {
-                case 1:   // stripes: 4.5 cm bands every 12 cm
+                case 1:   // stripes: 3.5 cm bands every 10 cm
                 {
-                    float f = Mathf.Repeat(Y, 0.12f) - 0.06f;
-                    return Edge(Mathf.Abs(f) - 0.0225f, pix);
+                    float f = Mathf.Repeat(Y, 0.10f) - 0.05f;
+                    return Edge(Mathf.Abs(f) - 0.0175f, pix);
                 }
-                case 2:   // dots: 2.6 cm dots on a staggered 10 cm grid
+                case 2:   // dots: 2 cm dots on a staggered 8 cm grid
                 {
-                    float row = Mathf.Floor(Y / 0.1f);
-                    float ox = (row % 2f) * 0.05f;
-                    float dx = Mathf.Repeat(X + ox, 0.1f) - 0.05f, dy = Mathf.Repeat(Y, 0.1f) - 0.05f;
-                    return Edge(Mathf.Sqrt(dx * dx + dy * dy) - 0.026f, pix);
+                    float row = Mathf.Floor(Y / 0.08f);
+                    float ox = (row % 2f) * 0.04f;
+                    float dx = Mathf.Repeat(X + ox, 0.08f) - 0.04f, dy = Mathf.Repeat(Y, 0.08f) - 0.04f;
+                    return Edge(Mathf.Sqrt(dx * dx + dy * dy) - 0.02f, pix);
                 }
                 case 3:   // shark teeth: a band of white teeth across the chest
                 {
-                    const float top = 0.98f, len = 0.085f;
+                    float top = Lv * 0.62f;
+                    const float len = 0.07f;
                     if (Y > top + 0.03f || Y < top - len - 0.01f) return 0f;
-                    float u = Mathf.Repeat(X, 0.09f) / 0.09f;
+                    float u = Mathf.Repeat(X, 0.07f) / 0.07f;
                     float toothTop = top, toothTip = top - len * (1f - Mathf.Abs(u * 2f - 1f));
-                    float band = Edge(Mathf.Abs(Y - (top + 0.012f)) - 0.012f, pix);
+                    float band = Edge(Mathf.Abs(Y - (top + 0.01f)) - 0.01f, pix);
                     float tooth = Y <= toothTop && Y >= toothTip ? 1f : Edge(Mathf.Min(Mathf.Abs(Y - toothTop), Mathf.Abs(Y - toothTip)), pix) * 0.5f;
                     return Mathf.Max(band, tooth);
                 }
                 case 4:   // herringbone: chevron lines
                 {
-                    float u = Mathf.Repeat(X, 0.1f) / 0.1f;
-                    float f = Mathf.Repeat(Y + Mathf.Abs(u * 2f - 1f) * 0.05f, 0.09f) - 0.045f;
-                    return Edge(Mathf.Abs(f) - 0.011f, pix);
+                    float u = Mathf.Repeat(X, 0.08f) / 0.08f;
+                    float f = Mathf.Repeat(Y + Mathf.Abs(u * 2f - 1f) * 0.04f, 0.075f) - 0.0375f;
+                    return Edge(Mathf.Abs(f) - 0.009f, pix);
                 }
                 case 5:   // waves
                 {
-                    float f = Mathf.Repeat(Y + Mathf.Sin(X / 0.22f * Mathf.PI * 2f) * 0.022f, 0.12f) - 0.06f;
-                    return Edge(Mathf.Abs(f) - 0.013f, pix);
+                    float f = Mathf.Repeat(Y + Mathf.Sin(X / 0.18f * Mathf.PI * 2f) * 0.018f, 0.1f) - 0.05f;
+                    return Edge(Mathf.Abs(f) - 0.011f, pix);
                 }
                 case 6:   // gold: soft diagonal sheen bands
                 {
-                    float f = Mathf.Repeat(X * 0.7f + Y, 0.32f) - 0.16f;
-                    return 0.35f * Edge(Mathf.Abs(f) - 0.03f, pix * 6f);
+                    float f = Mathf.Repeat(X * 0.7f + Y, 0.26f) - 0.13f;
+                    return 0.35f * Edge(Mathf.Abs(f) - 0.025f, pix * 6f);
                 }
                 case 7:   // lighthouse: broad red bands
                 {
-                    float f = Mathf.Repeat(Y, 0.26f) - 0.13f;
-                    return Edge(Mathf.Abs(f) - 0.065f, pix);
+                    float f = Mathf.Repeat(Y, 0.2f) - 0.1f;
+                    return Edge(Mathf.Abs(f) - 0.05f, pix);
                 }
+                case 8:   // camo: soft blobs from a few overlapping sines (seamless in X: whole periods over 1 m)
+                {
+                    float n = Mathf.Sin(X * Mathf.PI * 2f * 3f + Y * 9f) + Mathf.Sin(X * Mathf.PI * 2f * 5f - Y * 13f + 1.3f) * 0.7f + Mathf.Sin(Y * 21f + X * Mathf.PI * 2f * 2f) * 0.5f;
+                    return Edge(-n + 0.35f, pix * 4f);
+                }
+                case 9:   // zigzag band across the chest
+                {
+                    float u = Mathf.Repeat(X, 0.1f) / 0.1f;
+                    float zig = Lv * 0.55f + (Mathf.Abs(u * 2f - 1f) - 0.5f) * 0.06f;
+                    return Edge(Mathf.Abs(Y - zig) - 0.018f, pix);
+                }
+                case 10:  // little stars on a 10 cm grid
+                {
+                    float row = Mathf.Floor(Y / 0.1f);
+                    float dx = Mathf.Repeat(X + (row % 2f) * 0.05f, 0.1f) - 0.05f, dy = Mathf.Repeat(Y, 0.1f) - 0.05f;
+                    float ang = Mathf.Atan2(dy, dx);
+                    float r = Mathf.Sqrt(dx * dx + dy * dy);
+                    float starR = 0.012f + 0.009f * Mathf.Cos(ang * 5f + Mathf.PI * 0.5f);
+                    return Edge(r - starR, pix);
+                }
+                case 11:  // two-tone: the upper chest in the accent colour
+                    return Edge(Lv * 0.6f - Y, pix);
                 default: return 0f;
             }
         }

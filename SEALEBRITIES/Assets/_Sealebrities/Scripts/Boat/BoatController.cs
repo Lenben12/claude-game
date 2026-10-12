@@ -30,7 +30,7 @@ namespace Sealebrities
 
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { AnchorToggledLocally = null; }
+        static void ResetStatics() { AnchorToggledLocally = null; lastNotDriverHint = -10f; }
 
         // ------------------------------------------------------------------ state
         Rigidbody rb;
@@ -66,7 +66,7 @@ namespace Sealebrities
         // controls hint shown as the interaction prompt while driving (PlayerInteractor is inactive while seated)
         string drivePrompt;
         Language drivePromptLang;
-        string dpFwd, dpBack, dpLeft, dpRight, dpAnchor, dpExit;
+        string dpFwd, dpBack, dpLeft, dpRight, dpAnchor, dpExit, dpMap;
 
         // co-op: simulated elsewhere (NetFlags.BoatRemote)
         bool remote;
@@ -78,6 +78,10 @@ namespace Sealebrities
         /// K.8: without Toni's map the fog bank pushes the boat outward (m/s it reaches against the bow).
         public const float FogDriftSpeed = 2f;
         bool fogMap, inFogBank, fogToastShown;
+        // round 3: the volcano's current ring until the wreck is unlocked (VolcanoGate)
+        bool inVolcanoRing, volcanoToastShown;
+        float volcanoGateCheck;
+        bool volcanoOpen = true;
         float compassAngle, compassSpinVel, compressorRpm, flagPoll, flagWave;
         AudioSource chugSrc;
         bool compressorOwned, winchOwned;
@@ -398,6 +402,16 @@ namespace Sealebrities
             }
         }
 
+        static float lastNotDriverHint = -10f;
+
+        /// Round 3: somebody who is not at the wheel tried the anchor (key or winch) – one short line, max every 3 s.
+        public static void NotDriverHint()
+        {
+            if (Time.unscaledTime - lastNotDriverHint < 3f) return;
+            lastNotDriverHint = Time.unscaledTime;
+            GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Anker nur vom Fahrer", "Anchor: driver only"), Loc.Tr("am Steuer", "at the wheel"));
+        }
+
         /// L.10: "Anker ist unten" + key chip.
         void AnchorHint()
         {
@@ -631,7 +645,12 @@ namespace Sealebrities
                     seatedInput = false;
                 }
             }
-            if (inGame && !UIState.BlocksGameplay && GameInput.AnchorPressed && (driving || PlayerAboard)) ToggleAnchor();
+            // round 3 (GDD §19 „Nur der Fahrer kann den Anker legen“): only the driver works the anchor
+            if (inGame && !UIState.BlocksGameplay && GameInput.AnchorPressed)
+            {
+                if (driving) ToggleAnchor();
+                else if (PlayerAboard) NotDriverHint();
+            }
 
             // controls hint (UIHud hides prompts while menus block gameplay)
             if (seatedInput) InteractionPrompt.Text = DrivePrompt();
@@ -676,13 +695,16 @@ namespace Sealebrities
             string f = GameInput.BindingLabel(GameAction.Forward), b = GameInput.BindingLabel(GameAction.Back);
             string l = GameInput.BindingLabel(GameAction.Left), r = GameInput.BindingLabel(GameAction.Right);
             string q = GameInput.BindingLabel(GameAction.Anchor), e = GameInput.BindingLabel(GameAction.Interact);
+            string m = GameInput.BindingLabel(GameAction.Map);
             if (drivePrompt == null || drivePromptLang != Loc.Current || !ReferenceEquals(f, dpFwd) || !ReferenceEquals(b, dpBack)
-                || !ReferenceEquals(l, dpLeft) || !ReferenceEquals(r, dpRight) || !ReferenceEquals(q, dpAnchor) || !ReferenceEquals(e, dpExit))
+                || !ReferenceEquals(l, dpLeft) || !ReferenceEquals(r, dpRight) || !ReferenceEquals(q, dpAnchor) || !ReferenceEquals(e, dpExit)
+                || !ReferenceEquals(m, dpMap))
             {
                 drivePromptLang = Loc.Current;
-                dpFwd = f; dpBack = b; dpLeft = l; dpRight = r; dpAnchor = q; dpExit = e;
-                drivePrompt = Loc.Tr($"{f}/{b} Gas · {l}/{r} Lenken · {q} Anker · {e} Aufstehen",
-                                     $"{f}/{b} throttle · {l}/{r} steer · {q} anchor · {e} get up");
+                dpFwd = f; dpBack = b; dpLeft = l; dpRight = r; dpAnchor = q; dpExit = e; dpMap = m;
+                // round 3: the map key works while driving (UIMapPanel does not stop the steering)
+                drivePrompt = Loc.Tr($"{f}/{b} Gas · {l}/{r} Lenken · {q} Anker · {m} Karte · {e} Aufstehen",
+                                     $"{f}/{b} throttle · {l}/{r} steer · {q} anchor · {m} map · {e} get up");
             }
             return drivePrompt;
         }
@@ -853,6 +875,7 @@ namespace Sealebrities
             if (remote && dt > 0f) TrackRemoteMotion(dt);
             PublishTelemetry();
             UpdateFogState();
+            UpdateVolcanoGate();
             // wake emitter sits on the water behind the stern
             Vector3 w = transform.TransformPoint(parts.sternWakeLocal);
             w.y = Waves.HeightAt(w.x, w.z) + 0.05f;
@@ -884,6 +907,26 @@ namespace Sealebrities
             {
                 fogToastShown = true;
                 GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Dichter Nebel – kein Durchkommen", "Thick fog – no way through"), Loc.Tr("Karte fehlt", "No map"));
+            }
+        }
+
+        /// Round 3 (player answer): the volcano island opens with the wreck unlock. Inside WorldLayout.VolcanoGateRadius a
+        /// strong current pushes the boat back out while it is closed (FixedUpdate); entering shows the requirement once.
+        void UpdateVolcanoGate()
+        {
+            if (Time.time >= volcanoGateCheck)
+            {
+                volcanoGateCheck = Time.time + 1f;
+                volcanoOpen = VolcanoGate.Open;
+            }
+            bool inside = VolcanoGate.InsideRing(transform.position);
+            if (inside == inVolcanoRing) return;
+            inVolcanoRing = inside;
+            if (!inside) { volcanoToastShown = false; return; }
+            if (!volcanoOpen && !volcanoToastShown && (driving || PlayerAboard))
+            {
+                volcanoToastShown = true;
+                GameEvents.RaiseNotify(NotifyKind.Warning, Loc.Tr("Starke Strömung – kein Durchkommen", "Strong current – no way through"), VolcanoGate.RequirementText());
             }
         }
 
@@ -1061,6 +1104,23 @@ namespace Sealebrities
                     if (anchored) anchorPoint = Vector3.MoveTowards(anchorPoint, pos + outward * 3f, FogDriftSpeed * dt);   // the anchor drags
                     rb.AddForce(outward * (acc * sub01), ForceMode.Acceleration);
                     rb.AddTorque(Vector3.up * (Mathf.Sin(Time.time * 0.9f + r * 0.05f) * 0.35f * deep * sub01), ForceMode.Acceleration);
+                }
+            }
+
+            // round 3: the volcano's current ring while the wreck is still locked – same push-back as the fog bank
+            if (!volcanoOpen && sub01 > 0f)
+            {
+                Vector3 fromVol = pos - WorldLayout.VolcanoIsland;
+                fromVol.y = 0f;
+                float r = fromVol.magnitude;
+                if (r < WorldLayout.VolcanoGateRadius && r > 1f)
+                {
+                    Vector3 outward = fromVol / r;
+                    float vr = Vector3.Dot(v, outward);
+                    float deep = Mathf.Clamp01((WorldLayout.VolcanoGateRadius - r) / 60f);
+                    float acc = Mathf.Clamp((FogDriftSpeed - vr) * (0.8f + 2.2f * deep), 0f, 4f + 6f * deep);
+                    if (anchored) anchorPoint = Vector3.MoveTowards(anchorPoint, pos + outward * 3f, FogDriftSpeed * dt);
+                    rb.AddForce(outward * (acc * sub01), ForceMode.Acceleration);
                 }
             }
 

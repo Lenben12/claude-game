@@ -212,7 +212,8 @@ namespace Sealebrities
                     }
                 }
             }
-            line = Short(line, 90);   // L.10 lines are short; legacy sentences may wrap to a second line instead of being cut
+            // L.10 lines are short (round 3 UI step: max 64 characters – two lines at most); legacy sentences wrap
+            line = Short(line, 64);
             string key = (int)kind + "|" + line + "|" + (chip ?? "");
             // identical toast on screen → "×n"
             for (int i = 0; i < toasts.Count; i++)
@@ -355,7 +356,7 @@ namespace Sealebrities
                 // only the newest chat card waits
                 for (int i = cards.Count - 1; i >= 0; i--) if (LowPriority(cards[i].key)) cards.RemoveAt(i);
             }
-            Enqueue(new Card { type = CardType.Push, icon = icon, color = color, title = Short(title, 40), sub = sub != null ? Short(sub, 32) : null, key = key, image = image, ping = ping });
+            Enqueue(new Card { type = CardType.Push, icon = icon, color = color, title = Short(title, 34), sub = sub != null ? Short(sub, 30) : null, key = key, image = image, ping = ping });
         }
 
         static bool LowPriority(string key) => key != null && key.StartsWith("msg:", System.StringComparison.Ordinal);
@@ -623,8 +624,8 @@ namespace Sealebrities
             bool show = !UIState.LoadingOpen && !UIState.CharacterOpen;
             UIKit.Show(root, show);
             if (!show) return;
-            // the inventory card covers the lower right: lift the toasts a bit
-            toastStack.style.bottom = UIState.InventoryOpen ? 60f : 150f;
+            // always above the money block (final test: with the backpack open the toasts at 60 px sat on the money line)
+            toastStack.style.bottom = 150f;
             TickToasts(dt);
             TickPendingSummary(dt);
             TickCards(dt);
