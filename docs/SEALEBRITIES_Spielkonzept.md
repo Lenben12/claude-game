@@ -645,5 +645,116 @@ Der Spieler hat die Vorschau mit einem Freund im Koop getestet. Umsetzung als Na
 | 49 | Wichtigstes für Testversion 5 | **Mehr Inhalt im Meer** |
 | 50 | Spielzeit einer Testversion | 2–3 Stunden |
 
+## 21. Bild-Fragen zu Testversion 5 (13.10.2026)
+| Bild | Thema | Antwort |
+|---|---|---|
+| 1 | Insel von oben | **Mehr Abwechslung**: unterschiedliche Bereiche wie Felsküste, Sumpf, Bambuswald |
+| 2 | Einsiedler-Lager | **Mehr Chaos und Schrott**: mehr Treibgut, Netze, Selbstgebautes |
+| 3 | Vulkaninsel | **Dramatischer**: mehr Rauch, nachts Glühen, ab und zu Grollen |
+| 4 | Leben im Meer | **Mehr Fische UND buntere Riffe**. Der Spieler möchte außerdem noch mehr Fragen, um das Spiel weiter zu verändern. |
+
+Danach wollte der Spieler stattdessen **70 Fragen** zu allem, um das Spiel komplett zu überarbeiten. Die übrigen Bilder sind darin eingebaut.
+
+## 22. 70 Fragen zur kompletten Überarbeitung (13.10.2026)
+| # | Thema | Antwort |
+|---|---|---|
+| 1 | Ladebildschirm | **Bessere Grafikqualität.** Statt des Riffs ein **Cinematic-Video**, in dem man die Map von oben sieht (Kameraflug über die Insel) |
+| 2 | Hauptmenü-Hintergrund | **Wechselnde Orte** (auch unter Wasser) |
+| 3 | Intro | Kürzer, ca. 10 s |
+| 4 | Spielstände | So lassen, **plus eigene Namen für Welten**, **plus Spieler schon VOR dem Betreten der Welt einladen** (Lobby vor dem Laden) |
+| 5 | Figuren | **Noch realistischer** (schmalere Gesichter, genauere Hände, mehr Details) |
+| 6 | Charakter-Bildschirm | **Mehr Auswahl und bessere Grafik** |
+| 7 | Schlafen | Mit Schlaf-Effekt (Zzz-Blasen / Schnarchen) |
+| 8 | Emotes im Koop | **Keine** |
+| 9 | Mimik | Ja, reagiert auf alles (Gefahr, Funde, Hunger …) |
+| 10 | Kosmetik freischalten | Mix aus Erfolgen, Sets und Shop |
+| 11 | Rucksack | **Übersichtlicher und halb durchsichtig**, sodass man das Spiel dahinter sieht |
+| 12 | Hunger/Durst-Anzeige | **Neben der Hotbar** |
+| 13 | Aufgaben-Zeile | **Mit Fortschrittsbalken** (z. B. 3/5 Fische) |
+| 14 | Schrift & Farben | So lassen |
+| 15 | Schatzkarte | **Mehr Details** (Wege, Bäume, Häuser einzeichnen) |
+| 16 | Chopper-Shop | **Mehr Wanda**: Die Pilotin kommentiert jeden Kauf mit einem Spruch |
+| 17 | FinTube-Studio | **Mehr Statistik** (Zuschauer nach Tierart, beste Uhrzeit, Rekorde) |
+| 18 | Handy-Apps | Tastenkürzel für Apps (z. B. M Karte, J Sealog), zusätzlich zum Handy |
+| 19 | Neue Inselbereiche | Felsküste mit Grotten **und noch mehr** (siehe 21) |
+| 20 | Wege | Mehr Brücken und Kletterstellen |
+| 21 | Weitere Bereiche | **Alle drei:** Dünen + Wrack-Strand mit gestrandetem Frachter, Blüten- und Schmetterlingstal, alte Plantage mit Ruinen |
+| 22 | Insel bei Nacht | **Fast dunkel** (nur Mond und Taschenlampe, gruselig) |
+| 23 | Mehr kleine Inseln | Ja, 2–3 neue mit eigenem Thema |
+| 24 | Vulkan | Grollen, Glühen + seltener Ausbruch (Ascheregen, Lavabrocken im Meer) |
+| 25 | Sichtbares Wetter | **Alles:** Regen und Gewitter, Nebel, Regenbögen und Sonnenstrahlen |
+| 26 | Hütte | Gefällt so |
+| 27 | Big Mo | **Mehr Details** (Narben, Zähne, leuchtende Augen) |
+| 28 | Memes | Gefällt so |
+| 29 | Truhen | **Mehr versteckt** (halb im Sand, mit Korallen überwachsen) |
+| 30 | Bunte Riffe | **Alles:** Riesen-Anemonen und Seefächer, Korallenbögen und Riffhöhlen, Leuchtkorallen bei Nacht |
+| 31 | Sichtweite unter Wasser | **Kürzer und gruseliger** (Tiere tauchen erst knapp vor dir aus dem Blau auf) |
+| 32 | Strömungen | **Gefährlich** (ziehen dich weg, man muss gegenhalten) |
+| 33 | Unterwasserhöhlen | Mehrere mit Geheimnissen (Tunnel, Luftkammern, Schätze, Grusel) |
+| 34 | Schwärme | Teilen sich um dich + Raubtier-Jagden auf Köderbälle |
+| 35 | Unterwasser-Scooter | **Nein** |
+| 36 | Große Tiefe | Dunkler + Druckknacken + Herzschlag, Bildrand enger |
+| 37 | Bis 1.000 Follower | **Ca. 1 Stunde** |
+| 38 | Bis 1 Mio. Follower | **Ca. 15 Stunden** |
+| 39 | Ausrüstungspreise | **Schneller vorankommen, aber nicht zu schnell** (etwas günstiger) |
+| 40 | Erste Flasche | 90 s, so lassen |
+| 41 | Fischpreise | Etwas mehr |
+| 42 | Hunger/Durst leer | **Ohnmacht** (Aufwachen in der Hütte, etwas Geld weg) |
+| 43 | Hai-Angriffe | Selten, ab Tag 3 öfter |
+| 44 | Einsiedler | **Einsiedler bekommen einen Lebensbalken**, damit man sieht, wie viele Schläge man braucht |
+| 45 | Ohnmacht unter Wasser | Rettungsgebühr + ungesicherte Clips weg (wie jetzt) |
+| 46 | Stream vs. Video | Livestream bringt etwas mehr |
+| 47 | Sponsoren | So lassen |
+| 48 | Entspannt vs. Normal | Deutlicher (Entspannt: mehr Luft, keine Haiangriffe, langsamer Hunger) |
+| 49 | Werkbank/Crafting | **Klein**: nur ein paar einfache Rezepte |
+| 50 | Bauen auf der Insel | **Bleibt nein** |
+| 51 | Mini-Spiele | Angel-Turnier (auch gegen die Rivalen) + Foto-Wettbewerb (Dr. Fin bewertet) |
+| 52 | Meeresschutz | Netze entfernen und verhedderte Tiere retten (Follower + gute Kommentare) |
+| 53 | Koop-Aufgaben | Gemeinsame Aufträge (z. B. einer lockt, der andere filmt) |
+| 54 | Feste | **Einmal pro Woche** ein Inselfest |
+| 55 | Gestrandeter/Geheiminsel | Mittleres Spiel (nach dem Wrack) |
+| 56 | U-Boot | Ab ca. 100.000 Followern |
+| 57 | Neue Meerestiere | **Alles:** mehr Haie und Rochen, mehr bunte Rifffische, mehr Tiefsee |
+| 58 | Zuschauer-Kommentare | **Nur im Livestream** |
+| 59 | Erfolge | 30–50 lustige |
+| 60 | Musik | Mehr Stücke und Abwechslung je Ort und Tageszeit |
+| 61 | Geräusche | Mehr Tier- und Naturgeräusche |
+| 62 | Boot-Sitzbank | **Anderer Platz**: lieber hinten mit Blick aufs Kielwasser |
+| 63 | Controller | **Später** (kurz vor dem Steam-Start) |
+| 64 | Grafik-Optionen | Mehr Regler (Schatten, Sichtweite, Gras-Dichte, Tier-Anzahl) |
+| 65 | Tutorial | **Wahl zu Beginn**: ausführliches Tutorial ODER überspringen |
+| 66 | Koop-Größe | Bis 4 Spieler |
+| 67 | Speichern | Automatisch + manuell (Pausemenü) |
+| 68 | Tipps | Ab und zu kurze Tipps, wenn man nicht weiterkommt |
+| 69 | Was stört | **Alles drei:** Bugs und Steuerung, zu wenig zu tun, Grafik und Look |
+| 70 | Priorität nächste Runde | **Alles** (Unterwasser-Inhalt, Insel-Abwechslung, Grafik und Figuren gleichermaßen) |
+
+**Zusammenfassung für die nächste Runde (Testversion 6):** Der Spieler will eine komplette Überarbeitung. Schwerpunkte:
+- **Tempo:** deutlich schneller (1.000 Follower in ca. 1 h, 1 Mio. in ca. 15 h), Ausrüstung etwas günstiger, Fische bringen etwas mehr.
+- **Grafik und Figuren:** realistischere Figuren und mehr Auswahl beim Anpassen, Cinematic-Ladebildschirm mit Insel-Überflug, wechselnde Menü-Hintergründe, kürzeres Intro.
+- **Insel:**
+  - neue Bereiche: Felsküste mit Grotten, Dünen mit Wrack-Strand, Blütental, Plantage mit Ruinen
+  - 2–3 neue kleine Inseln, mehr Brücken und Kletterstellen
+  - fast dunkle Nächte, alle Wetterarten, dramatischer Vulkan
+  - Lager mit mehr Chaos und Schrott
+- **Unterwasser:**
+  - bunte Riffe mit Anemonen, Bögen und Leuchtkorallen, mehr Fische
+  - kürzere, gruseligere Sicht, gefährliche Strömungen, Höhlen mit Geheimnissen
+  - Schwarm-Jagden, Druck-Effekte in der Tiefe
+  - Big Mo detaillierter, Truhen versteckter
+  - alle neuen Tiergruppen, Netze entfernen und Tiere retten
+- **Oberfläche:**
+  - Rucksack übersichtlicher und halb durchsichtig, Hunger und Durst neben der Hotbar
+  - Aufgaben mit Fortschrittsbalken, Karte mit mehr Details
+  - mehr Wanda-Sprüche im Shop, mehr Studio-Statistik, Tastenkürzel für Apps, mehr Grafik-Regler
+- **Spielstände:** eigene Namen für Welten, Mitspieler schon vor dem Betreten einladen.
+- **Sonstiges:**
+  - Schlaf-Effekt, Mimik, keine Emotes, Kosmetik als Mix
+  - Ohnmacht bei leerem Hunger, Lebensbalken bei Einsiedlern
+  - kleine Werkbank, kein Bauen
+  - Angel-Turnier und Foto-Wettbewerb, gemeinsame Koop-Aufträge, Wochenfest
+  - Sitzbank hinten am Boot, Tutorial zur Wahl, automatisches und manuelles Speichern
+  - mehr Musik und Geräusche
+
 ## 12. Offene Punkte
 Werden in den nächsten Frage-Runden geklärt.
