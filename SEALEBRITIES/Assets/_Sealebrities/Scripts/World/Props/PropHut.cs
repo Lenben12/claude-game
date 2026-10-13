@@ -1,0 +1,1566 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.Rendering;
+
+namespace Sealebrities
+{
+    /// The "Sealebrity Dive Co." hut in the How to Fish beach-shop style (art bible §1.11): weathered whitewashed
+    /// clapboard (Whitewash #DCCFBE in three ±6 % variants) with 2–3 cm gaps showing a dark backing, red-brown accent
+    /// boards at the base, off-white trim, turquoise shutters, 4-pane windows, a red shingle roof and a striped porch
+    /// awning; chunky interior with bed, sofa bunk, TV, desk, shelves, fridge and locker. Walls, gables, roof and awning
+    /// are solid (feedback #10).
+    /// Round 2b: a wide veranda with two hammocks (sleep spots, L.9), the sofa bunk, the hut fridge (E.1), the locker
+    /// (1c), the golden camera trophy (Q52), Gus' letter (K.5), a roof ladder (L.12) and the hut yard (L.5 spot 1):
+    /// washing line with wetsuits, Gus' upturned rowboat „Rostlaube“ as a bench, surfboard rack, Gus' old compressor
+    /// with a hose to the dock (E.4).
+    /// Round 3 (GDD §19): a cosy How-to-Fish cabin interior (zones listed at BuildInterior) with a customizable layer
+    /// (PropHutDecor: wall paint, floor, rug, curtains, decor items – HutDecor / „Einrichten“) and the surfboard rack
+    /// fixed (boards stand on their tails and lean on the bar, BuildSurfRack).
+    /// Local frame: origin = WorldLayout.Hut (shifted west) at floor-top height, +x east (door side), +z north.
+    /// Interior x [-4.5, 4.5], z [-5, 5] (sized so that WorldLayout.Bed / TV / PlayerSpawn are inside); inner wall faces
+    /// at x ±4.43 / z ±4.93, the painted lining adds ≤ 3 cm – wall-mounted things sit ≥ 4 cm in front of the faces.
+    public static class PropHut
+    {
+        const float HX = 4.5f, HZ = 5f, WallH = 2.7f, PitchDeg = 20f, T = 0.14f, BoardH = 0.22f, BoardGap = 0.025f;
+        /// Veranda: x from the east wall to PorchX1, z ±PorchZ; the steps leave it at z = StepsZ.
+        const float PorchX1 = 7.6f, PorchZ = 4.75f, StepsZ = 0.9f;
+        static int wallId;
+
+        static PropBatch batch;
+        static Matrix4x4 TO;
+        static Vector3 O;
+        static Transform cols, root;
+
+        /// World position of the hut's local origin (floor top, interior centre shifted west) – set by Build.
+        public static Vector3 Origin => O;
+        /// Hut-local point (PropHut frame, see above) → world.
+        public static Vector3 ToWorld(Vector3 local) => O + local;
+
+        /// Wall openings (s0, s1, v0, v1) per wall: west, east, south, north (s = z for west/east, x for south/north).
+        static readonly List<Vector4>[] Holes =
+        {
+            new List<Vector4> { new Vector4(-1.9f, -0.7f, 1.0f, 1.9f), new Vector4(1.0f, 2.0f, 1.0f, 1.9f) },
+            new List<Vector4> { new Vector4(-3.2f, -2.0f, 1.0f, 1.9f), new Vector4(0.2f, 1.6f, 0f, 2.15f) },
+            new List<Vector4> { new Vector4(-1.6f, -0.4f, 1.15f, 1.95f), new Vector4(1.2f, 2.2f, 1.0f, 1.9f) },
+            new List<Vector4> { new Vector4(-0.7f, 0.3f, 1.0f, 1.9f) },
+        };
+
+        static PropMeshBuilder B(Material m)
+        {
+            var b = batch.B(m);
+            b.M = TO;
+            return b;
+        }
+
+        static void Col(Vector3 localCenter, Vector3 size, Quaternion rot) => PropCol.Box(cols, O + localCenter, size, rot);
+        static void Col(Vector3 localCenter, Vector3 size) => PropCol.Box(cols, O + localCenter, size, Quaternion.identity);
+
+        static float GL(float lx, float lz) => PropGround.H(O.x + lx, O.z + lz) - O.y;
+
+        /// World XZ position converted into the hut's local frame (y = 0).
+        static Vector3 Local(Vector3 world) => new Vector3(world.x - O.x, 0f, world.z - O.z);
+        static Vector3 W(Vector3 local) => O + local;
+
+        /// The hut is shifted slightly west of WorldLayout.Hut so WorldLayout.PlayerSpawn has ~0.8 m clearance to the west wall.
+        public const float WestShift = 0.4f;
+
+        static float RidgeY => WallH + HZ * Mathf.Tan(PitchDeg * Mathf.Deg2Rad);
+
+        public static IEnumerator Build(Transform island, PropExclusion excl)
+        {
+            Vector3 c = WorldLayout.Hut - new Vector3(WestShift, 0f, 0f);
+            PropGround.MinMaxRect(new Vector3(c.x + 1.6f, 0f, c.z), Quaternion.identity, 6.6f, 5.8f, 1f, out float gmin, out float gmax);
+            float floorY = Mathf.Max(gmax + 0.3f, 1.1f);
+            O = new Vector3(c.x, floorY, c.z);
+            TO = Matrix4x4.Translate(O);
+            PropInfo.HutFloorY = floorY;
+            PropInfo.HutDoor = O + new Vector3(HX + 1.2f, 0f, 0.9f);
+
+            root = PropUtil.WorldRoot("Hut", island);
+            cols = new GameObject("Colliders").transform;
+            cols.SetParent(root, false);
+            batch = new PropBatch(0f);
+
+            BuildShell();
+            if (PropRun.Due()) yield return null;
+            BuildRoof();
+            BuildPorch(excl);
+            if (PropRun.Due()) yield return null;
+            BuildInterior(root);
+            BuildExteriorDetails();
+            if (PropRun.Due()) yield return null;
+            BuildYard(excl);
+            if (PropRun.Due()) yield return null;
+
+            batch.Flush(root, "HutMesh", ShadowCastingMode.On, 0f);
+            batch = null;
+            excl.Add(c.x + 1.6f, c.z, 10f);
+            excl.Add(WorldLayout.PlayerSpawn.x, WorldLayout.PlayerSpawn.z, 2f);
+            PropInfo.AddLandSpot(W(new Vector3(0f, RidgeY + 0.25f, 0f)), LandSpotKind.Perch, 4f, "hut");
+            PropInfo.AddLandSpot(W(new Vector3(-HX - 0.1f, 1.4f, -2.5f)), LandSpotKind.Wall, 1.5f, "hut", Vector3.left);
+            PropInfo.AddLandSpot(W(new Vector3(0.5f, 1.6f, HZ + 0.1f)), LandSpotKind.Wall, 1.5f, "hut", Vector3.forward);
+            PropInfo.AddLandSpot(W(new Vector3(PorchX1 - 0.1f, 2.4f, -PorchZ)), LandSpotKind.Perch, 1f, "hut");
+        }
+
+        // ------------------------------------------------------------------ shell
+        static void BuildShell()
+        {
+            // floor: the boards themselves are customizable (PropHutDecor, three tone renderers) – here the dark skirt
+            // that shows through their gaps
+            B(PropMats.PlankGap).Box(new Vector3(0f, -0.15f, 0f), new Vector3(2f * HX + 0.2f, 0.1f, 2f * HZ + 0.2f));
+            Col(new Vector3(0f, -0.15f, 0f), new Vector3(2f * HX + 0.3f, 0.3f, 2f * HZ + 0.3f));
+            for (int i = -2; i <= 2; i++)
+                B(PropMats.WoodDark).Box(new Vector3(i * 2.2f, -0.32f, 0f), new Vector3(0.18f, 0.2f, 2f * HZ + 0.3f));
+
+            // stilts
+            float[] xs = { -HX + 0.1f, 0f, HX - 0.1f };
+            float[] zs = { -HZ + 0.1f, 0f, HZ - 0.1f };
+            foreach (float x in xs) foreach (float z in zs) Stilt(x, z);
+
+            // clapboard walls with openings (s0, s1, v0, v1)
+            wallId = 1; Wall(true, -HX, -HZ - T * 0.5f, HZ + T * 0.5f, new List<Vector4>(Holes[0]));
+            wallId = 2; Wall(true, HX, -HZ - T * 0.5f, HZ + T * 0.5f, new List<Vector4>(Holes[1]));
+            wallId = 3; Wall(false, -HZ, -HX + T * 0.5f, HX - T * 0.5f, new List<Vector4>(Holes[2]));
+            wallId = 4; Wall(false, HZ, -HX + T * 0.5f, HX - T * 0.5f, new List<Vector4>(Holes[3]));
+
+            // off-white corner posts and top plates
+            var trim = B(PropMats.Trim);
+            for (int sx = -1; sx <= 1; sx += 2)
+                for (int sz = -1; sz <= 1; sz += 2)
+                    trim.Box(new Vector3(sx * (HX + 0.02f), WallH * 0.5f, sz * (HZ + 0.02f)), new Vector3(0.22f, WallH, 0.22f));
+            trim.Box(new Vector3(0f, WallH - 0.06f, -HZ), new Vector3(2f * HX, 0.14f, T + 0.08f));
+            trim.Box(new Vector3(0f, WallH - 0.06f, HZ), new Vector3(2f * HX, 0.14f, T + 0.08f));
+
+            // gables (east / west): horizontal whitewashed boards shortened under the roof line, dark backing, solid prism
+            float rise = (HZ + T * 0.5f) * Mathf.Tan(PitchDeg * Mathf.Deg2Rad);
+            for (int s = -1; s <= 1; s += 2)
+            {
+                float x = s * HX;
+                var gap = B(PropMats.PlankGap);
+                for (int f = -1; f <= 1; f += 2)
+                {
+                    float xf = x + f * T * 0.2f;
+                    Vector3 a = new Vector3(xf, WallH, -HZ - T * 0.5f), b = new Vector3(xf, WallH, HZ + T * 0.5f), t = new Vector3(xf, WallH + rise, 0f);
+                    gap.Face3(a, b, t, new Vector3(f, 0f, 0f));
+                }
+                int row = 0;
+                for (float y = WallH; y < WallH + rise - 0.05f; y += BoardH, row++)
+                {
+                    float yTop = Mathf.Min(y + BoardH - BoardGap, WallH + rise);
+                    float half = (HZ + T * 0.5f) * (1f - (yTop - WallH) / rise);
+                    if (half < 0.08f) break;
+                    uint h = Hash(row, 20 + s, 7);
+                    float off = ((h & 255) / 255f - 0.5f) * 0.02f;
+                    B(PropMats.Whitewash((int)((h >> 8) % 3))).Box(new Vector3(x + s * off, (y + yTop) * 0.5f, 0f), new Vector3(T, yTop - y, 2f * half));
+                }
+                GablePrism(x, rise);
+                // a little round attic vent in the west gable (the east gable carries the sign)
+                if (s > 0) continue;
+                B(PropMats.Trim).Cylinder(new Vector3(x + s * (T * 0.5f), WallH + rise * 0.45f, 0f), Quaternion.Euler(0f, 0f, -90f * s), 0.24f, 0.24f, 0.04f, 8, false, true);
+                B(PropMats.Ink).Cylinder(new Vector3(x + s * (T * 0.5f + 0.04f), WallH + rise * 0.45f, 0f), Quaternion.Euler(0f, 0f, -90f * s), 0.15f, 0.15f, 0.005f, 8, false, true);
+            }
+        }
+
+        static uint Hash(int a, int b, int c)
+        {
+            unchecked
+            {
+                uint h = (uint)(a * 374761393 + b * 668265263 + c * 1442695041);
+                h = (h ^ (h >> 13)) * 1274126177u;
+                return h ^ (h >> 16);
+            }
+        }
+
+        /// Convex triangular prism collider closing a gable (the space between the wall top and the roof).
+        static void GablePrism(float x, float rise)
+        {
+            float z = HZ + T * 0.5f;
+            var v = new[]
+            {
+                new Vector3(x - T, WallH - 0.05f, -z), new Vector3(x - T, WallH - 0.05f, z), new Vector3(x - T, WallH + rise + 0.05f, 0f),
+                new Vector3(x + T, WallH - 0.05f, -z), new Vector3(x + T, WallH - 0.05f, z), new Vector3(x + T, WallH + rise + 0.05f, 0f),
+            };
+            var t = new[] { 0, 2, 1, 3, 4, 5, 0, 1, 4, 0, 4, 3, 1, 2, 5, 1, 5, 4, 0, 3, 5, 0, 5, 2 };
+            var m = new Mesh { name = "HutGableCol" };
+            m.vertices = v;
+            m.triangles = t;
+            m.RecalculateBounds();
+            var mc = PropCol.Mesh(cols, m, O, Quaternion.identity, Vector3.one, "GableCol");
+            mc.convex = true;
+        }
+
+        static void Stilt(float x, float z)
+        {
+            float g = GL(x, z);
+            float bottom = g - 0.4f, top = -0.2f;
+            if (top - bottom < 0.08f) return;
+            B(PropMats.WoodDark).Cylinder(new Vector3(x, bottom, z), Quaternion.identity, 0.13f, 0.12f, top - bottom, 6);
+            if (top - bottom > 0.6f) PropCol.Capsule(cols, O + new Vector3(x, (top + bottom) * 0.5f, z), 0.13f, top - bottom, Quaternion.identity);
+        }
+
+        /// Clapboard wall with rectangular openings. alongZ: wall at x = fixed running along z; else wall at z = fixed along x.
+        static void Wall(bool alongZ, float fixedCoord, float s0, float s1, List<Vector4> holes)
+        {
+            holes.Sort((a, b) => a.x.CompareTo(b.x));
+            float cur = s0;
+            foreach (var h in holes)
+            {
+                if (h.x > cur) WallPiece(alongZ, fixedCoord, cur, h.x, 0f, WallH);
+                if (h.z > 0f) WallPiece(alongZ, fixedCoord, h.x, h.y, 0f, h.z);
+                if (h.w < WallH) WallPiece(alongZ, fixedCoord, h.x, h.y, h.w, WallH);
+                cur = h.y;
+                Frame(alongZ, fixedCoord, h);
+            }
+            if (cur < s1) WallPiece(alongZ, fixedCoord, cur, s1, 0f, WallH);
+        }
+
+        /// One wall rectangle as horizontal boards (0.22 m pitch, 2.5 cm gaps) over a dark backing; three whitewash
+        /// variants, a random 0–1 cm out-of-plane offset per board, red-brown accent boards in the two lowest rows.
+        static void WallPiece(bool alongZ, float f, float a0, float a1, float v0, float v1)
+        {
+            float outSign = Mathf.Sign(f);
+            float s = (a0 + a1) * 0.5f;
+            float yc = (v0 + v1) * 0.5f;
+            Vector3 bc = alongZ ? new Vector3(f, yc, s) : new Vector3(s, yc, f);
+            Vector3 bs = alongZ ? new Vector3(T * 0.45f, v1 - v0, a1 - a0) : new Vector3(a1 - a0, v1 - v0, T * 0.45f);
+            B(PropMats.PlankGap).Box(bc, bs);
+            int k0 = Mathf.FloorToInt(v0 / BoardH + 1e-3f), k1 = Mathf.CeilToInt(v1 / BoardH - 1e-3f);
+            for (int k = k0; k < k1; k++)
+            {
+                float y0 = Mathf.Max(v0, k * BoardH), y1 = Mathf.Min(v1, (k + 1) * BoardH - BoardGap);
+                if (y1 - y0 < 0.02f) continue;
+                uint h = Hash(k, wallId, Mathf.RoundToInt(a0 * 10f));
+                float off = ((h & 255) / 255f - 0.5f) * 0.02f * outSign;
+                float y = (y0 + y1) * 0.5f;
+                Vector3 center = alongZ ? new Vector3(f + off, y, s) : new Vector3(s, y, f + off);
+                Vector3 size = alongZ ? new Vector3(T, y1 - y0, a1 - a0) : new Vector3(a1 - a0, y1 - y0, T);
+                Material m = k < 2 ? PropMats.AccentBoard : PropMats.Whitewash((int)((h >> 8) % 3));
+                B(m).Box(center, size);
+            }
+            Vector3 cs = alongZ ? new Vector3(T, v1 - v0, a1 - a0) : new Vector3(a1 - a0, v1 - v0, T);
+            Col(bc, cs);
+        }
+
+        static void Frame(bool alongZ, float f, Vector4 h)
+        {
+            var d = B(PropMats.Trim);
+            float depth = T + 0.1f, w = 0.09f;
+            bool isDoor = h.z <= 0.001f;
+            Vector3 P(float s, float y) => alongZ ? new Vector3(f, y, s) : new Vector3(s, y, f);
+            Vector3 Sz(float alongS, float alongY) => alongZ ? new Vector3(depth, alongY, alongS) : new Vector3(alongS, alongY, depth);
+            d.Box(P(h.x - w * 0.5f, (h.z + h.w) * 0.5f), Sz(w, h.w - h.z + w));
+            d.Box(P(h.y + w * 0.5f, (h.z + h.w) * 0.5f), Sz(w, h.w - h.z + w));
+            d.Box(P((h.x + h.y) * 0.5f, h.w + w * 0.5f), Sz(h.y - h.x + 2f * w, w));
+            if (!isDoor)
+            {
+                Vector3 sill = alongZ ? new Vector3(depth + 0.12f, w, h.y - h.x + 3f * w) : new Vector3(h.y - h.x + 3f * w, w, depth + 0.12f);
+                d.Box(P((h.x + h.y) * 0.5f, h.z - w * 0.5f), sill);
+                // 4-pane window: light glass and a cross of off-white mullions
+                float cs = (h.x + h.y) * 0.5f, cy = (h.z + h.w) * 0.5f;
+                Vector3 gs = alongZ ? new Vector3(0.02f, h.w - h.z, h.y - h.x) : new Vector3(h.y - h.x, h.w - h.z, 0.02f);
+                B(PropMats.Glass).Box(P(cs, cy), gs);
+                Vector3 mv = alongZ ? new Vector3(0.05f, h.w - h.z, 0.05f) : new Vector3(0.05f, h.w - h.z, 0.05f);
+                Vector3 mh = alongZ ? new Vector3(0.05f, 0.05f, h.y - h.x) : new Vector3(h.y - h.x, 0.05f, 0.05f);
+                d.Box(P(cs, cy), mv);
+                d.Box(P(cs, cy), mh);
+                // turquoise shutters left open on both sides (outside)
+                float outSide = Mathf.Sign(f);
+                float sw = (h.y - h.x) * 0.5f;
+                for (int side = 0; side < 2; side++)
+                {
+                    float sc = side == 0 ? h.x - w - sw * 0.5f - 0.02f : h.y + w + sw * 0.5f + 0.02f;
+                    Vector3 sp = alongZ
+                        ? new Vector3(f + outSide * (T * 0.5f + 0.05f), (h.z + h.w) * 0.5f, sc)
+                        : new Vector3(sc, (h.z + h.w) * 0.5f, f + outSide * (T * 0.5f + 0.05f));
+                    Vector3 ss = alongZ ? new Vector3(0.05f, h.w - h.z, sw) : new Vector3(sw, h.w - h.z, 0.05f);
+                    B(PropMats.Shutter).Box(sp, ss);
+                }
+            }
+        }
+
+        // ------------------------------------------------------------------ roof: stepped red shingle rows
+        static void BuildRoof()
+        {
+            float p = PitchDeg * Mathf.Deg2Rad;
+            float ridgeY = RidgeY;
+            float over = 0.55f;
+            float run = HZ + over;
+            float slopeLen = run / Mathf.Cos(p);
+            const int rows = 5;
+            float seg = slopeLen / rows;
+            float width = 2f * HX + 2f * over;
+            for (int s = -1; s <= 1; s += 2)
+            {
+                for (int r = 0; r < rows; r++)
+                {
+                    float d = (r + 0.5f) * seg;
+                    Vector3 c = new Vector3(0f, ridgeY + 0.07f - d * Mathf.Sin(p), s * d * Mathf.Cos(p));
+                    Quaternion rot = Quaternion.Euler(s * (PitchDeg + 4f), 0f, 0f);
+                    B(r % 2 == 0 ? PropMats.Roof : PropMats.RoofDark).Box(c, new Vector3(width + (r % 2) * 0.04f, 0.1f, seg * 1.14f), rot);
+                }
+                Quaternion prot = Quaternion.Euler(s * PitchDeg, 0f, 0f);
+                float zc = s * run * 0.5f;
+                float yc = ridgeY - run * 0.5f * Mathf.Tan(p) + 0.05f;
+                Vector3 center = new Vector3(0f, yc, zc);
+                // thick slabs (no tunnelling when jumping against them), overlapping at the ridge
+                Col(center + prot * new Vector3(0f, 0.02f, -s * 0.15f), new Vector3(width + 0.1f, 0.4f, slopeLen + 0.3f), prot);
+            }
+            Col(new Vector3(0f, ridgeY + 0.05f, 0f), new Vector3(width + 0.1f, 0.45f, 0.6f));
+            // chunky ridge cap
+            B(PropMats.RoofDark).Box(new Vector3(0f, ridgeY + 0.1f, 0f), new Vector3(width + 0.1f, 0.3f, 0.3f), Quaternion.Euler(45f, 0f, 0f));
+
+            // rafters, ridge beam, ties (visible from inside)
+            var dark = B(PropMats.WoodDark);
+            dark.Box(new Vector3(0f, ridgeY - 0.12f, 0f), new Vector3(2f * HX, 0.2f, 0.16f));
+            for (int i = -2; i <= 2; i++)
+            {
+                float x = i * 1.8f;
+                dark.Beam(new Vector3(x, WallH, -HZ), new Vector3(x, ridgeY - 0.05f, 0f), 0.1f, 0.14f);
+                dark.Beam(new Vector3(x, WallH, HZ), new Vector3(x, ridgeY - 0.05f, 0f), 0.1f, 0.14f);
+            }
+            dark.Box(new Vector3(-1.8f, WallH + 0.05f, 0f), new Vector3(0.12f, 0.14f, 2f * HZ));
+            dark.Box(new Vector3(1.8f, WallH + 0.05f, 0f), new Vector3(0.12f, 0.14f, 2f * HZ));
+
+            // L.12: a wooden ladder at the north-west corner leaning on the eave (the chopper sometimes delivers up there)
+            float lx = -HX + 0.9f;
+            float eaveZ = HZ + over;
+            float eave = WallH - over * Mathf.Tan(p) - 0.05f;
+            float footZ = eaveZ + 0.75f, topZ = eaveZ + 0.08f;
+            float footY = GL(lx, footZ);
+            float railTop = eave + 1.0f;
+            var lw = B(PropMats.Wood);
+            for (int s = -1; s <= 1; s += 2)
+                lw.Beam(new Vector3(lx + s * 0.25f, footY - 0.05f, footZ), new Vector3(lx + s * 0.25f, railTop, topZ), 0.06f, 0.06f);
+            for (float y = footY + 0.3f; y < railTop - 0.15f; y += 0.3f)
+            {
+                float t = (y - footY) / (railTop - footY);
+                float z = Mathf.Lerp(footZ, topZ, t);
+                lw.Rod(new Vector3(lx - 0.25f, y, z), new Vector3(lx + 0.25f, y, z), 0.025f, 0.025f, 5);
+            }
+            Vector3 roofTop = new Vector3(lx, ridgeY - (HZ - 0.4f) * Mathf.Tan(p) + 0.14f, HZ - 0.4f);
+            PropLadder.Create(root, "HutRoofLadder", W(new Vector3(lx, footY, footZ)), O.y + railTop, W(roofTop), Vector3.forward, LadderInfo.Wood);
+            PropInfo.SetSpot("hut_roof", W(new Vector3(0f, RidgeY - 0.6f, 1.6f)));
+        }
+
+        // ------------------------------------------------------------------ porch (veranda), awning, steps, hammocks
+        static void BuildPorch(PropExclusion excl)
+        {
+            float px0 = HX + 0.15f, px1 = PorchX1, pz0 = -PorchZ, pz1 = PorchZ;
+            int k = 0;
+            for (float x = px0 + 0.15f; x < px1; x += 0.3f, k++)
+                B(k % 3 == 2 ? PropMats.WoodLight : PropMats.Wood).Box(new Vector3(x, -0.06f, (pz0 + pz1) * 0.5f), new Vector3(0.28f, 0.12f, pz1 - pz0));
+            B(PropMats.WoodDark).Box(new Vector3((px0 + px1) * 0.5f, -0.17f, (pz0 + pz1) * 0.5f), new Vector3(px1 - px0, 0.12f, pz1 - pz0 - 0.05f));
+            Vector3 pc = new Vector3((px0 + px1) * 0.5f, -0.1f, (pz0 + pz1) * 0.5f);
+            Vector3 ps = new Vector3(px1 - px0, 0.2f, pz1 - pz0);
+            Col(pc - new Vector3(0f, 0.05f, 0f), ps + new Vector3(0f, 0.1f, 0f));
+            for (int s = -1; s <= 1; s += 2)
+            {
+                Stilt(px1 - 0.15f, s * (PorchZ - 0.1f));
+                Stilt(px0 + 1.2f, s * (PorchZ - 0.1f));
+            }
+            Stilt(px1 - 0.15f, StepsZ - 1.0f);
+            Stilt(px1 - 0.15f, StepsZ + 1.0f);
+
+            // striped awning over the whole veranda on four posts, zig-zag valance
+            var wood = B(PropMats.Wood);
+            float aTop = 2.55f, aLow = 2.25f, ax1 = PorchX1 + 0.25f;
+            float ang = Mathf.Atan2(aTop - aLow, ax1 - HX) * Mathf.Rad2Deg;
+            float alen = (ax1 - HX) / Mathf.Cos(ang * Mathf.Deg2Rad);
+            Quaternion arot = Quaternion.Euler(0f, 0f, -ang);
+            const int stripes = 10;
+            float az0 = -PorchZ - 0.25f, sw = (2f * PorchZ + 0.5f) / stripes;
+            for (int i = 0; i < stripes; i++)
+            {
+                float zc = az0 + (i + 0.5f) * sw;
+                var m = i % 2 == 0 ? PropMats.Roof : PropMats.White;
+                B(m).Box(new Vector3((HX + ax1) * 0.5f, (aTop + aLow) * 0.5f + 0.04f, zc), new Vector3(alen, 0.05f, sw), arot);
+                Vector3 e0 = new Vector3(ax1, aLow + 0.02f, zc - sw * 0.5f), e1 = new Vector3(ax1, aLow + 0.02f, zc + sw * 0.5f);
+                B(m).Tri2(e0, e1, new Vector3(ax1, aLow - 0.24f, zc), Vector3.right);
+            }
+            float postX = PorchX1 - 0.1f;
+            wood.Box(new Vector3(postX, 2.2f, 0f), new Vector3(0.14f, 0.14f, 2f * PorchZ + 0.3f));
+            float[] postZ = { -PorchZ + 0.1f, StepsZ - 0.85f, StepsZ + 0.85f, PorchZ - 0.1f };
+            foreach (float z in postZ)
+            {
+                wood.Box(new Vector3(postX, 1.1f, z), new Vector3(0.14f, 2.2f, 0.14f));
+                Col(new Vector3(postX, 1.1f, z), new Vector3(0.16f, 2.2f, 0.16f));
+            }
+            // the awning is solid: nobody climbs through it into the gable
+            Col(new Vector3((HX + ax1) * 0.5f, (aTop + aLow) * 0.5f + 0.06f, az0 + stripes * sw * 0.5f), new Vector3(alen + 0.1f, 0.16f, stripes * sw + 0.1f), arot);
+            // railings: north / south edges and the east edge beside the steps
+            for (int s = 0; s < 2; s++)
+            {
+                float z = s == 0 ? pz0 + 0.05f : pz1 - 0.05f;
+                wood.Box(new Vector3((px0 + px1) * 0.5f, 0.95f, z), new Vector3(px1 - px0, 0.09f, 0.09f));
+                for (int i = 0; i < 4; i++) wood.Box(new Vector3(px0 + 0.3f + i * 0.85f, 0.47f, z), new Vector3(0.08f, 0.94f, 0.08f));
+                Col(new Vector3((px0 + px1) * 0.5f, 0.5f, z), new Vector3(px1 - px0, 1f, 0.1f));
+            }
+            for (int s = -1; s <= 1; s += 2)
+            {
+                float zA = s < 0 ? -PorchZ : StepsZ + 0.85f, zB = s < 0 ? StepsZ - 0.85f : PorchZ;
+                wood.Box(new Vector3(postX, 0.95f, (zA + zB) * 0.5f), new Vector3(0.09f, 0.09f, zB - zA));
+                for (float z = zA + 0.6f; z < zB - 0.2f; z += 0.7f) wood.Box(new Vector3(postX, 0.47f, z), new Vector3(0.08f, 0.94f, 0.08f));
+                Col(new Vector3(postX, 0.5f, (zA + zB) * 0.5f), new Vector3(0.1f, 1f, zB - zA));
+            }
+            // flower boxes on the east railing
+            for (int s = -1; s <= 1; s += 2)
+            {
+                Vector3 fb = new Vector3(postX, 1.06f, StepsZ + s * 2.2f);
+                B(PropMats.Shutter).Box(fb, new Vector3(0.22f, 0.16f, 0.8f));
+                var rng = new System.Random(31 + s);
+                for (int i = 0; i < 3; i++)
+                {
+                    Vector3 bp = fb + new Vector3(0f, 0.14f, -0.25f + i * 0.25f);
+                    B(PropMats.GrassDark).Ico(bp, new Vector3(0.12f, 0.12f, 0.14f), Quaternion.Euler(0f, i * 40f, 0f), 0);
+                    B(i == 1 ? PropMats.FlowerYellow : PropMats.FlowerPink).Octa(bp + new Vector3(0.04f, 0.12f, PropUtil.Range(rng, -0.05f, 0.05f)), 0.05f);
+                }
+            }
+
+            // L.9: two porch hammocks (north and south end of the veranda) – sleep spots for co-op guests
+            for (int s = -1; s <= 1; s += 2)
+            {
+                float z = s * (PorchZ - 0.85f);
+                Vector3 a = new Vector3(HX + 0.2f, 1.72f, z), b = new Vector3(PorchX1 - 0.2f, 1.72f, z);
+                PorchHammock(a, b, s);
+                Vector3 mid = W(new Vector3((a.x + b.x) * 0.5f, 1.05f, z));
+                Vector3 stand = W(new Vector3((a.x + b.x) * 0.5f, 0.02f, z - s * 0.95f));
+                // round 3: the exact hammock curve (head at the wall hook, where the pillow is) – the diver lies IN it
+                int idx = PropBed.RegisterHammock(s < 0 ? "porch_hammock_south" : "porch_hammock_north", W(a), W(b), 0.62f, stand, s < 0 ? 0f : 180f, 0.11f);
+                var go = new GameObject(s < 0 ? "PorchHammockSouth" : "PorchHammockNorth");
+                go.transform.SetParent(root, false);
+                go.transform.position = mid;
+                var bc = go.AddComponent<BoxCollider>();
+                bc.size = new Vector3(2.4f, 0.35f, 0.9f);
+                var bed = go.AddComponent<PropBed>();
+                bed.spotIndex = idx;
+                bed.kind = SleepSpotInfo.Hammock;
+            }
+
+            // steps down to the beach
+            float rise = 0.19f, runStep = 0.3f, sz = StepsZ, swidth = 1.5f;
+            float lastTop = 0f, lastX = px1;
+            int count = 0;
+            var dark = B(PropMats.WoodDark);
+            for (int i = 0; i < 40; i++)
+            {
+                float top = -(i + 1) * rise;
+                float x = px1 + i * runStep + runStep * 0.5f;
+                float g = GL(x, sz);
+                if (top < g - 0.02f) break;
+                B(PropMats.WoodLight).Box(new Vector3(x, top - 0.04f, sz), new Vector3(runStep + 0.02f, 0.08f, swidth));
+                float blockH = top - 0.08f - (g - 0.3f);
+                if (blockH > 0.02f) dark.Box(new Vector3(x, top - 0.08f - blockH * 0.5f, sz), new Vector3(runStep, blockH, swidth - 0.1f));
+                lastTop = top;
+                lastX = x + runStep * 0.5f;
+                count++;
+            }
+            if (count > 0)
+            {
+                Vector2 A = new Vector2(px1, 0f), Bp = new Vector2(lastX, lastTop);
+                Vector2 d = Bp - A;
+                float angle = Mathf.Atan2(d.y, d.x) * Mathf.Rad2Deg;
+                Quaternion r = Quaternion.Euler(0f, 0f, angle);
+                Vector3 mid = new Vector3((A.x + Bp.x) * 0.5f, (A.y + Bp.y) * 0.5f, sz);
+                Col(mid - r * new Vector3(0f, 0.06f, 0f), new Vector3(d.magnitude + 0.1f, 0.12f, swidth), r);
+                excl.AddLine(O + new Vector3(px1, 0f, sz), O + new Vector3(lastX + 1.5f, 0f, sz), 2.5f);
+            }
+        }
+
+        /// A striped hammock hanging along x between the wall hook a and the porch post hook b (local).
+        static void PorchHammock(Vector3 a, Vector3 b, int side)
+        {
+            Vector3 dir = (b - a).normalized;
+            Vector3 lat = Vector3.Cross(Vector3.up, dir).normalized;
+            const int n = 8;
+            const float sag = 0.62f;
+            Vector3 P(float t, float w) => Vector3.Lerp(a, b, t) - Vector3.up * (sag * Mathf.Sin(t * Mathf.PI)) + lat * (w * Mathf.Sin(Mathf.Clamp01(t * 1.15f - 0.075f) * Mathf.PI) * 0.45f) - Vector3.up * (Mathf.Abs(w) * 0.1f * Mathf.Sin(t * Mathf.PI));
+            Material[] stripes = side < 0
+                ? new[] { PropMats.Flat(PropPal.Turquoise), PropMats.Trim, PropMats.Flat(PropPal.Sun), PropMats.Trim }
+                : new[] { PropMats.Flat(PropPal.Coral), PropMats.Trim, PropMats.Flat(PropPal.Turquoise), PropMats.Trim };
+            for (int s = 0; s < 4; s++)
+            {
+                float w0 = -1f + s * 0.5f, w1 = w0 + 0.5f;
+                var m = B(stripes[s]);
+                for (int i = 0; i < n; i++)
+                {
+                    float t0 = i / (float)n, t1 = (i + 1) / (float)n;
+                    m.Quad2(P(t0, w0), P(t1, w0), P(t1, w1), P(t0, w1), Vector3.up);
+                }
+            }
+            var rope = B(PropMats.Rope);
+            rope.Rod(a, P(0.06f, 0f), 0.018f, 0.018f, 3);
+            rope.Rod(b, P(0.94f, 0f), 0.018f, 0.018f, 3);
+            B(PropMats.DarkMetal).Torus(a, Quaternion.Euler(0f, 0f, 90f), 0.05f, 0.012f, 6, 3);
+            B(PropMats.DarkMetal).Torus(b, Quaternion.Euler(0f, 0f, 90f), 0.05f, 0.012f, 6, 3);
+            // a pillow at the head end
+            B(PropMats.White).Box(P(0.22f, 0f) + Vector3.up * 0.06f, new Vector3(0.45f, 0.1f, 0.3f), Quaternion.Euler(0f, 0f, 12f));
+        }
+
+        // ------------------------------------------------------------------ interior
+        // Round 3 (GDD §19 „Das Haus innen schöner“): a cosy How-to-Fish cabin. Zones (local frame):
+        //   NW bedroom – bed (WorldLayout.Bed), nightstand + table lamp, bedside rug, pinboard with Gus' sea chart;
+        //       the corner around WorldLayout.PlayerSpawn (-3.6, 4) stays free (≥ 0.6 m)
+        //   W  desk under the west window (laptop, Gus' letter, the „Einrichten“ catalogue), chair, locker, high shelf
+        //   SW workshop – workbench + pegboard, grinder against the west wall, stool
+        //   S  sofa bunk under the window, bookshelf
+        //   SE TV corner – CRT TV (WorldLayout.TV) on a cabinet, armchair, side table, floor lamp, the rug
+        //   NE kitchen – fridge, counter + sink + open shelves, water filter, big plant; trophy shelf on the east wall
+        //   E  door (z 0.2–1.6) kept free; mounted fish beside it
+        // Customizable parts (wall paint, floor, rug, curtains, decor items): PropHutDecor.
+        static void BuildInterior(Transform root)
+        {
+            try { PropHutDecor.Build(root, O, Holes); }
+            catch (System.Exception e) { Debug.LogError("Sealebrities props: hut decor failed: " + e); }
+            InteriorTrims();
+            BedCorner(root);
+            DeskCorner(root);
+            Workshop();
+            Kitchen(root);
+            LivingCorner();
+
+            // L.9: sofa bunk under the south windows (sleep spot) + the bookshelf beside it
+            SofaBunk(root, new Vector3(-1.05f, 0f, -HZ + 0.5f));
+            Shelf(new Vector3(0.45f, 0f, -HZ + T * 0.5f + 0.035f + 0.18f), 0f, 3, 0.84f, 0.36f, 1.9f, true);
+            Col(new Vector3(0.45f, 0.95f, -HZ + T * 0.5f + 0.035f + 0.18f), new Vector3(0.86f, 1.9f, 0.36f));
+            FramedPhotos(new Vector3(0.45f, 2.2f, -HZ + T * 0.5f + 0.035f));
+
+            // 1c: the locker (west wall, between the north window and the bed corner – the spawn stays free)
+            Locker(root, new Vector3(-HX + 0.36f, 0f, 2.75f));
+
+            // trophy shelf on the east wall: golden camera (Q52) + the old brass diving helmet on top
+            Vector3 trophyShelf = new Vector3(HX - T * 0.5f - 0.035f - 0.2f, 0f, 3.0f);
+            Shelf(trophyShelf, -90f, 2, 1.6f, 0.4f, 1.9f, false);
+            Col(trophyShelf + new Vector3(0f, 0.95f, 0f), new Vector3(0.4f, 1.9f, 1.62f));
+            Trophy(root, trophyShelf + new Vector3(0f, ShelfTop(1.9f), -0.1f), -90f);
+            DivingHelmet(trophyShelf + new Vector3(0f, ShelfTop(1.9f), 0.52f), -90f);
+            MountedFish(new Vector3(HX - T * 0.5f - 0.035f, 1.68f, -0.95f));
+
+            // round 3 (GDD §19 Überleben / Waffen): the water filter in the kitchen (north wall, beside the sink) and the
+            // grinder in the workshop corner (west wall) – PropSurvival
+            try { PropSurvival.BuildHutStations(root, W(new Vector3(3.25f, 0f, HZ - 0.45f)), 180f, W(new Vector3(-HX + 0.42f, 0f, -2.75f)), 90f); }
+            catch (System.Exception e) { Debug.LogError("Sealebrities props: hut survival stations failed: " + e); }
+
+            // posters: FinTube on the west wall above the spawn corner, Gus' 1987 documentary above the bed
+            float wx = -HX + T * 0.5f + 0.04f;
+            B(PropMats.Poster).QuadAuto(new Vector3(wx, 1.2f, 3.45f), new Vector3(wx, 1.9f, 3.45f), new Vector3(wx, 1.9f, 4.29f), new Vector3(wx, 1.2f, 4.29f),
+                new Vector2(0f, 0f), new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(1f, 0f), Vector3.right);
+            float nz = HZ - T * 0.5f - 0.04f;
+            B(PropMats.GusPoster).QuadAuto(new Vector3(-2.2f, 1.35f, nz), new Vector3(-2.2f, 2.25f, nz), new Vector3(-1.2f, 2.25f, nz), new Vector3(-1.2f, 1.35f, nz),
+                new Vector2(0f, 0f), new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(1f, 0f), Vector3.back);
+            // fishing rod hanging on the south wall (east of the windows)
+            B(PropMats.WoodDark).Rod(new Vector3(2.62f, 2.32f, -HZ + T * 0.5f + 0.07f), new Vector3(4.05f, 1.5f, -HZ + T * 0.5f + 0.07f), 0.02f, 0.01f, 4);
+            B(PropMats.Metal).Torus(new Vector3(3.6f, 1.82f, -HZ + T * 0.5f + 0.09f), Quaternion.Euler(90f, 0f, 0f), 0.05f, 0.015f, 8, 3);
+
+            // plants: hanging pothos over the sofa, a potted plant by the door, a cactus on the desk
+            HangingPlant(new Vector3(-1.8f, 2.22f, -3.95f));
+            PottedPlant(new Vector3(HX - 0.5f, 0f, -0.18f), 0.55f, 11);
+            Col(new Vector3(HX - 0.5f, 0.2f, -0.18f), new Vector3(0.26f, 0.4f, 0.26f));
+
+            // hanging lamp under the ridge: cone shade + glowing bulb
+            Vector3 lamp = new Vector3(0.3f, 2.3f, 0f);
+            B(PropMats.Ink).Rod(new Vector3(lamp.x, RidgeY - 0.2f, 0f), lamp + new Vector3(0f, 0.15f, 0f), 0.012f, 0.012f, 4);
+            B(PropMats.FlowerYellow).Cylinder(lamp - new Vector3(0f, 0.05f, 0f), Quaternion.identity, 0.28f, 0.07f, 0.22f, 6, false, true);
+            B(PropMats.Wall2).Cylinder(lamp - new Vector3(0f, 0.05f, 0f), Quaternion.identity, 0.27f, 0.065f, 0.215f, 6, false, false, 1f, 1f, 0f, true);
+            B(PropMats.HutBulb).Ico(lamp - new Vector3(0f, 0.04f, 0f), new Vector3(0.07f, 0.08f, 0.07f), Quaternion.identity, 0);
+            var lt = PropUtil.AddPointLight(root, O + lamp - new Vector3(0f, 0.15f, 0f), new Color(1f, 0.78f, 0.52f), 10f, 2.4f, "HutLamp");
+            PropNightLight.Attach(lt.gameObject, lt, PropMats.HutBulb, new Color(4f, 2.9f, 1.6f), 0.12f, 0.45f, false);
+        }
+
+        /// Skirting boards, crown molding on the gable walls, inner corner trims, curtain rods over every window.
+        static void InteriorTrims()
+        {
+            float ix = HX - T * 0.5f, iz = HZ - T * 0.5f;
+            const float sk = 0.05f;
+            var dark = B(PropMats.WoodDark);
+            dark.Box(new Vector3(-ix + sk * 0.5f, 0.06f, 0f), new Vector3(sk, 0.12f, 2f * iz));
+            dark.Box(new Vector3(0f, 0.06f, -iz + sk * 0.5f), new Vector3(2f * ix, 0.12f, sk));
+            dark.Box(new Vector3(0f, 0.06f, iz - sk * 0.5f), new Vector3(2f * ix, 0.12f, sk));
+            dark.Box(new Vector3(ix - sk * 0.5f, 0.06f, (-iz + 0.2f) * 0.5f), new Vector3(sk, 0.12f, iz + 0.2f));
+            dark.Box(new Vector3(ix - sk * 0.5f, 0.06f, (1.6f + iz) * 0.5f), new Vector3(sk, 0.12f, iz - 1.6f));
+            var trim = B(PropMats.Trim);
+            for (int s = -1; s <= 1; s += 2)
+                trim.Box(new Vector3(s * (ix - 0.025f), WallH - 0.05f, 0f), new Vector3(0.05f, 0.12f, 2f * iz));
+            for (int sx = -1; sx <= 1; sx += 2)
+                for (int sz = -1; sz <= 1; sz += 2)
+                    trim.Box(new Vector3(sx * (ix - 0.03f), WallH * 0.5f, sz * (iz - 0.03f)), new Vector3(0.06f, WallH, 0.06f));
+            // curtain rods
+            var rod = B(PropMats.Ink);
+            for (int wi = 0; wi < 4; wi++)
+            {
+                var list = Holes[wi];
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var h = list[i];
+                    if (h.z <= 0.001f) continue;
+                    float y = h.w + 0.16f, off = 0.17f;
+                    Vector3 a, b, n;
+                    if (wi < 2)
+                    {
+                        float x = wi == 0 ? -ix + off : ix - off;
+                        a = new Vector3(x, y, h.x - 0.36f); b = new Vector3(x, y, h.y + 0.36f);
+                        n = new Vector3(wi == 0 ? -1f : 1f, 0f, 0f);
+                    }
+                    else
+                    {
+                        float z = wi == 2 ? -iz + off : iz - off;
+                        a = new Vector3(h.x - 0.36f, y, z); b = new Vector3(h.y + 0.36f, y, z);
+                        n = new Vector3(0f, 0f, wi == 2 ? -1f : 1f);
+                    }
+                    rod.Rod(a, b, 0.012f, 0.012f, 5, true);
+                    rod.Ico(a, new Vector3(0.025f, 0.025f, 0.025f), Quaternion.identity, 0);
+                    rod.Ico(b, new Vector3(0.025f, 0.025f, 0.025f), Quaternion.identity, 0);
+                    rod.Rod(a + n * 0.14f + (b - a).normalized * 0.06f, a + (b - a).normalized * 0.06f, 0.008f, 0.008f, 4);
+                    rod.Rod(b + n * 0.14f - (b - a).normalized * 0.06f, b - (b - a).normalized * 0.06f, 0.008f, 0.008f, 4);
+                }
+            }
+        }
+
+        // ---- NW: bed corner
+        static void BedCorner(Transform root)
+        {
+            // bed at WorldLayout.Bed, head at the north wall
+            Vector3 bed = Local(WorldLayout.Bed);
+            float bx = bed.x, bz = bed.z;
+            var frame = B(PropMats.Wood);
+            frame.Box(new Vector3(bx, 0.22f, bz), new Vector3(1.04f, 0.2f, 1.94f));
+            for (int sx = -1; sx <= 1; sx += 2)
+                for (int sz = -1; sz <= 1; sz += 2)
+                    frame.Box(new Vector3(bx + sx * 0.45f, 0.1f, bz + sz * 0.88f), new Vector3(0.1f, 0.2f, 0.1f));
+            frame.Box(new Vector3(bx, 0.6f, bz + 0.93f), new Vector3(1.08f, 0.85f, 0.08f));
+            frame.Box(new Vector3(bx, 1.05f, bz + 0.93f), new Vector3(1.16f, 0.08f, 0.12f));
+            B(PropMats.WoodDark).Box(new Vector3(bx, 0.38f, bz - 0.95f), new Vector3(1.08f, 0.36f, 0.06f));
+            B(PropMats.White).Box(new Vector3(bx, 0.39f, bz), new Vector3(0.94f, 0.16f, 1.86f));
+            B(PropMats.Wall2).Box(new Vector3(bx, 0.53f, bz + 0.66f), new Vector3(0.64f, 0.13f, 0.36f), Quaternion.Euler(-8f, 3f, 0f));
+            B(PropMats.CushionA).Box(new Vector3(bx + 0.22f, 0.58f, bz + 0.78f), new Vector3(0.36f, 0.16f, 0.12f), Quaternion.Euler(-20f, -8f, 0f));
+            B(PropMats.Blanket).Box(new Vector3(bx, 0.49f, bz - 0.25f), new Vector3(1.0f, 0.06f, 1.32f), Quaternion.Euler(0f, 1.5f, 0f));
+            B(PropMats.Blanket).Box(new Vector3(bx + 0.51f, 0.32f, bz - 0.25f), new Vector3(0.04f, 0.36f, 1.26f));
+            // a striped quilt band and a folded throw at the foot
+            B(PropMats.Flat(PropPal.Sun)).Box(new Vector3(bx, 0.522f, bz - 0.05f), new Vector3(1.0f, 0.006f, 0.12f), Quaternion.Euler(0f, 1.5f, 0f));
+            B(PropMats.Flat(PropPal.Coral)).Box(new Vector3(bx - 0.05f, 0.545f, bz - 0.72f), new Vector3(0.8f, 0.05f, 0.3f), Quaternion.Euler(0f, -3f, 0f));
+            var bedGo = new GameObject("Bed");
+            bedGo.transform.SetParent(root, false);
+            bedGo.transform.position = O + new Vector3(bx, 0.33f, bz);
+            var bc = bedGo.AddComponent<BoxCollider>();
+            bc.size = new Vector3(1.05f, 0.66f, 1.95f);
+            var pb = bedGo.AddComponent<PropBed>();
+            pb.kind = SleepSpotInfo.Bed;
+            // round 3: head on the pillow (north), pelvis on the blanket – the diver lies ON the mattress
+            pb.spotIndex = PropBed.RegisterBed("hut_bed", W(new Vector3(bx, 0.595f, bz + 0.66f)), 0.36f, Vector3.back, W(new Vector3(bx, 0.52f, bz)).y,
+                                               W(new Vector3(bx + 0.95f, 0.02f, bz - 0.2f)), 270f, SleepSpotInfo.Bed);
+
+            // nightstand (east of the bed, away from the player spawn) with drawer, table lamp, book and alarm clock
+            Vector3 ns = new Vector3(bx + 0.88f, 0f, HZ - T * 0.5f - 0.035f - 0.21f);
+            B(PropMats.WoodLight).Box(ns + new Vector3(0f, 0.27f, 0f), new Vector3(0.45f, 0.5f, 0.4f));
+            B(PropMats.Wood).Box(ns + new Vector3(0f, 0.535f, 0f), new Vector3(0.49f, 0.04f, 0.44f));
+            B(PropMats.Shutter).Box(ns + new Vector3(0f, 0.38f, -0.205f), new Vector3(0.38f, 0.16f, 0.012f));
+            B(PropMats.Metal).Box(ns + new Vector3(0f, 0.38f, -0.215f), new Vector3(0.08f, 0.025f, 0.015f));
+            Col(ns + new Vector3(0f, 0.28f, 0f), new Vector3(0.49f, 0.56f, 0.44f));
+            // (the shade stays below the curtain hem of the north window: top at 0.87 m)
+            Vector3 tl = ns + new Vector3(0.1f, 0.555f, -0.02f);
+            B(PropMats.Ink).Cylinder(tl, Quaternion.identity, 0.07f, 0.06f, 0.03f, 8, false, true);
+            B(PropMats.WoodDark).Rod(tl, tl + new Vector3(0f, 0.2f, 0f), 0.012f, 0.012f, 4);
+            B(PropMats.Flat(PropPal.Canvas)).Cylinder(tl + new Vector3(0f, 0.145f, 0f), Quaternion.identity, 0.14f, 0.085f, 0.17f, 8, false, true);
+            B(PropMats.HutBulb).Ico(tl + new Vector3(0f, 0.18f, 0f), new Vector3(0.04f, 0.05f, 0.04f), Quaternion.identity, 0);
+            var tlt = PropUtil.AddPointLight(root, W(tl + new Vector3(0f, 0.16f, -0.08f)), new Color(1f, 0.8f, 0.55f), 3.6f, 0.9f, "HutTableLamp");
+            PropNightLight.Attach(tlt.gameObject, tlt, PropMats.HutBulb, new Color(4f, 2.9f, 1.6f), 0.12f, 0.45f, false);
+            B(PropMats.Flat(PropPal.Turquoise)).Box(ns + new Vector3(-0.1f, 0.575f, -0.06f), new Vector3(0.16f, 0.035f, 0.22f), Quaternion.Euler(0f, 14f, 0f));
+            B(PropMats.Flat(PropPal.Coral)).Box(ns + new Vector3(-0.12f, 0.6f, -0.08f), new Vector3(0.012f, 0.012f, 0.012f));
+            B(PropMats.Flat(PropPal.LighthouseRed)).Cylinder(ns + new Vector3(-0.14f, 0.555f, 0.1f), Quaternion.Euler(90f, 0f, 0f), 0.045f, 0.045f, 0.035f, 8, true, true);
+            B(PropMats.White).Cylinder(ns + new Vector3(-0.14f, 0.555f, 0.1f) + new Vector3(0f, 0f, -0.0f), Quaternion.Euler(90f, 0f, 0f), 0.034f, 0.034f, 0.037f, 8, true, true);
+
+            // round sheepskin rug beside the bed
+            B(PropMats.Flat(PropPal.Paper)).Cylinder(new Vector3(bx - 0.95f, 0f, bz - 0.4f), Quaternion.identity, 0.48f, 0.46f, 0.016f, 9, false, true, 1f, 1f, 0f, false, 12f);
+            B(PropMats.White).Cylinder(new Vector3(bx - 0.95f, 0f, bz - 0.4f), Quaternion.identity, 0.34f, 0.32f, 0.022f, 9, false, true, 1f, 1f, 0f, false, 30f);
+
+            // pinboard with Gus' sea chart, notes and pins (north wall, above the free spawn corner)
+            float pz = HZ - T * 0.5f - 0.04f;
+            Vector3 pin = new Vector3(-3.6f, 1.55f, pz);
+            B(PropMats.WoodDark).Box(pin, new Vector3(1.34f, 0.84f, 0.03f));
+            B(PropMats.Flat(LowPoly.Hex("#B8956A"))).Box(pin - new Vector3(0f, 0f, 0.016f), new Vector3(1.24f, 0.74f, 0.012f));
+            Vector3 chart = pin + new Vector3(-0.22f, 0.02f, -0.025f);
+            B(PropMats.Flat(LowPoly.Hex("#A9CFDC"))).Box(chart, new Vector3(0.66f, 0.48f, 0.004f), Quaternion.Euler(0f, 0f, 2f));
+            B(PropMats.Flat(PropPal.Sand)).Box(chart + new Vector3(-0.05f, 0.03f, -0.004f), new Vector3(0.2f, 0.12f, 0.003f), Quaternion.Euler(0f, 0f, 20f));
+            B(PropMats.Flat(LowPoly.Hex("#7FA243"))).Box(chart + new Vector3(-0.06f, 0.035f, -0.006f), new Vector3(0.1f, 0.06f, 0.003f), Quaternion.Euler(0f, 0f, 24f));
+            B(PropMats.Flat(LowPoly.Hex("#5A86A0"))).Box(chart + new Vector3(0.18f, -0.12f, -0.005f), new Vector3(0.18f, 0.1f, 0.002f));
+            B(PropMats.LighthouseRed).Box(chart + new Vector3(0.2f, 0.1f, -0.007f), new Vector3(0.05f, 0.012f, 0.003f), Quaternion.Euler(0f, 0f, 45f));
+            B(PropMats.LighthouseRed).Box(chart + new Vector3(0.2f, 0.1f, -0.007f), new Vector3(0.05f, 0.012f, 0.003f), Quaternion.Euler(0f, 0f, -45f));
+            Color[] notes = { PropPal.Paper, PropPal.Sun, PropPal.FlowerPink, PropPal.Paper };
+            for (int i = 0; i < 4; i++)
+            {
+                Vector3 nt = pin + new Vector3(0.3f + (i % 2) * 0.22f, 0.18f - (i / 2) * 0.3f, -0.024f);
+                B(PropMats.Flat(notes[i])).Box(nt, new Vector3(0.16f, 0.16f, 0.003f), Quaternion.Euler(0f, 0f, (i - 1.5f) * 6f));
+                B(PropMats.LighthouseRed).Ico(nt + new Vector3(0f, 0.06f, -0.006f), new Vector3(0.012f, 0.012f, 0.012f), Quaternion.identity, 0);
+            }
+            B(PropMats.LighthouseRed).Ico(chart + new Vector3(-0.3f, 0.22f, -0.008f), new Vector3(0.012f, 0.012f, 0.012f), Quaternion.identity, 0);
+            B(PropMats.LighthouseRed).Ico(chart + new Vector3(0.3f, 0.22f, -0.008f), new Vector3(0.012f, 0.012f, 0.012f), Quaternion.identity, 0);
+        }
+
+        // ---- W: desk under the west window, chair, high shelf
+        static void DeskCorner(Transform root)
+        {
+            Vector3 tp = new Vector3(-HX + T * 0.5f + 0.035f + 0.42f, 0f, -1.25f);
+            var light = B(PropMats.WoodLight);
+            light.Box(tp + new Vector3(0f, 0.74f, 0f), new Vector3(0.84f, 0.07f, 1.34f));
+            for (int sx = -1; sx <= 1; sx += 2)
+                for (int sz = -1; sz <= 1; sz += 2)
+                    light.Box(tp + new Vector3(sx * 0.36f, 0.36f, sz * 0.61f), new Vector3(0.07f, 0.72f, 0.07f));
+            // drawer block under the north end
+            B(PropMats.Wood).Box(tp + new Vector3(-0.02f, 0.4f, 0.4f), new Vector3(0.74f, 0.6f, 0.44f));
+            for (int i = 0; i < 3; i++)
+            {
+                B(PropMats.Shutter).Box(tp + new Vector3(0.355f, 0.22f + i * 0.19f, 0.4f), new Vector3(0.012f, 0.16f, 0.38f));
+                B(PropMats.Metal).Box(tp + new Vector3(0.365f, 0.22f + i * 0.19f, 0.4f), new Vector3(0.015f, 0.025f, 0.08f));
+            }
+            Col(tp + new Vector3(0f, 0.39f, 0f), new Vector3(0.84f, 0.78f, 1.34f));
+            // laptop (facing the chair, east)
+            Vector3 lp = tp + new Vector3(0.05f, 0f, -0.15f);
+            B(PropMats.Ink).Box(lp + new Vector3(0f, 0.79f, 0f), new Vector3(0.26f, 0.03f, 0.36f));
+            Quaternion lid = Quaternion.Euler(0f, 0f, -14f);
+            Vector3 lidC = lp + new Vector3(-0.13f, 0.91f, 0f);
+            B(PropMats.Ink).Box(lidC, new Vector3(0.02f, 0.24f, 0.36f), lid);
+            B(PropMats.LaptopScreen).Box(lidC + lid * new Vector3(0.012f, 0f, 0f), new Vector3(0.005f, 0.2f, 0.31f), lid);
+            B(PropMats.CushionB).Cylinder(tp + new Vector3(0.25f, 0.775f, 0.1f), Quaternion.identity, 0.05f, 0.05f, 0.11f, 6, false, true);
+            // a little cactus in a pot
+            Vector3 cac = tp + new Vector3(-0.22f, 0.775f, -0.5f);
+            B(PropMats.Flat(LowPoly.Hex("#B8644A"))).Cylinder(cac, Quaternion.identity, 0.05f, 0.065f, 0.08f, 6, false, true);
+            B(PropMats.Flat(PropPal.FoliageDark)).Cylinder(cac + new Vector3(0f, 0.08f, 0f), Quaternion.identity, 0.04f, 0.03f, 0.13f, 6, false, true);
+            B(PropMats.Flat(PropPal.FoliageDark)).Rod(cac + new Vector3(0f, 0.14f, 0f), cac + new Vector3(0.05f, 0.19f, 0f), 0.018f, 0.014f, 5);
+            // K.5: Gus' letter (envelope + folded sheet) – „E – Gus' Brief lesen“
+            Vector3 letter = tp + new Vector3(0.2f, 0.785f, 0.35f);
+            B(PropMats.Paper).Box(letter, new Vector3(0.22f, 0.012f, 0.3f), Quaternion.Euler(0f, 12f, 0f));
+            B(PropMats.Flat(PropMats.Value(PropPal.Paper, 0.9f))).Box(letter + new Vector3(0.02f, 0.012f, -0.04f), new Vector3(0.16f, 0.01f, 0.24f), Quaternion.Euler(0f, -6f, 0f));
+            B(PropMats.LighthouseRed).Cylinder(letter + new Vector3(0.0f, 0.016f, 0.08f), Quaternion.identity, 0.025f, 0.025f, 0.008f, 6, true, true);
+            var lgo = new GameObject("GusLetter");
+            lgo.transform.SetParent(root, false);
+            lgo.transform.position = W(letter + Vector3.up * 0.05f);
+            var lsc = lgo.AddComponent<SphereCollider>();
+            lsc.isTrigger = true;
+            lsc.radius = 0.28f;
+            var rd = lgo.AddComponent<PropReadable>();
+            rd.verbDe = "Gus' Brief lesen"; rd.verbEn = "Read Gus's letter";
+            rd.titleDe = "Brief von Onkel Gus"; rd.titleEn = "Letter from Uncle Gus";
+            rd.textDe = PropReadable.LetterDe; rd.textEn = PropReadable.LetterEn;
+            rd.gusLetter = true;
+            PropInfo.SetSpot("gus_letter", W(letter));
+            // round 3: the furnishing catalogue – clipboard with paint chips („E – Einrichten“)
+            Vector3 cat = tp + new Vector3(0.18f, 0.782f, -0.48f);
+            Quaternion cr = Quaternion.Euler(0f, -10f, 0f);
+            B(PropMats.Wood).Box(cat, new Vector3(0.24f, 0.012f, 0.32f), cr);
+            B(PropMats.Paper).Box(cat + new Vector3(0f, 0.008f, -0.01f), new Vector3(0.2f, 0.004f, 0.26f), cr);
+            B(PropMats.Metal).Box(cat + cr * new Vector3(0f, 0.014f, 0.13f), new Vector3(0.1f, 0.012f, 0.03f), cr);
+            Color[] chips = { HutDecor.Walls[1].a, HutDecor.Walls[2].a, HutDecor.Walls[3].a, HutDecor.Walls[4].a };
+            for (int i = 0; i < chips.Length; i++)
+                B(PropMats.Flat(chips[i])).Box(cat + cr * new Vector3(-0.06f + i * 0.04f, 0.0115f, -0.04f), new Vector3(0.035f, 0.002f, 0.12f), cr);
+            B(PropMats.Flat(PropPal.Sun)).Rod(cat + cr * new Vector3(0.08f, 0.02f, -0.12f), cat + cr * new Vector3(0.13f, 0.02f, 0.08f), 0.006f, 0.006f, 5);
+            var cgo = new GameObject("HutDecorCatalog");
+            cgo.transform.SetParent(root, false);
+            cgo.transform.position = W(cat + Vector3.up * 0.05f);
+            var csc = cgo.AddComponent<SphereCollider>();
+            csc.isTrigger = true;
+            csc.radius = 0.24f;
+            cgo.AddComponent<PropHutCatalog>();
+            PropInfo.SetSpot("hut_decor", W(cat), 90f);
+
+            // chair facing west (the desk)
+            Vector3 cp = new Vector3(tp.x + 0.84f, 0f, tp.z);
+            var cw = B(PropMats.Wood);
+            cw.Box(cp + new Vector3(0f, 0.45f, 0f), new Vector3(0.46f, 0.06f, 0.46f));
+            for (int sx = -1; sx <= 1; sx += 2)
+                for (int sz = -1; sz <= 1; sz += 2)
+                    cw.Box(cp + new Vector3(sx * 0.19f, 0.22f, sz * 0.19f), new Vector3(0.06f, 0.44f, 0.06f));
+            cw.Box(cp + new Vector3(0.21f, 0.74f, 0f), new Vector3(0.06f, 0.5f, 0.46f));
+            B(PropMats.CushionA).Box(cp + new Vector3(0f, 0.49f, 0f), new Vector3(0.4f, 0.04f, 0.4f));
+            Col(cp + new Vector3(0f, 0.45f, 0f), new Vector3(0.46f, 0.9f, 0.46f));
+
+            // long high shelf along the west wall (above the windows): bottles, jars, books, shells
+            float sx0 = -HX + T * 0.5f + 0.035f + 0.11f;
+            const float sy = 2.15f, sz0 = -4.6f, sz1 = 0.6f;
+            B(PropMats.WoodLight).Box(new Vector3(sx0, sy, (sz0 + sz1) * 0.5f), new Vector3(0.22f, 0.03f, sz1 - sz0));
+            float[] brackets = { -4.4f, -2.6f, 0.4f };
+            foreach (float bz in brackets)
+                B(PropMats.WoodDark).Box(new Vector3(sx0 - 0.03f, sy - 0.08f, bz), new Vector3(0.03f, 0.18f, 0.03f), Quaternion.Euler(-0f, 0f, 35f));
+            var rng = new System.Random(77);
+            Material[] jarFill = { PropMats.FlowerYellow, PropMats.Flat(PropPal.Coral), PropMats.Flat(PropPal.FoliageLight), PropMats.Flat(PropPal.Paper) };
+            float z = sz0 + 0.12f;
+            while (z < sz1 - 0.15f)
+            {
+                int kind = rng.Next(5);
+                Vector3 p = new Vector3(sx0 + PropUtil.Range(rng, -0.03f, 0.03f), sy + 0.015f, z);
+                float step;
+                if (kind == 0)
+                {
+                    float h = PropUtil.Range(rng, 0.16f, 0.26f);
+                    B(PropMats.BottleGlass).Cylinder(p, Quaternion.identity, 0.04f, 0.04f, h, 6, true, false);
+                    B(PropMats.BottleGlass).Cylinder(p + Vector3.up * h, Quaternion.identity, 0.04f, 0.015f, 0.06f, 6);
+                    B(PropMats.Wood).Cylinder(p + Vector3.up * (h + 0.06f), Quaternion.identity, 0.016f, 0.016f, 0.025f, 5, false, true);
+                    step = 0.12f;
+                }
+                else if (kind == 1)
+                {
+                    B(jarFill[rng.Next(jarFill.Length)]).Cylinder(p, Quaternion.identity, 0.055f, 0.055f, 0.1f, 7, false, true);
+                    B(PropMats.Glass).Cylinder(p, Quaternion.identity, 0.06f, 0.06f, 0.13f, 7, false, true);
+                    B(PropMats.Ink).Cylinder(p + Vector3.up * 0.13f, Quaternion.identity, 0.062f, 0.062f, 0.02f, 7, false, true);
+                    step = 0.15f;
+                }
+                else if (kind == 2)
+                {
+                    int n = 3 + rng.Next(4);
+                    Color[] spines = { PropPal.Coral, PropPal.Turquoise, PropPal.Sun, PropPal.FlowerPurple, PropPal.Paper, PropPal.LighthouseRed };
+                    for (int i = 0; i < n; i++)
+                    {
+                        float bh = PropUtil.Range(rng, 0.16f, 0.22f);
+                        B(PropMats.Flat(spines[rng.Next(spines.Length)])).Box(p + new Vector3(0f, bh * 0.5f, i * 0.04f), new Vector3(0.15f, bh, 0.035f));
+                    }
+                    step = n * 0.04f + 0.08f;
+                }
+                else if (kind == 3)
+                {
+                    B(PropMats.Flat(rng.Next(2) == 0 ? PropPal.FlowerPink : PropPal.Sun)).Cylinder(p, Quaternion.Euler(0f, 0f, 80f), 0.05f, 0f, 0.07f, 6, true, false);
+                    B(PropMats.White).Ico(p + new Vector3(0.02f, 0.03f, 0.08f), new Vector3(0.05f, 0.03f, 0.04f), Quaternion.identity, 0);
+                    step = 0.18f;
+                }
+                else
+                {
+                    // a little globe
+                    B(PropMats.WoodDark).Cylinder(p, Quaternion.identity, 0.05f, 0.04f, 0.04f, 6, false, true);
+                    B(PropMats.Flat(LowPoly.Hex("#5A9FC0"))).Ico(p + Vector3.up * 0.13f, new Vector3(0.085f, 0.085f, 0.085f), Quaternion.identity, 1);
+                    B(PropMats.Flat(PropPal.FoliageLight)).Ico(p + new Vector3(0.03f, 0.16f, 0.03f), new Vector3(0.05f, 0.04f, 0.05f), Quaternion.identity, 0);
+                    B(PropMats.Metal).Rod(p + Vector3.up * 0.03f, p + Vector3.up * 0.23f, 0.006f, 0.006f, 3);
+                    step = 0.2f;
+                }
+                z += step + PropUtil.Range(rng, 0.03f, 0.1f);
+            }
+        }
+
+        // ---- SW: workshop corner (workbench + pegboard, the grinder stands against the west wall)
+        static void Workshop()
+        {
+            float iz = HZ - T * 0.5f;
+            Vector3 wb = new Vector3(-HX + T * 0.5f + 0.035f + 0.62f, 0f, -iz + 0.035f + 0.28f);
+            var dark = B(PropMats.WoodDark);
+            for (int sx = -1; sx <= 1; sx += 2)
+                for (int sz = -1; sz <= 1; sz += 2)
+                    dark.Box(wb + new Vector3(sx * 0.57f, 0.44f, sz * 0.24f), new Vector3(0.07f, 0.88f, 0.07f));
+            B(PropMats.Wood).Box(wb + new Vector3(0f, 0.88f, 0f), new Vector3(1.24f, 0.06f, 0.56f));
+            B(PropMats.Wood2).Box(wb + new Vector3(0f, 0.25f, 0f), new Vector3(1.14f, 0.04f, 0.5f));
+            Col(wb + new Vector3(0f, 0.455f, 0f), new Vector3(1.24f, 0.91f, 0.56f));
+            float top = 0.91f;
+            // vice
+            var dm = B(PropMats.DarkMetal);
+            dm.Box(wb + new Vector3(0.42f, top + 0.05f, 0.18f), new Vector3(0.14f, 0.1f, 0.12f));
+            dm.Box(wb + new Vector3(0.42f, top + 0.1f, 0.26f), new Vector3(0.16f, 0.08f, 0.04f));
+            B(PropMats.Metal).Rod(wb + new Vector3(0.42f, top + 0.08f, 0.3f), wb + new Vector3(0.42f, top + 0.08f, 0.42f), 0.01f, 0.01f, 4);
+            // toolbox, jar of nails, rope coil, a spare whetstone
+            B(PropMats.LighthouseRed).Box(wb + new Vector3(-0.35f, top + 0.08f, 0.02f), new Vector3(0.4f, 0.16f, 0.2f));
+            B(PropMats.Metal).Box(wb + new Vector3(-0.35f, top + 0.2f, 0.02f), new Vector3(0.24f, 0.03f, 0.03f));
+            B(PropMats.Glass).Cylinder(wb + new Vector3(0.08f, top, 0.05f), Quaternion.identity, 0.05f, 0.05f, 0.12f, 7, false, true);
+            B(PropMats.Metal).Cylinder(wb + new Vector3(0.08f, top, 0.05f), Quaternion.identity, 0.042f, 0.042f, 0.06f, 7, false, true);
+            B(PropMats.Rope).Torus(wb + new Vector3(0.1f, 0.3f, 0.05f), Quaternion.identity, 0.14f, 0.04f, 10, 4);
+            B(PropMats.Stone).Box(wb + new Vector3(-0.05f, top + 0.025f, -0.15f), new Vector3(0.18f, 0.05f, 0.06f), Quaternion.Euler(0f, 18f, 0f));
+            // pegboard with tool silhouettes
+            Vector3 pb = new Vector3(wb.x, 1.5f, -iz + 0.045f);
+            B(PropMats.Flat(LowPoly.Hex("#B8956A"))).Box(pb, new Vector3(1.2f, 0.74f, 0.02f));
+            var holes = B(PropMats.Flat(LowPoly.Hex("#8A6A4C")));
+            for (int ix = 0; ix < 11; ix++)
+                for (int iy = 0; iy < 6; iy++)
+                    holes.Box(pb + new Vector3(-0.5f + ix * 0.1f, -0.28f + iy * 0.11f, 0.0105f), new Vector3(0.012f, 0.012f, 0.002f));
+            Vector3 f = pb + new Vector3(0f, 0f, 0.03f);
+            B(PropMats.Wood).Rod(f + new Vector3(-0.45f, -0.25f, 0f), f + new Vector3(-0.45f, 0.1f, 0f), 0.016f, 0.016f, 5);            // hammer
+            dm.Box(f + new Vector3(-0.45f, 0.12f, 0f), new Vector3(0.14f, 0.05f, 0.04f));
+            B(PropMats.Metal).Box(f + new Vector3(-0.15f, -0.02f, 0f), new Vector3(0.12f, 0.42f, 0.006f), Quaternion.Euler(0f, 0f, 4f));   // saw
+            B(PropMats.Wood).Box(f + new Vector3(-0.15f, 0.23f, 0f), new Vector3(0.12f, 0.1f, 0.03f));
+            B(PropMats.Metal).Box(f + new Vector3(0.1f, 0f, 0f), new Vector3(0.03f, 0.32f, 0.012f), Quaternion.Euler(0f, 0f, -8f));        // wrench
+            B(PropMats.Metal).Torus(f + new Vector3(0.12f, 0.17f, 0f), Quaternion.Euler(90f, 0f, 0f), 0.035f, 0.012f, 6, 3);
+            B(PropMats.Flat(PropPal.Sun)).Rod(f + new Vector3(0.28f, 0.12f, 0f), f + new Vector3(0.28f, 0.0f, 0f), 0.018f, 0.018f, 5);   // screwdriver
+            B(PropMats.Metal).Rod(f + new Vector3(0.28f, 0f, 0f), f + new Vector3(0.28f, -0.17f, 0f), 0.006f, 0.004f, 4);
+            B(PropMats.Flat(PropPal.Coral)).Box(f + new Vector3(0.44f, 0.05f, 0f), new Vector3(0.05f, 0.18f, 0.02f), Quaternion.Euler(0f, 0f, 10f)); // pliers
+            B(PropMats.Flat(PropPal.Coral)).Box(f + new Vector3(0.48f, 0.05f, 0f), new Vector3(0.05f, 0.18f, 0.02f), Quaternion.Euler(0f, 0f, -10f));
+            B(PropMats.DarkMetal).Box(f + new Vector3(0.46f, -0.08f, 0f), new Vector3(0.05f, 0.1f, 0.025f));
+            // clamp lamp on the bench edge (glows at night)
+            Vector3 cl = wb + new Vector3(-0.55f, top, 0.2f);
+            dm.Box(cl + new Vector3(0f, 0.03f, 0f), new Vector3(0.06f, 0.06f, 0.06f));
+            dm.Rod(cl + new Vector3(0f, 0.05f, 0f), cl + new Vector3(0.12f, 0.42f, 0f), 0.01f, 0.01f, 4);
+            B(PropMats.Flat(PropPal.Turquoise)).Cylinder(cl + new Vector3(0.12f, 0.42f, 0f), Quaternion.Euler(0f, 0f, 150f), 0.03f, 0.09f, 0.12f, 7, false, false);
+            B(PropMats.HutBulb).Ico(cl + new Vector3(0.15f, 0.37f, 0f), new Vector3(0.03f, 0.03f, 0.03f), Quaternion.identity, 0);
+            // stool
+            Vector3 st = new Vector3(wb.x + 0.18f, 0f, wb.z + 0.62f);
+            B(PropMats.Wood).Cylinder(st + new Vector3(0f, 0.55f, 0f), Quaternion.identity, 0.17f, 0.17f, 0.05f, 8, true, true);
+            for (int i = 0; i < 3; i++)
+            {
+                float a = i * 120f * Mathf.Deg2Rad;
+                B(PropMats.WoodDark).Rod(st + new Vector3(Mathf.Cos(a) * 0.17f, 0f, Mathf.Sin(a) * 0.17f), st + new Vector3(Mathf.Cos(a) * 0.1f, 0.55f, Mathf.Sin(a) * 0.1f), 0.022f, 0.02f, 4);
+            }
+            Col(st + new Vector3(0f, 0.3f, 0f), new Vector3(0.36f, 0.6f, 0.36f));
+        }
+
+        // ---- NE: kitchen (fridge, counter + sink + shelves, the water filter beside it, a big plant)
+        static void Kitchen(Transform root)
+        {
+            float iz = HZ - T * 0.5f;
+            // E.1: the hut fridge
+            Fridge(root, new Vector3(1.0f, 0f, HZ - 0.42f));
+            Vector3 kc = new Vector3(2.15f, 0f, iz - 0.035f - 0.3f);
+            B(PropMats.Wood2).Box(kc + new Vector3(0f, 0.44f, 0f), new Vector3(1.4f, 0.84f, 0.58f));
+            B(PropMats.WoodLight).Box(kc + new Vector3(0f, 0.885f, 0f), new Vector3(1.44f, 0.05f, 0.62f));
+            B(PropMats.WoodDark).Box(kc + new Vector3(0f, 0.04f, -0.25f), new Vector3(1.38f, 0.08f, 0.06f));
+            for (int i = 0; i < 3; i++)
+            {
+                float x = -0.46f + i * 0.46f;
+                B(PropMats.Shutter).Box(kc + new Vector3(x, 0.46f, -0.295f), new Vector3(0.42f, 0.62f, 0.012f));
+                B(PropMats.Metal).Box(kc + new Vector3(x + 0.15f, 0.66f, -0.305f), new Vector3(0.025f, 0.08f, 0.015f));
+            }
+            Col(kc + new Vector3(0f, 0.455f, 0f), new Vector3(1.44f, 0.91f, 0.62f));
+            // sink + tap
+            Vector3 sink = kc + new Vector3(0.3f, 0.912f, 0.02f);
+            B(PropMats.Metal).Box(sink, new Vector3(0.52f, 0.008f, 0.38f));
+            B(PropMats.DarkMetal).Box(sink + new Vector3(0f, 0.003f, 0f), new Vector3(0.42f, 0.008f, 0.28f));
+            var tap = B(PropMats.Metal);
+            tap.Rod(sink + new Vector3(0f, 0f, 0.22f), sink + new Vector3(0f, 0.26f, 0.22f), 0.016f, 0.014f, 5);
+            tap.Rod(sink + new Vector3(0f, 0.26f, 0.22f), sink + new Vector3(0f, 0.24f, 0.06f), 0.014f, 0.012f, 5);
+            tap.Box(sink + new Vector3(0f, 0.2f, 0.22f), new Vector3(0.12f, 0.02f, 0.02f));
+            // dish rack with plates, cutting board, fruit bowl
+            Vector3 rack = kc + new Vector3(-0.3f, 0.91f, 0.05f);
+            B(PropMats.WoodDark).Box(rack + new Vector3(0f, 0.02f, 0f), new Vector3(0.3f, 0.04f, 0.26f));
+            for (int i = 0; i < 4; i++)
+                B(PropMats.White).Cylinder(rack + new Vector3(-0.1f + i * 0.065f, 0.14f, 0f), Quaternion.Euler(0f, 0f, 90f), 0.11f, 0.11f, 0.012f, 10, true, true);
+            B(PropMats.WoodLight).Box(kc + new Vector3(-0.58f, 0.92f, -0.05f), new Vector3(0.22f, 0.02f, 0.32f), Quaternion.Euler(0f, 8f, 0f));
+            Vector3 bowl = kc + new Vector3(-0.58f, 0.91f, 0.18f);
+            B(PropMats.Flat(PropPal.Turquoise)).Cylinder(bowl, Quaternion.identity, 0.07f, 0.12f, 0.07f, 8, true, false);
+            B(PropMats.Flat(LowPoly.Hex("#F2A93B"))).Ico(bowl + new Vector3(-0.03f, 0.08f, 0f), new Vector3(0.05f, 0.045f, 0.045f), Quaternion.identity, 0);
+            B(PropMats.FlowerYellow).Ico(bowl + new Vector3(0.04f, 0.08f, 0.02f), new Vector3(0.09f, 0.03f, 0.03f), Quaternion.Euler(0f, 30f, 10f), 0);
+            B(PropMats.Flat(PropPal.Coral)).Ico(bowl + new Vector3(0.01f, 0.09f, -0.04f), new Vector3(0.045f, 0.045f, 0.045f), Quaternion.identity, 0);
+            // open shelves above the counter: plates, cups, jars, a kettle
+            float sz = iz - 0.035f - 0.125f;
+            for (int i = 0; i < 2; i++)
+            {
+                float y = 1.5f + i * 0.4f;
+                B(PropMats.WoodLight).Box(new Vector3(kc.x, y, sz), new Vector3(1.4f, 0.03f, 0.25f));
+                B(PropMats.WoodDark).Box(new Vector3(kc.x - 0.62f, y - 0.07f, sz + 0.06f), new Vector3(0.03f, 0.12f, 0.12f));
+                B(PropMats.WoodDark).Box(new Vector3(kc.x + 0.62f, y - 0.07f, sz + 0.06f), new Vector3(0.03f, 0.12f, 0.12f));
+            }
+            Color[] cups = { PropPal.Coral, PropPal.Turquoise, PropPal.Sun, PropPal.White };
+            for (int i = 0; i < 4; i++)
+            {
+                Vector3 c = new Vector3(kc.x - 0.55f + i * 0.13f, 1.515f, sz - 0.02f);
+                B(PropMats.Flat(cups[i])).Cylinder(c, Quaternion.identity, 0.04f, 0.045f, 0.09f, 7, true, false);
+                B(PropMats.Flat(cups[i])).Torus(c + new Vector3(0.05f, 0.05f, 0f), Quaternion.Euler(90f, 0f, 0f), 0.022f, 0.007f, 6, 3);
+            }
+            for (int i = 0; i < 5; i++)
+                B(PropMats.White).Cylinder(new Vector3(kc.x + 0.1f + i * 0.025f, 1.515f + 0.11f, sz + 0.05f), Quaternion.Euler(0f, 0f, 90f) * Quaternion.Euler(0f, 0f, 0f), 0.11f, 0.11f, 0.012f, 10, true, true);
+            Material[] fill = { PropMats.Flat(PropPal.Sand), PropMats.Flat(PropPal.Coral), PropMats.Flat(PropPal.FoliageLight), PropMats.FlowerYellow };
+            for (int i = 0; i < 5; i++)
+            {
+                Vector3 j = new Vector3(kc.x - 0.55f + i * 0.2f, 1.915f, sz);
+                B(fill[i % fill.Length]).Cylinder(j, Quaternion.identity, 0.05f, 0.05f, 0.1f, 7, false, true);
+                B(PropMats.Glass).Cylinder(j, Quaternion.identity, 0.055f, 0.055f, 0.14f, 7, false, true);
+                B(PropMats.Wood).Cylinder(j + Vector3.up * 0.14f, Quaternion.identity, 0.058f, 0.058f, 0.025f, 7, false, true);
+            }
+            Vector3 kettle = new Vector3(kc.x + 0.45f, 1.515f, sz);
+            B(PropMats.Flat(PropPal.LighthouseRed)).Cylinder(kettle, Quaternion.identity, 0.08f, 0.06f, 0.14f, 8, true, true);
+            B(PropMats.Ink).Torus(kettle + new Vector3(0f, 0.17f, 0f), Quaternion.Euler(0f, 0f, 90f), 0.045f, 0.01f, 6, 3);
+            Col(new Vector3(kc.x, 1.72f, sz), new Vector3(1.4f, 0.46f, 0.25f));
+
+            // big plant in the north-east corner
+            PottedPlant(new Vector3(HX - 0.52f, 0f, HZ - 0.55f), 1.0f, 5);
+            Col(new Vector3(HX - 0.52f, 0.25f, HZ - 0.55f), new Vector3(0.44f, 0.5f, 0.44f));
+        }
+
+        // ---- SE: TV corner
+        static void LivingCorner()
+        {
+            // chunky CRT TV on a little cabinet, facing the armchair
+            Vector3 tv = Local(WorldLayout.TV);
+            Vector3 chair = new Vector3(1.8f, 0f, -2.6f);
+            Vector3 toChair = chair - tv;
+            float tvYaw = Mathf.Atan2(toChair.x, toChair.z) * Mathf.Rad2Deg;
+            Quaternion tr = Quaternion.Euler(0f, tvYaw, 0f);
+            Vector3 cab = new Vector3(tv.x, 0f, tv.z);
+            B(PropMats.Wood2).Box(cab + new Vector3(0f, 0.31f, 0f), new Vector3(0.8f, 0.58f, 0.56f), tr);
+            B(PropMats.WoodLight).Box(cab + new Vector3(0f, 0.61f, 0f), new Vector3(0.84f, 0.04f, 0.6f), tr);
+            B(PropMats.WoodDark).Box(cab + new Vector3(0f, 0.04f, 0f), new Vector3(0.76f, 0.08f, 0.52f), tr);
+            B(PropMats.Shutter).Box(cab + tr * new Vector3(-0.19f, 0.33f, 0.281f), new Vector3(0.36f, 0.42f, 0.01f), tr);
+            Color[] tapes = { PropPal.Ink, PropPal.Coral, PropPal.Ink, PropPal.Sun };
+            for (int i = 0; i < 4; i++)
+                B(PropMats.Flat(tapes[i])).Box(cab + tr * new Vector3(0.12f + i * 0.055f, 0.33f, 0.2f), new Vector3(0.035f, 0.2f, 0.12f), tr);
+            Vector3 tvc = new Vector3(tv.x, 0.63f + 0.29f, tv.z);
+            B(PropMats.TvBody).Box(tvc, new Vector3(0.74f, 0.58f, 0.52f), tr);
+            B(PropMats.TvBody).Box(tvc + tr * new Vector3(0f, -0.02f, -0.38f), new Vector3(0.5f, 0.42f, 0.32f), tr);
+            B(PropMats.Screen).Box(tvc + tr * new Vector3(-0.07f, 0.02f, 0.26f), new Vector3(0.5f, 0.42f, 0.02f), tr);
+            B(PropMats.Ink).Box(tvc + tr * new Vector3(0.28f, 0.1f, 0.265f), new Vector3(0.07f, 0.07f, 0.03f), tr);
+            B(PropMats.CushionB).Box(tvc + tr * new Vector3(0.28f, -0.06f, 0.265f), new Vector3(0.07f, 0.07f, 0.03f), tr);
+            B(PropMats.Metal).Rod(tvc + new Vector3(0f, 0.29f, 0f), tvc + tr * new Vector3(-0.25f, 0.76f, -0.05f), 0.012f, 0.008f, 4);
+            B(PropMats.Metal).Rod(tvc + new Vector3(0f, 0.29f, 0f), tvc + tr * new Vector3(0.22f, 0.73f, -0.1f), 0.012f, 0.008f, 4);
+            Col(new Vector3(tv.x, 0.6f, tv.z), new Vector3(0.84f, 1.2f, 0.75f), tr);
+
+            // armchair facing the TV
+            Vector3 toTv = tv - chair;
+            Quaternion cr = Quaternion.Euler(0f, Mathf.Atan2(toTv.x, toTv.z) * Mathf.Rad2Deg, 0f);
+            var fab = B(PropMats.Armchair);
+            fab.Box(chair + cr * new Vector3(0f, 0.24f, 0f), new Vector3(0.88f, 0.42f, 0.82f), cr);
+            fab.Box(chair + cr * new Vector3(0f, 0.68f, -0.34f), new Vector3(0.88f, 0.82f, 0.2f), cr * Quaternion.Euler(-8f, 0f, 0f));
+            fab.Box(chair + cr * new Vector3(-0.39f, 0.54f, 0.02f), new Vector3(0.14f, 0.3f, 0.8f), cr);
+            fab.Box(chair + cr * new Vector3(0.39f, 0.54f, 0.02f), new Vector3(0.14f, 0.3f, 0.8f), cr);
+            B(PropMats.Wall2).Box(chair + cr * new Vector3(0f, 0.47f, 0.04f), new Vector3(0.62f, 0.08f, 0.66f), cr);
+            B(PropMats.Flat(PropPal.Turquoise)).Box(chair + cr * new Vector3(0.18f, 0.64f, -0.18f), new Vector3(0.34f, 0.3f, 0.12f), cr * Quaternion.Euler(-16f, 12f, 0f));
+            B(PropMats.Blanket).Box(chair + cr * new Vector3(-0.39f, 0.7f, 0.02f), new Vector3(0.18f, 0.03f, 0.6f), cr);
+            Col(chair + new Vector3(0f, 0.45f, 0f), new Vector3(0.9f, 0.9f, 0.85f), cr);
+
+            // side table with a mug and a magazine
+            Vector3 stp = new Vector3(0.95f, 0f, -2.05f);
+            B(PropMats.WoodLight).Cylinder(stp + new Vector3(0f, 0.55f, 0f), Quaternion.identity, 0.25f, 0.25f, 0.04f, 10, true, true);
+            B(PropMats.WoodDark).Rod(stp, stp + new Vector3(0f, 0.55f, 0f), 0.03f, 0.03f, 6);
+            B(PropMats.WoodDark).Cylinder(stp, Quaternion.identity, 0.16f, 0.14f, 0.03f, 8, false, true);
+            B(PropMats.Flat(PropPal.Coral)).Cylinder(stp + new Vector3(0.08f, 0.59f, 0.05f), Quaternion.identity, 0.04f, 0.045f, 0.09f, 7, true, false);
+            B(PropMats.Flat(PropPal.Paper)).Box(stp + new Vector3(-0.06f, 0.595f, -0.04f), new Vector3(0.18f, 0.008f, 0.24f), Quaternion.Euler(0f, 24f, 0f));
+            B(PropMats.Flat(PropPal.Turquoise)).Box(stp + new Vector3(-0.06f, 0.6f, -0.04f), new Vector3(0.14f, 0.003f, 0.08f), Quaternion.Euler(0f, 24f, 0f));
+            Col(stp + new Vector3(0f, 0.3f, 0f), new Vector3(0.5f, 0.6f, 0.5f));
+
+            // floor lamp behind the armchair (warm light at night)
+            Vector3 fl = new Vector3(1.05f, 0f, -3.5f);
+            B(PropMats.Ink).Cylinder(fl, Quaternion.identity, 0.15f, 0.13f, 0.03f, 8, false, true);
+            B(PropMats.WoodDark).Rod(fl, fl + new Vector3(0f, 1.5f, 0f), 0.018f, 0.016f, 5);
+            B(PropMats.Flat(PropPal.Canvas)).Cylinder(fl + new Vector3(0f, 1.42f, 0f), Quaternion.identity, 0.24f, 0.14f, 0.28f, 8, false, true);
+            B(PropMats.HutBulb).Ico(fl + new Vector3(0f, 1.48f, 0f), new Vector3(0.05f, 0.06f, 0.05f), Quaternion.identity, 0);
+            var flt = PropUtil.AddPointLight(root, W(fl + new Vector3(0f, 1.38f, 0f)), new Color(1f, 0.8f, 0.55f), 4.5f, 1.1f, "HutFloorLamp");
+            PropNightLight.Attach(flt.gameObject, flt, PropMats.HutBulb, new Color(4f, 2.9f, 1.6f), 0.12f, 0.45f, false);
+            Col(fl + new Vector3(0f, 0.85f, 0f), new Vector3(0.3f, 1.7f, 0.3f));
+        }
+
+        /// Three small framed photos (diver, sunset, the hut) on a wall facing +z (south wall), centred at c.
+        static void FramedPhotos(Vector3 c)
+        {
+            Color[][] pics =
+            {
+                new[] { LowPoly.Hex("#3D93B6"), LowPoly.Hex("#EE7F2D") },
+                new[] { LowPoly.Hex("#F28C4A"), LowPoly.Hex("#F2C94C") },
+                new[] { LowPoly.Hex("#8DBDEA"), LowPoly.Hex("#DCCFBE") },
+            };
+            for (int i = 0; i < 3; i++)
+            {
+                Vector3 p = c + new Vector3(-0.27f + i * 0.27f, (i == 1 ? 0.08f : -0.04f), 0.015f);
+                float w = i == 1 ? 0.22f : 0.18f, h = i == 1 ? 0.28f : 0.22f;
+                B(PropMats.WoodDark).Box(p, new Vector3(w, h, 0.025f));
+                B(PropMats.Flat(pics[i][0])).Box(p + new Vector3(0f, 0.02f, 0.014f), new Vector3(w - 0.05f, h * 0.55f, 0.003f));
+                B(PropMats.Flat(pics[i][1])).Box(p + new Vector3(0f, -h * 0.22f, 0.014f), new Vector3(w - 0.05f, h * 0.3f, 0.003f));
+                B(PropMats.Ink).Box(p + new Vector3(0f, h * 0.5f + 0.03f, 0f), new Vector3(0.01f, 0.06f, 0.005f));
+            }
+        }
+
+        /// Old brass diving helmet (standard dress) on a shelf top, window toward yaw.
+        static void DivingHelmet(Vector3 c, float yaw)
+        {
+            Quaternion r = Quaternion.Euler(0f, yaw, 0f);
+            var brass = PropMats.Flat(LowPoly.Hex("#C9A04A"));
+            B(PropMats.Flat(LowPoly.Hex("#A8823A"))).Cylinder(c, Quaternion.identity, 0.2f, 0.17f, 0.08f, 10, false, true);
+            B(brass).Ico(c + new Vector3(0f, 0.22f, 0f), new Vector3(0.16f, 0.16f, 0.16f), r, 1);
+            Vector3 front = c + new Vector3(0f, 0.22f, 0f) + r * new Vector3(0f, 0f, 0.15f);
+            B(PropMats.DarkMetal).Cylinder(front, r * Quaternion.Euler(90f, 0f, 0f), 0.075f, 0.075f, 0.03f, 10, false, true);
+            B(PropMats.Glass).Cylinder(front + r * new Vector3(0f, 0f, 0.025f), r * Quaternion.Euler(90f, 0f, 0f), 0.06f, 0.06f, 0.008f, 10, false, true);
+            for (int s = -1; s <= 1; s += 2)
+            {
+                Vector3 side = c + new Vector3(0f, 0.22f, 0f) + r * new Vector3(s * 0.15f, 0f, 0.02f);
+                B(PropMats.DarkMetal).Cylinder(side, r * Quaternion.Euler(0f, 0f, -90f * s), 0.05f, 0.05f, 0.025f, 8, false, true);
+            }
+            for (int i = 0; i < 4; i++)
+            {
+                float a = (i * 90f + 45f) * Mathf.Deg2Rad;
+                B(PropMats.DarkMetal).Ico(c + new Vector3(Mathf.Cos(a) * 0.17f, 0.065f, Mathf.Sin(a) * 0.17f), new Vector3(0.018f, 0.018f, 0.018f), Quaternion.identity, 0);
+            }
+        }
+
+        /// A mounted fish (fat grouper) on a wooden plaque on the east wall (facing west).
+        static void MountedFish(Vector3 c)
+        {
+            B(PropMats.WoodDark).Box(c + new Vector3(-0.02f, 0f, 0f), new Vector3(0.04f, 0.34f, 0.7f));
+            B(PropMats.Wood).Box(c + new Vector3(-0.045f, 0f, 0f), new Vector3(0.01f, 0.26f, 0.6f));
+            Vector3 b = c + new Vector3(-0.12f, 0f, 0f);
+            Color body = LowPoly.Hex("#E07A62"), belly = LowPoly.Hex("#F2C9A0");
+            B(PropMats.Flat(body)).Ico(b + new Vector3(0f, 0.02f, 0f), new Vector3(0.07f, 0.13f, 0.27f), Quaternion.identity, 1);
+            B(PropMats.Flat(belly)).Ico(b - new Vector3(0f, 0.05f, 0f), new Vector3(0.06f, 0.08f, 0.22f), Quaternion.identity, 1);
+            var fin = B(PropMats.Flat(PropMats.Value(body, 0.85f)));
+            fin.Tri2(b + new Vector3(0f, 0f, -0.24f), b + new Vector3(0f, 0.14f, -0.42f), b + new Vector3(0f, -0.13f, -0.42f), Vector3.left);
+            fin.Tri2(b + new Vector3(0f, 0.12f, 0.12f), b + new Vector3(0f, 0.12f, -0.16f), b + new Vector3(0f, 0.22f, -0.04f), Vector3.left);
+            B(PropMats.Ink).Ico(b + new Vector3(-0.055f, 0.05f, 0.17f), new Vector3(0.02f, 0.02f, 0.02f), Quaternion.identity, 0);
+            B(PropMats.Flat(PropMats.Value(body, 0.7f))).Box(b + new Vector3(-0.03f, -0.02f, 0.26f), new Vector3(0.05f, 0.04f, 0.03f));
+        }
+
+        /// A potted plant: terracotta pot + broad two-tone leaves (monstera / bird of paradise look).
+        static void PottedPlant(Vector3 p, float size, int seed)
+        {
+            var rng = new System.Random(seed);
+            var pot = PropMats.Flat(LowPoly.Hex("#B8644A"));
+            float pr = 0.17f * Mathf.Max(0.7f, size);
+            B(pot).Cylinder(p, Quaternion.identity, pr * 0.8f, pr, 0.4f * size + 0.05f, 8, true, false);
+            B(PropMats.Flat(PropMats.Value(LowPoly.Hex("#B8644A"), 0.85f))).Cylinder(p + new Vector3(0f, 0.38f * size + 0.02f, 0f), Quaternion.identity, pr + 0.02f, pr + 0.02f, 0.06f, 8, false, true);
+            B(PropMats.Flat(PropPal.WoodWet)).Cylinder(p + new Vector3(0f, 0.42f * size + 0.03f, 0f), Quaternion.identity, pr * 0.92f, pr * 0.92f, 0.02f, 8, false, true);
+            Vector3 top = p + new Vector3(0f, 0.42f * size + 0.04f, 0f);
+            Material lt = PropMats.Flat(PropPal.FoliageLight), ld = PropMats.Flat(PropPal.FoliageDark), stem = PropMats.Flat(PropPal.Foliage);
+            int n = 5 + rng.Next(3);
+            for (int i = 0; i < n; i++)
+            {
+                float a = (i * 360f / n + PropUtil.Range(rng, -15f, 15f)) * Mathf.Deg2Rad;
+                Vector3 d = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a));
+                float h = size * PropUtil.Range(rng, 0.45f, 0.8f);
+                Vector3 tip = top + d * (size * 0.22f) + Vector3.up * h;
+                B(stem).Rod(top, tip, 0.012f, 0.008f, 4);
+                Vector3 side = Vector3.Cross(Vector3.up, d);
+                float L = size * 0.32f, Wd = size * 0.13f;
+                Vector3 e = tip + d * L - Vector3.up * (L * 0.35f);
+                Vector3 m1 = tip + d * (L * 0.5f) + side * Wd, m2 = tip + d * (L * 0.5f) - side * Wd;
+                B(lt).Face3(tip, m1, e, Vector3.up); B(lt).Face3(tip, e, m2, Vector3.up);
+                B(ld).Face3(tip, m1, e, Vector3.down); B(ld).Face3(tip, e, m2, Vector3.down);
+            }
+        }
+
+        /// Hanging pothos in a basket on a rope from the rafter above.
+        static void HangingPlant(Vector3 c)
+        {
+            float ry = RidgeY - 0.05f;
+            float rafterY = WallH + (ry - WallH) * (1f - Mathf.Abs(c.z) / HZ);
+            var rope = B(PropMats.Rope);
+            for (int i = 0; i < 3; i++)
+            {
+                float a = i * 120f * Mathf.Deg2Rad;
+                rope.Rod(c + new Vector3(Mathf.Cos(a) * 0.13f, 0.08f, Mathf.Sin(a) * 0.13f), c + new Vector3(0f, 0.45f, 0f), 0.006f, 0.006f, 3);
+            }
+            rope.Rod(c + new Vector3(0f, 0.45f, 0f), new Vector3(c.x, rafterY - 0.05f, c.z), 0.008f, 0.008f, 3);
+            B(PropMats.Flat(LowPoly.Hex("#C9A46E"))).Cylinder(c, Quaternion.identity, 0.1f, 0.15f, 0.12f, 8, true, false);
+            Material lt = PropMats.Flat(PropPal.FoliageLight), ld = PropMats.Flat(PropPal.Foliage);
+            for (int i = 0; i < 7; i++)
+            {
+                float a = i * 51f * Mathf.Deg2Rad;
+                Vector3 d = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a));
+                Vector3 p = c + d * 0.12f + Vector3.up * 0.12f;
+                float len = 0.2f + (i % 3) * 0.12f;
+                for (int k = 0; k < 4; k++)
+                {
+                    Vector3 q = p + d * 0.05f - Vector3.up * (len / 4f);
+                    B(PropMats.Flat(PropPal.Foliage)).Rod(p, q, 0.006f, 0.006f, 3);
+                    B(k % 2 == 0 ? lt : ld).Ico(q, new Vector3(0.045f, 0.02f, 0.04f), Quaternion.Euler(20f * k, a * Mathf.Rad2Deg, 0f), 0);
+                    p = q;
+                }
+            }
+        }
+
+        static void SofaBunk(Transform root, Vector3 c)
+        {
+            // a low wooden bunk with a turquoise mattress and cushions along the south wall (2.1 × 0.85 m)
+            var w = B(PropMats.Wood2);
+            w.Box(c + new Vector3(0f, 0.2f, 0f), new Vector3(2.1f, 0.16f, 0.86f));
+            for (int sx = -1; sx <= 1; sx += 2) w.Box(c + new Vector3(sx * 1.0f, 0.36f, 0f), new Vector3(0.1f, 0.72f, 0.86f));
+            w.Box(c + new Vector3(0f, 0.52f, -0.4f), new Vector3(2.1f, 0.64f, 0.08f));
+            B(PropMats.CushionA).Box(c + new Vector3(0f, 0.36f, 0.03f), new Vector3(1.9f, 0.16f, 0.78f));
+            B(PropMats.CushionB).Box(c + new Vector3(-0.62f, 0.56f, -0.24f), new Vector3(0.55f, 0.32f, 0.16f), Quaternion.Euler(-12f, 4f, 0f));
+            B(PropMats.FlowerYellow).Box(c + new Vector3(0.1f, 0.56f, -0.25f), new Vector3(0.5f, 0.3f, 0.15f), Quaternion.Euler(-14f, -6f, 0f));
+            B(PropMats.Blanket).Box(c + new Vector3(0.62f, 0.46f, 0.05f), new Vector3(0.6f, 0.06f, 0.8f), Quaternion.Euler(0f, 8f, 0f));
+            var go = new GameObject("SofaBunk");
+            go.transform.SetParent(root, false);
+            go.transform.position = W(c + new Vector3(0f, 0.3f, 0f));
+            var bc = go.AddComponent<BoxCollider>();
+            bc.size = new Vector3(2.1f, 0.6f, 0.86f);
+            var pb = go.AddComponent<PropBed>();
+            pb.kind = SleepSpotInfo.Bunk;
+            pb.spotIndex = PropBed.RegisterBed("hut_sofa_bunk", W(c + new Vector3(-0.77f, 0.47f, 0.08f)), 0.32f, Vector3.right, W(c + new Vector3(0f, 0.44f, 0f)).y,
+                                               W(c + new Vector3(0f, 0.02f, 1.05f)), 180f, SleepSpotInfo.Bunk);
+        }
+
+        static void Fridge(Transform root, Vector3 c)
+        {
+            // chunky retro fridge (rounded corners read as bevelled boxes), mint body, chrome handle, Horst magnet
+            Color mint = LowPoly.Hex("#BFE3D6");
+            B(PropMats.Flat(mint)).Box(c + new Vector3(0f, 0.86f, 0f), new Vector3(0.74f, 1.62f, 0.62f));
+            B(PropMats.Flat(PropMats.Value(mint, 0.9f))).Box(c + new Vector3(0f, 1.69f, 0f), new Vector3(0.7f, 0.08f, 0.58f));
+            B(PropMats.Flat(PropMats.Value(mint, 0.85f))).Box(c + new Vector3(0f, 1.18f, -0.315f), new Vector3(0.7f, 0.02f, 0.02f));
+            B(PropMats.Metal).Box(c + new Vector3(0.28f, 1.38f, -0.34f), new Vector3(0.04f, 0.28f, 0.05f));
+            B(PropMats.Metal).Box(c + new Vector3(0.28f, 0.82f, -0.34f), new Vector3(0.04f, 0.22f, 0.05f));
+            B(PropMats.DarkMetal).Box(c + new Vector3(0f, 0.04f, 0f), new Vector3(0.7f, 0.08f, 0.58f));
+            B(PropMats.Starfish).Box(c + new Vector3(-0.15f, 1.45f, -0.315f), new Vector3(0.08f, 0.08f, 0.01f), Quaternion.Euler(0f, 0f, 45f));
+            B(PropMats.Paper).Box(c + new Vector3(-0.05f, 1.05f, -0.315f), new Vector3(0.16f, 0.2f, 0.005f), Quaternion.Euler(0f, 0f, -6f));
+            // a radio on top
+            B(PropMats.Flat(PropPal.Turquoise)).Box(c + new Vector3(0.05f, 1.8f, 0.02f), new Vector3(0.32f, 0.16f, 0.12f), Quaternion.Euler(0f, -8f, 0f));
+            B(PropMats.Metal).Cylinder(c + new Vector3(-0.03f, 1.8f, -0.05f), Quaternion.Euler(90f, -8f, 0f), 0.05f, 0.05f, 0.01f, 8, false, true);
+            B(PropMats.Metal).Rod(c + new Vector3(0.18f, 1.88f, 0.02f), c + new Vector3(0.3f, 2.15f, 0.06f), 0.005f, 0.004f, 3);
+            Col(c + new Vector3(0f, 0.85f, 0f), new Vector3(0.76f, 1.7f, 0.64f));
+            var go = new GameObject("Fridge");
+            go.transform.SetParent(root, false);
+            go.transform.position = W(c + new Vector3(0f, 1.0f, -0.33f));
+            var sc = go.AddComponent<BoxCollider>();
+            sc.isTrigger = true;
+            sc.size = new Vector3(0.8f, 1.6f, 0.15f);
+            go.AddComponent<PropFoodSpot>().kind = "fridge";
+            PropInfo.SetSpot("fridge", W(c), 180f);
+        }
+
+        static void Locker(Transform root, Vector3 c)
+        {
+            // tall turquoise metal locker facing east, slats + a sticker
+            Quaternion r = Quaternion.Euler(0f, 90f, 0f);
+            B(PropMats.Shutter).Box(c + new Vector3(0f, 0.95f, 0f), new Vector3(0.55f, 1.9f, 0.85f));
+            var dk = B(PropMats.DarkMetal);
+            for (int i = 0; i < 3; i++) dk.Box(c + new Vector3(0.28f, 1.55f + i * 0.08f, 0f), new Vector3(0.01f, 0.03f, 0.5f));
+            dk.Box(c + new Vector3(0.29f, 0.95f, 0.36f), new Vector3(0.03f, 0.18f, 0.04f));
+            B(PropMats.Flat(PropPal.Sun)).Box(c + new Vector3(0.281f, 1.15f, -0.15f), new Vector3(0.005f, 0.16f, 0.16f));
+            // a wetsuit drying on a hook beside it + a mask on top
+            B(PropMats.Flat(LowPoly.Hex("#343849"))).Box(c + new Vector3(0.02f, 2.0f, 0.1f), new Vector3(0.2f, 0.08f, 0.3f), Quaternion.Euler(0f, 0f, 6f));
+            B(PropMats.Flat(PropPal.Turquoise)).Box(c + new Vector3(0.05f, 2.06f, 0.1f), new Vector3(0.1f, 0.05f, 0.18f));
+            Col(c + new Vector3(0f, 0.95f, 0f), new Vector3(0.56f, 1.9f, 0.86f));
+            var go = new GameObject("Locker");
+            go.transform.SetParent(root, false);
+            go.transform.SetPositionAndRotation(W(c + new Vector3(0.3f, 1.0f, 0f)), r);
+            var bc = go.AddComponent<BoxCollider>();
+            bc.isTrigger = true;
+            bc.size = new Vector3(0.85f, 1.8f, 0.12f);
+            go.AddComponent<PropLocker>();
+            PropInfo.SetSpot("locker", W(c), 90f);
+        }
+
+        /// Q52: the golden camera trophy on the shelf – shown when the Sealog is 100 % (achievement golden_camera).
+        static void Trophy(Transform root, Vector3 c, float yaw)
+        {
+            var b = new PropMeshBuilder();
+            b.Cylinder(Vector3.zero, Quaternion.identity, 0.12f, 0.1f, 0.06f, 8, false, true);
+            b.Cylinder(new Vector3(0f, 0.06f, 0f), Quaternion.identity, 0.03f, 0.03f, 0.12f, 6);
+            b.Box(new Vector3(0f, 0.27f, 0f), new Vector3(0.24f, 0.17f, 0.15f), Quaternion.identity);
+            b.Cylinder(new Vector3(0f, 0.27f, 0.07f), Quaternion.Euler(90f, 0f, 0f), 0.06f, 0.07f, 0.1f, 10, true, true);
+            b.Cylinder(new Vector3(-0.05f, 0.4f, 0f), Quaternion.Euler(0f, 0f, 90f), 0.07f, 0.07f, 0.04f, 10, true, true);
+            b.Cylinder(new Vector3(0.08f, 0.4f, 0f), Quaternion.Euler(0f, 0f, 90f), 0.06f, 0.06f, 0.04f, 10, true, true);
+            var mesh = b.ToMesh("GoldenCamera");
+            var go = new GameObject("GoldenCameraTrophy");
+            go.transform.SetParent(root, false);
+            go.transform.SetPositionAndRotation(W(c), Quaternion.Euler(0f, yaw, 0f));
+            var mat = PropMats.EmissiveInstance(LowPoly.Hex("#E8C65A"), LowPoly.Hex("#E8C65A") * 0.2f);
+            PropUtil.MeshObject(go.transform, "Body", mesh, mat, Vector3.zero, Quaternion.identity);
+            var t = go.AddComponent<PropTrophy>();
+            t.model = go.transform.GetChild(0).gameObject;
+            PropInfo.SetSpot("golden_camera", W(c));
+        }
+
+        /// A wooden crate (yard / porch use); collider = solid box when requested.
+        static void Crate(Vector3 basePos, float size, float yaw, bool collider = true)
+        {
+            Quaternion r = Quaternion.Euler(0f, yaw, 0f);
+            Vector3 c = basePos + new Vector3(0f, size * 0.5f, 0f);
+            B(PropMats.Wood).Box(c, new Vector3(size, size, size) * 0.94f, r);
+            var d = B(PropMats.WoodDark);
+            float e = size * 0.5f;
+            for (int sx = -1; sx <= 1; sx += 2)
+                for (int sz = -1; sz <= 1; sz += 2)
+                    d.Box(c + r * new Vector3(sx * (e - 0.035f), 0f, sz * (e - 0.035f)), new Vector3(0.08f, size, 0.08f), r);
+            d.Box(c + r * new Vector3(0f, e - 0.03f, 0f), new Vector3(size * 0.98f, 0.06f, 0.1f), r);
+            if (collider) Col(c, new Vector3(size, size, size), r);
+        }
+
+        /// Height of the top board's upper surface of a Shelf of height h.
+        static float ShelfTop(float h)
+        {
+            int rows = Mathf.Max(2, Mathf.RoundToInt((h - 0.15f) / 0.55f) + 1);
+            return 0.15f + (rows - 1) * ((h - 0.2f) / (rows - 1)) + 0.026f;
+        }
+
+        /// Open shelf (width w along local x, depth along local z) with books, jars, shells, bottles and rope coils.
+        static void Shelf(Vector3 basePos, float yaw, int seed, float w = 1.6f, float dpt = 0.4f, float h = 1.9f, bool books = false)
+        {
+            var rng = new System.Random(seed * 31 + 7);
+            Quaternion r = Quaternion.Euler(0f, yaw, 0f);
+            var d = B(PropMats.Wood);
+            d.Box(basePos + r * new Vector3(-w * 0.5f, h * 0.5f, 0f), new Vector3(0.07f, h, dpt), r);
+            d.Box(basePos + r * new Vector3(w * 0.5f, h * 0.5f, 0f), new Vector3(0.07f, h, dpt), r);
+            B(PropMats.WoodDark).Box(basePos + r * new Vector3(0f, h * 0.5f, -dpt * 0.5f + 0.01f), new Vector3(w, h, 0.02f), r);
+            Material[] goods = { PropMats.FlowerYellow, PropMats.CushionA, PropMats.CushionB, PropMats.Orange, PropMats.White };
+            Color[] spines = { PropPal.Coral, PropPal.Turquoise, PropPal.Sun, PropPal.FlowerPurple, PropPal.Paper, PropPal.LighthouseRed, PropPal.Foliage };
+            int rows = Mathf.Max(2, Mathf.RoundToInt((h - 0.15f) / 0.55f) + 1);
+            float pitch = (h - 0.2f) / (rows - 1);
+            for (int i = 0; i < rows; i++)
+            {
+                float y = 0.15f + i * pitch;
+                B(PropMats.WoodLight).Box(basePos + r * new Vector3(0f, y, 0f), new Vector3(w, 0.05f, dpt), r);
+                if (i == rows - 1) continue;
+                float x = -w * 0.5f + 0.1f;
+                float room = pitch - 0.08f;
+                while (x < w * 0.5f - 0.13f)
+                {
+                    int kind = books && rng.Next(3) > 0 ? 4 : rng.Next(5);
+                    float s = PropUtil.Range(rng, 0.14f, 0.24f);
+                    Vector3 p = basePos + r * new Vector3(x + s * 0.5f, y + 0.025f, PropUtil.Range(rng, -0.04f, 0.04f));
+                    if (kind == 0) B(goods[rng.Next(goods.Length)]).Box(p + new Vector3(0f, s * 0.4f, 0f), new Vector3(s, s * 0.8f, s * 0.9f), r * Quaternion.Euler(0f, PropUtil.Range(rng, -8f, 8f), 0f));
+                    else if (kind == 1) { B(PropMats.Glass).Cylinder(p, Quaternion.identity, s * 0.28f, s * 0.28f, s * 0.75f, 7, false, true); B(goods[rng.Next(goods.Length)]).Cylinder(p, Quaternion.identity, s * 0.24f, s * 0.24f, s * 0.5f, 7, false, true); }
+                    else if (kind == 2) B(PropMats.Rope).Torus(p + new Vector3(0f, 0.04f, 0f), Quaternion.identity, s * 0.32f, 0.04f, 8, 3);
+                    else if (kind == 3)
+                    {
+                        B(PropMats.BottleGlass).Cylinder(p, Quaternion.identity, 0.04f, 0.04f, Mathf.Min(room - 0.06f, s), 6, true, false);
+                        B(PropMats.Flat(rng.Next(2) == 0 ? PropPal.FlowerPink : PropPal.Sun)).Cylinder(p + r * new Vector3(0.09f, 0f, 0f), Quaternion.Euler(0f, 0f, 80f), 0.045f, 0f, 0.06f, 6, true, false);
+                        s += 0.06f;
+                    }
+                    else
+                    {
+                        int n = 3 + rng.Next(5);
+                        float bx = 0f;
+                        for (int k = 0; k < n; k++)
+                        {
+                            float bh = Mathf.Min(room, PropUtil.Range(rng, 0.2f, 0.32f)), bw = PropUtil.Range(rng, 0.03f, 0.05f);
+                            float tilt = k == n - 1 && rng.Next(3) == 0 ? 14f : 0f;
+                            B(PropMats.Flat(spines[rng.Next(spines.Length)])).Box(basePos + r * new Vector3(x + bx + bw * 0.5f, y + 0.025f + bh * 0.5f, 0.02f), new Vector3(bw, bh, dpt * 0.7f), r * Quaternion.Euler(0f, 0f, -tilt));
+                            bx += bw + 0.004f;
+                        }
+                        s = bx;
+                    }
+                    x += s + PropUtil.Range(rng, 0.03f, 0.1f);
+                }
+            }
+        }
+
+        // ------------------------------------------------------------------ outside details
+        static void BuildExteriorDetails()
+        {
+            // painted sign on the east gable, above the awning
+            float sx = HX + T * 0.5f + 0.05f;
+            B(PropMats.WoodDark).Box(new Vector3(sx, 3.2f, 0f), new Vector3(0.07f, 1.05f, 3.6f));
+            float fx = sx + 0.04f;
+            B(PropMats.Sign).QuadAuto(new Vector3(fx, 2.73f, -1.73f), new Vector3(fx, 3.67f, -1.73f), new Vector3(fx, 3.67f, 1.73f), new Vector3(fx, 2.73f, 1.73f),
+                new Vector2(0f, 0f), new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(1f, 0f), Vector3.right);
+
+            // turquoise door leaf swung open against the outer wall
+            Vector3 door = new Vector3(HX + T * 0.5f + 0.05f, 1.06f, 1.6f + 0.67f);
+            B(PropMats.Shutter).Box(door, new Vector3(0.06f, 2.05f, 1.3f));
+            B(PropMats.Wood).Box(door + new Vector3(0.04f, 0f, 0f), new Vector3(0.03f, 0.1f, 1.2f));
+            B(PropMats.Metal).Box(door + new Vector3(0.05f, 0f, -0.5f), new Vector3(0.04f, 0.06f, 0.1f));
+
+            // life ring next to the door (orange / white segments)
+            Vector3 lr = new Vector3(HX + T * 0.5f + 0.12f, 1.55f, -0.75f);
+            const int segs = 8;
+            for (int i = 0; i < segs; i++)
+            {
+                float a0 = i * Mathf.PI * 2f / segs, a1 = (i + 1) * Mathf.PI * 2f / segs;
+                Vector3 p0 = lr + new Vector3(0f, Mathf.Sin(a0), Mathf.Cos(a0)) * 0.3f;
+                Vector3 p1 = lr + new Vector3(0f, Mathf.Sin(a1), Mathf.Cos(a1)) * 0.3f;
+                B(i % 2 == 0 ? PropMats.Orange : PropMats.White).Rod(p0, p1, 0.075f, 0.075f, 5, true);
+            }
+            // rain barrel at the south west corner
+            float g = GL(-HX - 0.6f, -HZ + 0.6f);
+            Vector3 rb = new Vector3(-HX - 0.6f, g - 0.05f, -HZ + 0.6f);
+            B(PropMats.DrumBlue).Cylinder(rb, Quaternion.identity, 0.34f, 0.34f, 0.95f, 8, false, true);
+            B(PropMats.DarkMetal).Cylinder(rb + Vector3.up * 0.2f, Quaternion.identity, 0.355f, 0.355f, 0.07f, 8);
+            B(PropMats.DarkMetal).Cylinder(rb + Vector3.up * 0.75f, Quaternion.identity, 0.355f, 0.355f, 0.07f, 8);
+            PropCol.Capsule(cols, O + new Vector3(-HX - 0.6f, g + 0.45f, -HZ + 0.6f), 0.35f, 0.95f, Quaternion.identity);
+        }
+
+        // ------------------------------------------------------------------ hut yard (L.5 spot 1)
+        static void BuildYard(PropExclusion excl)
+        {
+            // washing line with three little wetsuits and a towel behind the hut (south side)
+            float lz = -HZ - 2.4f;
+            Vector3 la = new Vector3(-4.4f, 0f, lz), lb = new Vector3(2.0f, 0f, lz);
+            la.y = GL(la.x, la.z); lb.y = GL(lb.x, lb.z);
+            var post = B(PropMats.WoodDark);
+            post.Cylinder(la - Vector3.up * 0.4f, Quaternion.identity, 0.06f, 0.05f, 2.4f, 6, false, true);
+            post.Cylinder(lb - Vector3.up * 0.4f, Quaternion.identity, 0.06f, 0.05f, 2.4f, 6, false, true);
+            PropCol.Capsule(cols, W(la + Vector3.up * 0.9f), 0.08f, 1.9f, Quaternion.identity, "LinePost");
+            PropCol.Capsule(cols, W(lb + Vector3.up * 0.9f), 0.08f, 1.9f, Quaternion.identity, "LinePost");
+            Vector3 ta = la + Vector3.up * 1.9f, tb = lb + Vector3.up * 1.9f;
+            var rope = B(PropMats.Rope);
+            Vector3 prev = ta;
+            for (int i = 1; i <= 8; i++)
+            {
+                float t = i / 8f;
+                Vector3 p = Vector3.Lerp(ta, tb, t) - Vector3.up * (0.18f * Mathf.Sin(t * Mathf.PI));
+                rope.Rod(prev, p, 0.012f, 0.012f, 3);
+                prev = p;
+            }
+            Color[] suits = { LowPoly.Hex("#EE7F2D"), LowPoly.Hex("#3FB8C4"), LowPoly.Hex("#E0607E") };
+            for (int i = 0; i < 3; i++)
+            {
+                float t = 0.22f + i * 0.24f;
+                Vector3 hang = Vector3.Lerp(ta, tb, t) - Vector3.up * (0.18f * Mathf.Sin(t * Mathf.PI));
+                Wetsuit(hang, suits[i], i);
+            }
+            Vector3 towel = Vector3.Lerp(ta, tb, 0.92f) - Vector3.up * 0.06f;
+            B(PropMats.CushionB).Box(towel - Vector3.up * 0.35f, new Vector3(0.45f, 0.7f, 0.02f));
+            B(PropMats.White).Box(towel - Vector3.up * 0.35f + new Vector3(0f, 0.1f, -0.012f), new Vector3(0.45f, 0.08f, 0.005f));
+
+            // Gus' upturned rowboat „Rostlaube“ as a bench by the beach campfire, facing the fire
+            Vector3 fire = Local(PropBeach.CampfireSpot);
+            Vector3 rbp = fire + new Vector3(0.3f, 0f, 2.7f);
+            rbp.y = GL(rbp.x, rbp.z) + 0.02f;
+            Quaternion rbr = Quaternion.Euler(0f, 90f, 180f);
+            PropBeach.RowingBoat(batch, TO * Matrix4x4.TRS(rbp + new Vector3(0f, 0.55f, 0f), rbr, new Vector3(0.95f, 0.95f, 0.85f)), PropMats.Flat(PropPal.Rust), false);
+            Vector3 sign = rbp + new Vector3(1.75f, 0f, -0.7f);
+            sign.y = GL(sign.x, sign.z);
+            B(PropMats.WoodDark).Cylinder(sign - Vector3.up * 0.3f, Quaternion.Euler(0f, 0f, 4f), 0.035f, 0.03f, 1.1f, 5, false, true);
+            B(PropMats.Trim).Box(sign + new Vector3(0f, 0.72f, -0.03f), new Vector3(0.72f, 0.16f, 0.03f), Quaternion.Euler(0f, 0f, -3f));
+            NameBoard(sign + new Vector3(0f, 0.72f, -0.05f));
+            Col(rbp + new Vector3(0f, 0.27f, 0f), new Vector3(3.0f, 0.55f, 1.05f));
+            AddSeat(rbp + new Vector3(-0.5f, 0.52f, 0f), 180f, rbp + new Vector3(-0.5f, 0f, -1.2f));
+            excl.Add(O.x + rbp.x, O.z + rbp.z, 2.2f);
+
+            // surfboard rack against the north wall. Round 3 fix („schwebende Surfbretter“): the boards stand on their
+            // tails on the ground NORTH of the rack and lean back (top toward the hut) with their deck on the upper bar –
+            // before they leaned outward ~0.13 m in front of the bars and read as hovering.
+            BuildSurfRack();
+
+            // Gus' old compressor (E.4: the hut zone refills air) at the north-east corner, a hose down to the dock
+            Vector3 cp = new Vector3(HX + 1.6f, 0f, HZ + 1.5f);
+            cp.y = GL(cp.x, cp.z);
+            Compressor(cp);
+            Vector3 hoseA = W(cp + new Vector3(0.45f, 0.25f, 0f));
+            Vector3 dock = new Vector3(WorldLayout.DockStart.x - 6f, 0f, WorldLayout.DockStart.z + 1.6f);
+            Hose(hoseA, dock);
+            PropInfo.SetSpot("compressor", W(cp));
+            excl.Add(O.x + cp.x, O.z + cp.z, 1.6f);
+        }
+
+        /// Rack local frame: rk = base centre on the ground, bars along x at z = 0 (±0.06), boards to the north (+z).
+        public const float RackBarY = 1.2f, RackBarHalfDepth = 0.06f, RackBoardHalfThick = 0.035f;
+        /// Test hook (AutoPlaytest / AutoShot): world tail point + world contact point per rack board.
+        public static readonly List<Vector3> RackBoardTails = new List<Vector3>(3), RackBoardContacts = new List<Vector3>(3);
+        public static Vector3 RackCenter { get; private set; }
+
+        static void BuildSurfRack()
+        {
+            Vector3 rk = new Vector3(1.6f, 0f, HZ + 0.55f);
+            rk.y = GL(rk.x, rk.z);
+            RackCenter = W(rk);
+            RackBoardTails.Clear();
+            RackBoardContacts.Clear();
+            var rw = B(PropMats.WoodDark);
+            const float half = 0.95f;
+            for (int s = -1; s <= 1; s += 2)
+            {
+                float gp = GL(rk.x + s * half, rk.z);
+                float postTop = rk.y + 1.42f;
+                rw.Box(new Vector3(rk.x + s * half, (postTop + gp - 0.2f) * 0.5f, rk.z), new Vector3(0.08f, postTop - gp + 0.2f, 0.08f));
+            }
+            rw.Box(rk + new Vector3(0f, RackBarY, 0f), new Vector3(2f * half + 0.1f, 0.07f, 2f * RackBarHalfDepth));
+            rw.Box(rk + new Vector3(0f, 0.45f, 0f), new Vector3(2f * half + 0.1f, 0.07f, 2f * RackBarHalfDepth));
+            Material[] boards = { PropMats.Surfboard, PropMats.Flat(PropPal.Turquoise), PropMats.Flat(PropPal.Sun) };
+            float maxTailZ = 0f;
+            for (int i = 0; i < 3; i++)
+            {
+                float x = rk.x - 0.58f + i * 0.58f;
+                float lean = (14f + i * 2.5f) * Mathf.Deg2Rad;
+                // nose direction: up and back toward the hut (−z); deck normal faces the rack (−z) and slightly down
+                Vector3 d = new Vector3(0f, Mathf.Cos(lean), -Mathf.Sin(lean));
+                Vector3 n = new Vector3(0f, -Mathf.Sin(lean), -Mathf.Cos(lean));
+                // the deck touches the top-north edge of the upper bar
+                Vector3 edge = new Vector3(x, rk.y + RackBarY + 0.035f, rk.z + RackBarHalfDepth);
+                Vector3 q = edge - n * RackBoardHalfThick;
+                // tail (local z −1) on the ground: solve along the centre line, re-sample the ground at the tail
+                float g = GL(x, rk.z + 0.4f);
+                Vector3 tail = q;
+                for (int it = 0; it < 3; it++)
+                {
+                    float t = (g + 0.025f - q.y) / d.y;
+                    tail = q + d * t;
+                    g = GL(tail.x, tail.z);
+                }
+                Vector3 center = tail + d * 1.0f;
+                Quaternion rot = Quaternion.LookRotation(d, n);
+                PropBeach.Surfboard(batch, W(center), rot, boards[i]);
+                RackBoardTails.Add(W(tail));
+                RackBoardContacts.Add(W(edge));
+                maxTailZ = Mathf.Max(maxTailZ, tail.z - rk.z);
+            }
+            // solid: bars + the leaning boards
+            Col(rk + new Vector3(0f, 1.0f, (maxTailZ + 0.12f - RackBarHalfDepth) * 0.5f), new Vector3(2f * half + 0.2f, 2.0f, maxTailZ + 0.12f + RackBarHalfDepth));
+        }
+
+        static void Wetsuit(Vector3 hang, Color c, int i)
+        {
+            var m = B(PropMats.Flat(c));
+            var dk = B(PropMats.Flat(PropMats.Value(c, 0.6f)));
+            Quaternion r = Quaternion.Euler(0f, 0f, (i - 1) * 4f);
+            Vector3 top = hang - Vector3.up * 0.05f;
+            m.Box(top - r * new Vector3(0f, 0.32f, 0f), new Vector3(0.36f, 0.55f, 0.04f), r);
+            m.Box(top - r * new Vector3(0.24f, 0.28f, 0f), new Vector3(0.1f, 0.45f, 0.035f), r * Quaternion.Euler(0f, 0f, 12f));
+            m.Box(top - r * new Vector3(-0.24f, 0.28f, 0f), new Vector3(0.1f, 0.45f, 0.035f), r * Quaternion.Euler(0f, 0f, -12f));
+            m.Box(top - r * new Vector3(0.09f, 0.86f, 0f), new Vector3(0.14f, 0.55f, 0.035f), r);
+            m.Box(top - r * new Vector3(-0.09f, 0.86f, 0f), new Vector3(0.14f, 0.55f, 0.035f), r);
+            dk.Box(top - r * new Vector3(0f, 0.1f, 0f), new Vector3(0.38f, 0.05f, 0.045f), r);
+            B(PropMats.WoodLight).Box(top + new Vector3(0f, 0.02f, 0f), new Vector3(0.04f, 0.09f, 0.03f));
+        }
+
+        /// „ROSTLAUBE“ in pixel letters (tiny boxes) on a board facing −z (local).
+        static void NameBoard(Vector3 c)
+        {
+            const string text = "ROSTLAUBE";
+            float cell = 0.0125f;
+            float w = PropFont.Width(text, 1f) * cell;
+            var ink = B(PropMats.LighthouseRed);
+            for (int k = 0; k < text.Length; k++)
+                for (int row = 0; row < 7; row++)
+                    for (int col = 0; col < 5; col++)
+                    {
+                        if (!PropFont.Bit(text[k], col, row)) continue;
+                        float x = -w * 0.5f + (k * 6 + col + 0.5f) * cell;
+                        float y = (3.5f - row) * cell;
+                        ink.Box(c + new Vector3(x, y, -0.004f), new Vector3(cell * 0.95f, cell * 0.95f, 0.006f));
+                    }
+        }
+
+        static void Compressor(Vector3 c)
+        {
+            var body = B(PropMats.Flat(PropPal.LighthouseRed));
+            body.Box(c + new Vector3(0f, 0.42f, 0f), new Vector3(0.9f, 0.5f, 0.55f));
+            B(PropMats.Metal).Cylinder(c + new Vector3(-0.15f, 0.72f, 0f), Quaternion.Euler(0f, 0f, 90f), 0.17f, 0.17f, 0.7f, 8, true, true);
+            B(PropMats.DarkMetal).Cylinder(c + new Vector3(0.28f, 0.68f, 0.14f), Quaternion.identity, 0.06f, 0.06f, 0.2f, 6, false, true);
+            B(PropMats.Ink).Cylinder(c + new Vector3(0.36f, 0.12f, 0.3f), Quaternion.Euler(90f, 0f, 0f), 0.12f, 0.12f, 0.06f, 8, true, true);
+            B(PropMats.Ink).Cylinder(c + new Vector3(-0.36f, 0.12f, 0.3f), Quaternion.Euler(90f, 0f, 0f), 0.12f, 0.12f, 0.06f, 8, true, true);
+            B(PropMats.Ink).Cylinder(c + new Vector3(0.36f, 0.12f, -0.36f), Quaternion.Euler(90f, 0f, 0f), 0.12f, 0.12f, 0.06f, 8, true, true);
+            B(PropMats.Ink).Cylinder(c + new Vector3(-0.36f, 0.12f, -0.36f), Quaternion.Euler(90f, 0f, 0f), 0.12f, 0.12f, 0.06f, 8, true, true);
+            B(PropMats.White).Cylinder(c + new Vector3(0.1f, 0.68f, 0.28f), Quaternion.Euler(90f, 0f, 0f), 0.07f, 0.07f, 0.02f, 8, true, true);
+            B(PropMats.Ink).Box(c + new Vector3(0.1f, 0.69f, 0.295f), new Vector3(0.01f, 0.05f, 0.005f), Quaternion.Euler(0f, 0f, 35f));
+            Col(c + new Vector3(0f, 0.45f, 0f), new Vector3(0.95f, 0.9f, 0.7f));
+        }
+
+        static void Hose(Vector3 a, Vector3 dockEnd)
+        {
+            // a yellow air hose lying on the ground in gentle curves
+            dockEnd.y = PropGround.H(dockEnd.x, dockEnd.z) + 0.04f;
+            float len = Vector2.Distance(new Vector2(a.x, a.z), new Vector2(dockEnd.x, dockEnd.z));
+            int n = Mathf.Max(4, Mathf.CeilToInt(len / 1.5f));
+            Vector3 side = Vector3.Cross(Vector3.up, (dockEnd - a).normalized);
+            Vector3 prev = a;
+            var hose = batch.W(PropMats.Flat(PropPal.Sun), dockEnd);
+            for (int i = 1; i <= n; i++)
+            {
+                float t = i / (float)n;
+                Vector3 p = Vector3.Lerp(a, dockEnd, t) + side * (Mathf.Sin(t * 9f) * 0.6f * Mathf.Sin(t * Mathf.PI));
+                p.y = PropGround.H(p.x, p.z) + 0.05f;
+                if (i == 1) p.y = Mathf.Max(p.y, a.y - 0.2f);
+                hose.Rod(prev, p, 0.035f, 0.035f, 4);
+                prev = p;
+            }
+        }
+
+        static void AddSeat(Vector3 local, float yaw, Vector3 standLocal)
+        {
+            var go = new GameObject("Seat");
+            go.transform.SetParent(root, false);
+            go.transform.SetPositionAndRotation(W(local), Quaternion.Euler(0f, yaw, 0f));
+            var bc = go.AddComponent<BoxCollider>();
+            bc.isTrigger = true;
+            bc.size = new Vector3(1.0f, 0.5f, 0.6f);
+            var seat = new GameObject("SeatPoint").transform;
+            seat.SetParent(go.transform, false);
+            seat.localPosition = new Vector3(0f, -0.62f, 0f);
+            var s = go.AddComponent<PropSeat>();
+            s.seat = seat;
+            s.standPos = W(standLocal) + Vector3.up * 0.05f;
+        }
+    }
+
+    /// The golden camera trophy (Q52): visible once the Sealog is complete (achievement golden_camera).
+    public class PropTrophy : MonoBehaviour
+    {
+        public GameObject model;
+        float next;
+
+        void Update()
+        {
+            if (model == null || Time.unscaledTime < next) return;
+            next = Time.unscaledTime + 1f;
+            bool on = GameManager.I != null && GameManager.I.InGame && Achievements.IsUnlocked("golden_camera");
+            if (model.activeSelf != on) model.SetActive(on);
+        }
+    }
+}

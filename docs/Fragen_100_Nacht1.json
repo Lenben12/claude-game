@@ -1,0 +1,1802 @@
+[
+  {
+    "question": "1/100 – Mittags sieht die Insel How to Fish schon sehr ähnlich. Wo soll die nächste Grafik-Runde zuerst ansetzen?",
+    "header": "Grafik",
+    "options": [
+      {
+        "label": "Morgen, Abend und Nacht (Empfohlen)",
+        "description": "Menü und Abend wirken kühl statt golden, das Nachtmeer ist zu knallig blau."
+      },
+      {
+        "label": "Hände und Gegenstände",
+        "description": "Lampe und Hände sind größer und dunkler als in How to Fish."
+      },
+      {
+        "label": "Meeresboden in der Tiefe",
+        "description": "Große flache Dreiecke am Kelpwald und Wrack feiner machen."
+      }
+    ]
+  },
+  {
+    "question": "2/100 – Die Hand am Handy ist hautfarben, alle anderen Hände sind Neopren-Handschuhe. Soll das einheitlich werden?",
+    "header": "Hände",
+    "options": [
+      {
+        "label": "Überall Handschuhe (Empfohlen)",
+        "description": "Passt zu deiner Entscheidung „Neopren mit bunter Manschette“."
+      },
+      {
+        "label": "An Land Haut, im Wasser Neopren",
+        "description": "An Land wie How to Fish, beim Tauchen Handschuhe."
+      },
+      {
+        "label": "So lassen",
+        "description": "Die Mischung stört dich nicht."
+      }
+    ]
+  },
+  {
+    "question": "3/100 – In Hütte und Bootskabine sieht man auf den Wänden ein körniges Rauschen (Schatten-Effekt). Wie lösen?",
+    "header": "Wände",
+    "options": [
+      {
+        "label": "Rauschen weich machen (Empfohlen)",
+        "description": "Weiche Schatten in Ecken bleiben, das Körnige verschwindet."
+      },
+      {
+        "label": "Effekt ganz ausschalten",
+        "description": "Flacher, noch mehr wie How to Fish, aber Ecken wirken weniger tief."
+      },
+      {
+        "label": "Nur auf Grafik „Hoch“",
+        "description": "Mittel und Niedrig ohne den Effekt, Hoch mit."
+      }
+    ]
+  },
+  {
+    "question": "4/100 – Hochsee ist jetzt stahlblau wie in How to Fish, türkis nur am Strand und unter Wasser. Dein Konzept sagte „Türkis“. Was gilt?",
+    "header": "Meerfarbe",
+    "options": [
+      {
+        "label": "So lassen (Empfohlen)",
+        "description": "Wie How to Fish: tiefes Meer blau, Strandwasser und Unterwasser hell türkis."
+      },
+      {
+        "label": "Breite türkise Lagune",
+        "description": "Rund um die Insel ein breiter Türkis-Gürtel, erst weiter draußen blau."
+      },
+      {
+        "label": "Überall helles Türkis",
+        "description": "Karibik-Look, weicht deutlich von How to Fish ab."
+      }
+    ]
+  },
+  {
+    "question": "5/100 – Die Insel hat jetzt Wasserfall, Höhle, Schlucht, Gezeitenbecken, zweiten Strand und Funkturm. Was fehlt am meisten?",
+    "header": "Insel",
+    "options": [
+      {
+        "label": "Mehr Leben: Vögel, Krabben (Empfohlen)",
+        "description": "Möwen, Krabben am Strand, wehende Palmen – die Insel wirkt lebendiger."
+      },
+      {
+        "label": "Mehr Kletterwege",
+        "description": "Felsen, Leitern und Abkürzungen quer über die Insel."
+      },
+      {
+        "label": "Mehr Höhlen und Geheimgänge",
+        "description": "Noch mehr zu entdecken im Inselinneren."
+      }
+    ]
+  },
+  {
+    "question": "6/100 – Wie sollst du dich auf der Insel zurechtfinden?",
+    "header": "Orientierung",
+    "options": [
+      {
+        "label": "Wegweiser + Seekarte (Empfohlen)",
+        "description": "Bilder-Schilder an den Wegen, die Handy-Karte zeigt die Orte."
+      },
+      {
+        "label": "Kompass oben im Bild",
+        "description": "Wie in vielen Erkundungsspielen."
+      },
+      {
+        "label": "Gar keine Hilfe",
+        "description": "Selbst entdecken, die Karte zeigt nur grob die Insel."
+      }
+    ]
+  },
+  {
+    "question": "7/100 – Die Wege über die Insel sind lang. Soll es eine Schnellreise geben?",
+    "header": "Schnellreise",
+    "options": [
+      {
+        "label": "Nein, aber Abkürzungen (Empfohlen)",
+        "description": "Rutschen und Pfade; Laufen bleibt Teil des Erkundens."
+      },
+      {
+        "label": "Ja, Hütte – Steg – Leuchtturm",
+        "description": "Per Handy-Karte zwischen den wichtigsten Orten, kostet etwas Spielzeit."
+      },
+      {
+        "label": "Ja, überall per Karte",
+        "description": "Sofort an jeden entdeckten Ort springen."
+      }
+    ]
+  },
+  {
+    "question": "8/100 – Wer in die Schlucht unter der Hängebrücke fällt, kommt evtl. schwer wieder raus. Wie soll die Schlucht sein?",
+    "header": "Schlucht",
+    "options": [
+      {
+        "label": "Leitern an beiden Enden (Empfohlen)",
+        "description": "Runter und sicher wieder hoch; unten liegt etwas Verstecktes."
+      },
+      {
+        "label": "Sturz = zurück zur Hütte",
+        "description": "Wie eine Ohnmacht: kurze Blende, du wachst in der Hütte auf."
+      },
+      {
+        "label": "Mit Zaun abgesperrt",
+        "description": "Man kommt gar nicht hinein."
+      }
+    ]
+  },
+  {
+    "question": "9/100 – Wie stark soll der Übergang beim Eintauchen sein (Platschen, Blasen, Ton)?",
+    "header": "Eintauchen",
+    "options": [
+      {
+        "label": "Kurzer Platscher + Blasen (Empfohlen)",
+        "description": "Eine halbe Sekunde Blasenwirbel und dumpfer Ton, dann klare Sicht."
+      },
+      {
+        "label": "Ganz sanft",
+        "description": "Fast ohne Effekt, sofort freie Sicht."
+      },
+      {
+        "label": "Großer Comic-Splash",
+        "description": "Viele Blasen und Wasser-Spritzer, lustiger, aber kurz weniger Sicht."
+      }
+    ]
+  },
+  {
+    "question": "10/100 – Im Tiefseegraben (91 m) ist fast alles schwarz, nur angeleuchtete Tiere sind sichtbar. Wie dunkel soll die Tiefe sein?",
+    "header": "Tiefsee",
+    "options": [
+      {
+        "label": "Dunkel, aber Lampe stärker (Empfohlen)",
+        "description": "Lampenkegel deutlich heller und weiter, die Umgebung bleibt finster."
+      },
+      {
+        "label": "Etwas Restlicht überall",
+        "description": "Boden und Umrisse auch ohne Lampe grob erkennbar."
+      },
+      {
+        "label": "So schwarz wie jetzt",
+        "description": "Maximaler Grusel."
+      }
+    ]
+  },
+  {
+    "question": "11/100 – Wie soll der Meeresboden abwechslungsreicher werden?",
+    "header": "Meeresboden",
+    "options": [
+      {
+        "label": "Felsen, Spalten, Sandrippen (Empfohlen)",
+        "description": "Mehr Form im Boden, feinere Dreiecke an den Tauchplätzen."
+      },
+      {
+        "label": "Mehr Pflanzen und Korallen",
+        "description": "Dichter bewachsen, besonders am Hausriff."
+      },
+      {
+        "label": "Mehr Müll und Fundstücke",
+        "description": "Reifen, Flaschen, alte Kameras – passt zur Comedy."
+      }
+    ]
+  },
+  {
+    "question": "12/100 – Was soll man unter Wasser hören (zusätzlich zur Musik)?",
+    "header": "Geräusche",
+    "options": [
+      {
+        "label": "Atem, Blasen, Tierlaute (Empfohlen)",
+        "description": "Ruhige Klangkulisse; der Atem wird schneller, wenn die Luft knapp ist."
+      },
+      {
+        "label": "Fast nur Musik",
+        "description": "Stimmungsvolle Musik, kaum Geräusche."
+      },
+      {
+        "label": "Fast Stille",
+        "description": "Nur Blasen, sehr echt und etwas beklemmend."
+      }
+    ]
+  },
+  {
+    "question": "13/100 – Am Wrack wirken Fische oft wie dunkle Schatten. Wie sollen Tiere in der Tiefe aussehen?",
+    "header": "Tierfarben",
+    "options": [
+      {
+        "label": "Leicht leuchtende Farben (Empfohlen)",
+        "description": "Jedes Tier behält etwas Farbe und Glupschaugen, auch tief unten."
+      },
+      {
+        "label": "Echt dunkel",
+        "description": "Erst die Lampe bringt die Farben zurück."
+      },
+      {
+        "label": "Immer voll bunt",
+        "description": "Comic-Look ganz ohne Abdunkeln in der Tiefe."
+      }
+    ]
+  },
+  {
+    "question": "14/100 – Durch die kürzere Sicht siehst du jetzt etwa doppelt so viele Tiere auf einmal. Passt die Menge?",
+    "header": "Tiermenge",
+    "options": [
+      {
+        "label": "Ja, lebendig so (Empfohlen)",
+        "description": "Immer etwas zu filmen, ohne lange suchen."
+      },
+      {
+        "label": "Weniger, dafür besondere",
+        "description": "Jede Begegnung fühlt sich wertvoller an."
+      },
+      {
+        "label": "Noch mehr, große Schwärme",
+        "description": "Sardinen-Wolken und volle Riffe."
+      }
+    ]
+  },
+  {
+    "question": "15/100 – Welche der geplanten neuen Tiergruppen soll als Erstes ins Spiel?",
+    "header": "Neue Tiere",
+    "options": [
+      {
+        "label": "Krebse und Seesterne (Empfohlen)",
+        "description": "Bodentiere, leicht zu filmen, ideal fürs Hausriff und die Gezeitenbecken."
+      },
+      {
+        "label": "Wale und Delfine",
+        "description": "Großer Wow-Moment, auch bei der Bootsfahrt."
+      },
+      {
+        "label": "Tiefsee-Monster",
+        "description": "Mehr Grusel im Graben."
+      }
+    ]
+  },
+  {
+    "question": "16/100 – Wie oft sollen Tiere Unfug machen (z. B. Lampe klauen, an der Flosse knabbern)?",
+    "header": "Tier-Unfug",
+    "options": [
+      {
+        "label": "Ab und zu, lustig (Empfohlen)",
+        "description": "Ein Krake schnappt kurz die Lampe, ein Fisch knabbert – bringt Views."
+      },
+      {
+        "label": "Oft, Chaos wie Safari-TV",
+        "description": "Ständig kleine Pannen."
+      },
+      {
+        "label": "Gar nicht",
+        "description": "Tiere bleiben ruhig und natürlich."
+      }
+    ]
+  },
+  {
+    "question": "17/100 – Rechte Hand 1–3, linke Hand 4–6. Wie willst du Gegenstände am liebsten wechseln?",
+    "header": "Hotbar",
+    "options": [
+      {
+        "label": "Zahlen + Mausrad (Empfohlen)",
+        "description": "Mausrad blättert in der rechten Hand, solange du nicht zoomst."
+      },
+      {
+        "label": "Nur Zahlentasten",
+        "description": "Klar und einfach wie jetzt."
+      },
+      {
+        "label": "Ringmenü beim Halten",
+        "description": "Taste halten, Gegenstand mit der Maus wählen."
+      }
+    ]
+  },
+  {
+    "question": "18/100 – Leere Hände sind an Land unsichtbar und erscheinen nur beim Schwimmen. Wie soll es sein?",
+    "header": "Leere Hände",
+    "options": [
+      {
+        "label": "So lassen (Empfohlen)",
+        "description": "Freie Sicht auf die Insel."
+      },
+      {
+        "label": "Immer locker sichtbar",
+        "description": "Mehr Körpergefühl, aber mehr im Bild."
+      },
+      {
+        "label": "Sichtbar + Handzeichen-Taste",
+        "description": "Hände zeigen Gesten (Daumen hoch, Zeigen) – praktisch im Koop."
+      }
+    ]
+  },
+  {
+    "question": "19/100 – Controller und Steam Deck sind geplant. Wann sollen sie kommen?",
+    "header": "Controller",
+    "options": [
+      {
+        "label": "Vor dem Early Access (Empfohlen)",
+        "description": "Jetzt einbauen, solange die Steuerung noch überschaubar ist."
+      },
+      {
+        "label": "Sofort als Nächstes",
+        "description": "Du testest gern mit Gamepad."
+      },
+      {
+        "label": "Nach dem Early-Access-Start",
+        "description": "Erst mehr Inhalt, dann Controller."
+      }
+    ]
+  },
+  {
+    "question": "20/100 – Soll die Kamera beim Sprung ins Wasser automatisch in die Hand kommen?",
+    "header": "Auto-Kamera",
+    "options": [
+      {
+        "label": "Ja, automatisch (Empfohlen)",
+        "description": "Spart einen Tastendruck; die Angel wird beim Eintauchen ohnehin weggesteckt."
+      },
+      {
+        "label": "Nein, immer selbst wählen",
+        "description": "Volle Kontrolle über beide Hände."
+      },
+      {
+        "label": "In den Einstellungen wählbar",
+        "description": "Jeder entscheidet selbst."
+      }
+    ]
+  },
+  {
+    "question": "21/100 – Anfangs bringt ein Fisch ca. 6 $. Für die erste Flasche (130 $) brauchst du ~21 Fische ≈ 14 Min. Passt das?",
+    "header": "Startgeld",
+    "options": [
+      {
+        "label": "Schneller: ca. 10 Minuten (Empfohlen)",
+        "description": "Erste Flasche nach rund 14 Fischen, das Tutorial bleibt kurzweilig."
+      },
+      {
+        "label": "So lassen",
+        "description": "Angeln als ruhiger, längerer Einstieg."
+      },
+      {
+        "label": "Viel schneller: ca. 5 Minuten",
+        "description": "Schnell zum Tauchen, Angeln nur als Nebensache."
+      }
+    ]
+  },
+  {
+    "question": "22/100 – Soll das Einholen eines Fisches ein kleines Geschicklichkeitsspiel werden?",
+    "header": "Einholen",
+    "options": [
+      {
+        "label": "Ja, mit Spannungsleiste (Empfohlen)",
+        "description": "Leine nicht reißen lassen; große Fische kämpfen länger."
+      },
+      {
+        "label": "Nein, Klick beim Biss reicht",
+        "description": "Entspannt wie jetzt."
+      },
+      {
+        "label": "Nur bei seltenen Fischen",
+        "description": "Normale Fische einfach, Raritäten mit Kampf."
+      }
+    ]
+  },
+  {
+    "question": "23/100 – Wo soll es neue Angelplätze oder bessere Fische geben?",
+    "header": "Angelplätze",
+    "options": [
+      {
+        "label": "Vom Boot auf offener See (Empfohlen)",
+        "description": "Größere, wertvollere Fische weit draußen."
+      },
+      {
+        "label": "Wasserfall-Teich + Becken",
+        "description": "Eigene Fische an Orten auf der Insel."
+      },
+      {
+        "label": "Nur am Steg",
+        "description": "Angeln bleibt ein kleiner Startpunkt."
+      }
+    ]
+  },
+  {
+    "question": "24/100 – Bessere Angeln (350 $ / 2.500 $) beißen schneller und bringen mehr Glück. Was sollen sie noch können?",
+    "header": "Bessere Rute",
+    "options": [
+      {
+        "label": "Weiter werfen + Seltenes (Empfohlen)",
+        "description": "Weite Würfe erreichen tiefes Wasser mit wertvolleren Fischen."
+      },
+      {
+        "label": "Nur schneller wie jetzt",
+        "description": "Einfach und klar."
+      },
+      {
+        "label": "Eigene Angel-Aufträge",
+        "description": "Dr. Fin will bestimmte Fische für die Forschung."
+      }
+    ]
+  },
+  {
+    "question": "25/100 – Ohne Flasche: 20 s Luft anhalten, an der Oberfläche ist der Atem in ~6 s wieder voll. Soll das so bleiben?",
+    "header": "Schnorcheln",
+    "options": [
+      {
+        "label": "Ja, Schnorcheln erlaubt (Empfohlen)",
+        "description": "Flaches Erkunden ohne Flasche bleibt möglich."
+      },
+      {
+        "label": "Atem nur an Land auffüllen",
+        "description": "Strenger, genau wie bei der Flasche."
+      },
+      {
+        "label": "Mehr Atem: 30 s",
+        "description": "Etwas mehr Freiheit am Anfang."
+      }
+    ]
+  },
+  {
+    "question": "26/100 – Was soll passieren, wenn du tiefer tauchst, als deine Flasche erlaubt?",
+    "header": "Zu tief",
+    "options": [
+      {
+        "label": "Luft schneller leer (jetzt) (Empfohlen)",
+        "description": "Dreifacher Verbrauch + Warnung; kurz riskieren geht."
+      },
+      {
+        "label": "Harte Grenze",
+        "description": "Man kommt einfach nicht tiefer."
+      },
+      {
+        "label": "Bild wackelt, Ohnmacht droht",
+        "description": "Druck-Effekt: wer bleibt, wird schnell ohnmächtig."
+      }
+    ]
+  },
+  {
+    "question": "27/100 – Laut Konzept muss ein Kompressor gekauft werden. Jetzt füllt Ausruhen an Land/Boot gratis in 5 s. Was gilt?",
+    "header": "Kompressor",
+    "options": [
+      {
+        "label": "Boot-Kompressor kaufen (Empfohlen)",
+        "description": "Hütte füllt gratis, das Boot erst nach dem Kauf – Ausflüge planen lohnt sich."
+      },
+      {
+        "label": "Überall gratis wie jetzt",
+        "description": "Einfach und ohne Frust."
+      },
+      {
+        "label": "Kompressor überall nötig",
+        "description": "Wie im Konzept: ohne Kauf nur Flaschentausch per Heli."
+      }
+    ]
+  },
+  {
+    "question": "28/100 – Sollen größere Flaschen auch Nachteile haben (z. B. langsamer schwimmen)?",
+    "header": "Flaschen",
+    "options": [
+      {
+        "label": "Nein, nur Vorteile (Empfohlen)",
+        "description": "Bessere Flasche = mehr Luft, keine Haken – einfach und klar."
+      },
+      {
+        "label": "Ja, große Flaschen bremsen",
+        "description": "Mehr Luft, aber langsamer; Flossen gleichen das aus."
+      },
+      {
+        "label": "Wahl: leicht oder lang",
+        "description": "Zwei Flaschen-Typen pro Stufe."
+      }
+    ]
+  },
+  {
+    "question": "29/100 – Ins Sealog kommt ein Tier nach 1,5 s mittig, nah (max. 12 m) und mit Zielen. Ist das zu streng?",
+    "header": "Scan",
+    "options": [
+      {
+        "label": "Passt so (Empfohlen)",
+        "description": "Gut filmen lohnt sich, Zufallstreffer zählen nicht."
+      },
+      {
+        "label": "Etwas lockerer",
+        "description": "1 s reicht, das Tier darf weiter am Rand sein."
+      },
+      {
+        "label": "Strenger",
+        "description": "2–3 s und größer im Bild, mehr Profi-Gefühl."
+      }
+    ]
+  },
+  {
+    "question": "30/100 – Der Sucher zeigt Hinweise wie „Näher ran“ oder „Mittig halten“. Wie sollen sie aussehen?",
+    "header": "Sucher",
+    "options": [
+      {
+        "label": "Symbol + 1–2 Wörter (Empfohlen)",
+        "description": "Passt zu „weniger Text“: Pfeil, Lupe, kurzes Wort."
+      },
+      {
+        "label": "Nur Symbole",
+        "description": "Ganz ohne Text."
+      },
+      {
+        "label": "Keine Hinweise",
+        "description": "Selbst herausfinden, was fehlt."
+      }
+    ]
+  },
+  {
+    "question": "31/100 – Fotos (P beim Zielen) landen in der Galerie. Sollen sie im Spiel etwas bringen?",
+    "header": "Fotos",
+    "options": [
+      {
+        "label": "Foto als Vorschaubild (Empfohlen)",
+        "description": "Gutes Vorschaubild für das FinTube-Video = mehr Aufrufe."
+      },
+      {
+        "label": "Foto-Aufträge von Dr. Fin",
+        "description": "Bestimmte Tiere fotografieren gegen Geld."
+      },
+      {
+        "label": "Nur als Erinnerung",
+        "description": "Galerie ohne Wirkung aufs Spiel."
+      }
+    ]
+  },
+  {
+    "question": "32/100 – Was soll eine bessere Kamera können (außer mehr Qualität)?",
+    "header": "Kamera-Upgr.",
+    "options": [
+      {
+        "label": "Mehr Zoom + Nachtsicht (Empfohlen)",
+        "description": "Höhere Stufen sehen in dunklem Wasser weiter und zoomen näher."
+      },
+      {
+        "label": "Nur bessere Qualität",
+        "description": "Wie jetzt: mehr Aufrufe pro Clip."
+      },
+      {
+        "label": "Spezial-Linsen",
+        "description": "Makro für kleine Tiere, Weitwinkel für Riesen."
+      }
+    ]
+  },
+  {
+    "question": "33/100 – Das 3D-Handy füllt etwa 70 % der Bildhöhe. Wie groß soll es sein?",
+    "header": "Handy-Größe",
+    "options": [
+      {
+        "label": "Groß wie jetzt (Empfohlen)",
+        "description": "Gut lesbar, die Welt dahinter bleibt sichtbar."
+      },
+      {
+        "label": "Kleiner (ca. 50 %)",
+        "description": "Mehr von der Welt, aber kleinere Schrift."
+      },
+      {
+        "label": "Flach als 2D-Fenster",
+        "description": "Am besten lesbar, aber ohne Hand-Gefühl (gibt es schon als Einstellung)."
+      }
+    ]
+  },
+  {
+    "question": "34/100 – Das alte, verkratzte Handy soll später upgradebar sein. Was soll ein besseres Handy bringen?",
+    "header": "Handy-Upgr.",
+    "options": [
+      {
+        "label": "Neue Apps + neuer Look (Empfohlen)",
+        "description": "Z. B. Wetter-App und Sonar-Karte, weniger Risse im Glas."
+      },
+      {
+        "label": "Nur neues Aussehen",
+        "description": "Gleiche Apps, neue Hülle."
+      },
+      {
+        "label": "Gar kein Upgrade",
+        "description": "Das alte Handy bleibt Kult."
+      }
+    ]
+  },
+  {
+    "question": "35/100 – Wo soll das Handy benutzbar sein?",
+    "header": "Handy nass",
+    "options": [
+      {
+        "label": "Nur an Land und auf dem Boot (Empfohlen)",
+        "description": "Tauchgänge vorher planen, unter Wasser zählt nur die Kamera."
+      },
+      {
+        "label": "Überall (Gefrierbeutel)",
+        "description": "Witzig und praktisch, auch unter Wasser."
+      },
+      {
+        "label": "Unter Wasser nur Karte + Sealog",
+        "description": "Wichtiges ja, Shop und FinTube nein."
+      }
+    ]
+  },
+  {
+    "question": "36/100 – Welche neue App wünschst du dir als Nächstes?",
+    "header": "Neue App",
+    "options": [
+      {
+        "label": "Wetter-App (Empfohlen)",
+        "description": "Zeigt Sturm, Sicht und Wellen für die nächsten Tage."
+      },
+      {
+        "label": "Spind-App",
+        "description": "Anzug, Hut und Gesicht jederzeit ändern."
+      },
+      {
+        "label": "Radio-App",
+        "description": "Insel-Radiosender und Musik auswählen."
+      }
+    ]
+  },
+  {
+    "question": "37/100 – Meldungen oben (Karten) und rechts (kurze Texte) können sich stapeln. Wie viele sollen gleichzeitig erscheinen?",
+    "header": "Meldungen",
+    "options": [
+      {
+        "label": "Max. 1 Karte + 2 Texte (Empfohlen)",
+        "description": "Der Rest wird zusammengefasst, das Bild bleibt frei."
+      },
+      {
+        "label": "So viele wie nötig",
+        "description": "Nichts verpassen."
+      },
+      {
+        "label": "Nur Wichtiges im Bild",
+        "description": "Kleinkram nur noch im Handy."
+      }
+    ]
+  },
+  {
+    "question": "38/100 – Unter dem gelben Meilenstein-Banner steht eine kleine Zeile, die vor dem Himmel schwer lesbar ist. Lösung?",
+    "header": "Banner",
+    "options": [
+      {
+        "label": "Zeile auf hellem Band (Empfohlen)",
+        "description": "Gleicher Stil, aber immer lesbar."
+      },
+      {
+        "label": "Nur Titel, Rest im Handy",
+        "description": "Weniger Text im Bild."
+      },
+      {
+        "label": "Größer und länger zeigen",
+        "description": "Mehr Feier-Moment."
+      }
+    ]
+  },
+  {
+    "question": "39/100 – Die Hotbar ist fast immer sichtbar. Soll sie sich von selbst ausblenden?",
+    "header": "Hotbar-Anz.",
+    "options": [
+      {
+        "label": "Nach 3 s ausblenden (Empfohlen)",
+        "description": "Erscheint beim Drücken von 1–6 wieder – mehr freie Sicht."
+      },
+      {
+        "label": "Immer sichtbar",
+        "description": "Wie in How to Fish."
+      },
+      {
+        "label": "Nur an Land sichtbar",
+        "description": "Unter Wasser freie Sicht."
+      }
+    ]
+  },
+  {
+    "question": "40/100 – Unter Wasser verliert man schnell die Richtung zum Boot. Was soll helfen?",
+    "header": "Richtung",
+    "options": [
+      {
+        "label": "Boot-Pfeil am Bildrand (Empfohlen)",
+        "description": "Kleiner Pfeil zeigt Richtung und Abstand zum Boot."
+      },
+      {
+        "label": "Tauchcomputer am Arm",
+        "description": "Ein Blick auf die Hand zeigt Richtung und Tiefe."
+      },
+      {
+        "label": "Gar nichts",
+        "description": "Orientierung über Boje und Ankerseil."
+      }
+    ]
+  },
+  {
+    "question": "41/100 – Das Menü zeigt die Crew am Steg, wirkt aber eher wie ein kühler Abend als goldene Stunde. Was ändern?",
+    "header": "Menü-Licht",
+    "options": [
+      {
+        "label": "Wärmer, tiefe Sonne (Empfohlen)",
+        "description": "Orange-goldenes Licht wie ein Sonnenuntergang in How to Fish."
+      },
+      {
+        "label": "So lassen",
+        "description": "Ruhiger blauer Abend."
+      },
+      {
+        "label": "Uhrzeit wie im Spielstand",
+        "description": "Das Menü zeigt die Tageszeit deines letzten Speicherns."
+      }
+    ]
+  },
+  {
+    "question": "42/100 – Das Intro (~23 s) läuft bei jedem Start und ist überspringbar. Wie oft soll es kommen?",
+    "header": "Intro",
+    "options": [
+      {
+        "label": "Nur beim ersten Start (Empfohlen)",
+        "description": "Danach direkt ins Menü; das Intro bleibt im Menü abrufbar."
+      },
+      {
+        "label": "Bei jedem Start",
+        "description": "Wie jetzt, jede Taste überspringt."
+      },
+      {
+        "label": "Nie automatisch",
+        "description": "Nur über einen Menüpunkt."
+      }
+    ]
+  },
+  {
+    "question": "43/100 – Die Unterwasser-Szene im Intro ist noch recht leer. Was soll dort zu sehen sein?",
+    "header": "Intro-Tauch",
+    "options": [
+      {
+        "label": "Gerald + Fischschwarm (Empfohlen)",
+        "description": "Die Schildkröte schwimmt nah an der Kamera vorbei, dahinter ein bunter Schwarm."
+      },
+      {
+        "label": "Kurzer Grusel-Moment",
+        "description": "Ein riesiges Auge in der Tiefe als Hinweis auf „The Big Eye“."
+      },
+      {
+        "label": "Die Crew taucht zusammen",
+        "description": "Zeigt sofort, dass man im Koop spielt."
+      }
+    ]
+  },
+  {
+    "question": "44/100 – Im Menü sitzen 3 Bohnen-Taucher am Steg. Wer soll dort sitzen?",
+    "header": "Menü-Crew",
+    "options": [
+      {
+        "label": "Du + deine Koop-Freunde (Empfohlen)",
+        "description": "Zuletzt gespielte Freunde mit ihren Farben und Hüten."
+      },
+      {
+        "label": "Feste Crew wie jetzt",
+        "description": "Immer dieselben drei."
+      },
+      {
+        "label": "Zufällige Crew",
+        "description": "Bei jedem Start andere Anzüge und Hüte."
+      }
+    ]
+  },
+  {
+    "question": "45/100 – Das erste Video bringt ~5.500 Aufrufe, +65 Follower, aber 0 $ (Geld erst ab 100 Followern). Passt der Start?",
+    "header": "Erstes Geld",
+    "options": [
+      {
+        "label": "Etwas Geld ab Video 1 (Empfohlen)",
+        "description": "Ein kleiner Betrag schon am Anfang, damit Filmen sich sofort lohnt."
+      },
+      {
+        "label": "So lassen",
+        "description": "100 Follower bleiben das erste große Ziel."
+      },
+      {
+        "label": "Mehr Follower pro Video",
+        "description": "Schneller über die 100er-Grenze."
+      }
+    ]
+  },
+  {
+    "question": "46/100 – Pro Spieltag gibt es ein Video; spätere Uploads am selben Tag werden ins Tagesvideo gemischt. Gut so?",
+    "header": "Videos/Tag",
+    "options": [
+      {
+        "label": "Ja, ein Video pro Tag (Empfohlen)",
+        "description": "Klarer Rhythmus: tauchen, hochladen, schlafen."
+      },
+      {
+        "label": "Bis zu 3 Videos pro Tag",
+        "description": "Mehr Uploads, dafür bringt jedes etwas weniger."
+      },
+      {
+        "label": "Beliebig viele",
+        "description": "Mehr Freiheit, aber schnelleres Wachstum."
+      }
+    ]
+  },
+  {
+    "question": "47/100 – Alle Ausrüstung kostet zusammen ~453.000 $, die beste Flasche allein 120.000 $. Wie fühlt sich das an?",
+    "header": "Preise",
+    "options": [
+      {
+        "label": "Passt, Spiel soll lang sein (Empfohlen)",
+        "description": "Laut Rechnung ca. 35–45 Stunden bis zur Million."
+      },
+      {
+        "label": "Etwas günstiger (−30 %)",
+        "description": "Upgrades kommen schneller, ca. 25–30 Stunden."
+      },
+      {
+        "label": "Noch teurer",
+        "description": "Sehr langes Spiel für Sammler."
+      }
+    ]
+  },
+  {
+    "question": "48/100 – Im Koop zählen Fische und Videos pro Kopf etwas weniger: 4 Spieler sind ~1,3× so schnell wie allein. Okay?",
+    "header": "Koop-Tempo",
+    "options": [
+      {
+        "label": "Ja, Koop leicht schneller (Empfohlen)",
+        "description": "Zusammen geht es fixer, aber nicht 4× so schnell."
+      },
+      {
+        "label": "Gleich schnell wie allein",
+        "description": "Gleiches Tempo, egal wie viele spielen."
+      },
+      {
+        "label": "Koop deutlich schneller",
+        "description": "Mehr Spieler = viel mehr Geld und Follower."
+      }
+    ]
+  },
+  {
+    "question": "49/100 – Neue Plätze: Kelp 300, Wrack 2.500, Blauwasser 15.000, Graben 100.000 Follower (+60 % Sealog). Passt das?",
+    "header": "Freischalten",
+    "options": [
+      {
+        "label": "Passt (Empfohlen)",
+        "description": "Laut Rechnung: Kelp nach ~1,3 h, Wrack ~3,7 h, Blauwasser ~7,6 h, Graben ~15 h."
+      },
+      {
+        "label": "Früher freischalten",
+        "description": "Alle Plätze in den ersten ~8 Stunden."
+      },
+      {
+        "label": "Nur über den Sealog",
+        "description": "Wer viel entdeckt, kommt weiter – egal wie viele Follower."
+      }
+    ]
+  },
+  {
+    "question": "50/100 – Soll dein Kanal Ränge bekommen (z. B. Anfänger, Riff-Profi, Sealebrity)?",
+    "header": "Ränge",
+    "options": [
+      {
+        "label": "Ja, Ränge mit Abzeichen (Empfohlen)",
+        "description": "Sichtbarer Fortschritt zwischen den Meilensteinen."
+      },
+      {
+        "label": "Nein, Follower reichen",
+        "description": "Die Zahl sagt alles."
+      },
+      {
+        "label": "Ja, auch pro Koop-Spieler",
+        "description": "Jeder hat zusätzlich seinen eigenen Taucher-Rang."
+      }
+    ]
+  },
+  {
+    "question": "51/100 – Soll man gekaufte Ausrüstung an der Figur sehen (größere Flasche, andere Flossen)?",
+    "header": "Ausrüstung",
+    "options": [
+      {
+        "label": "Ja, sichtbar an der Figur (Empfohlen)",
+        "description": "Freunde sehen sofort, wer die Profi-Ausrüstung trägt."
+      },
+      {
+        "label": "Nur im Inventar",
+        "description": "Figur bleibt immer gleich."
+      },
+      {
+        "label": "Nur Kamera und Lampe",
+        "description": "Nur was man in der Hand hält, ändert sich."
+      }
+    ]
+  },
+  {
+    "question": "52/100 – Was soll es geben, wenn alle Tierarten im Sealog sind?",
+    "header": "100 %",
+    "options": [
+      {
+        "label": "Goldene Kamera + Erfolg (Empfohlen)",
+        "description": "Trophäe in der Hütte und ein Steam-Erfolg."
+      },
+      {
+        "label": "Geheimer Tauchplatz",
+        "description": "Ein sechster, versteckter Ort."
+      },
+      {
+        "label": "Nichts Besonderes",
+        "description": "Der volle Sealog ist Belohnung genug."
+      }
+    ]
+  },
+  {
+    "question": "53/100 – Welcher Tauchplatz soll als Nächstes mehr Inhalt bekommen?",
+    "header": "Platz-Ausbau",
+    "options": [
+      {
+        "label": "Wrack „MS Clickbait“ (Empfohlen)",
+        "description": "Innenräume, Fundstücke, Grusel-Ecken; wirkt jetzt noch leer und dunkel."
+      },
+      {
+        "label": "Kelpwald",
+        "description": "Dichter Wald, Seelöwen, Verstecke."
+      },
+      {
+        "label": "Blauwasser-Kante",
+        "description": "Strömung, große Tiere, Blick in den Abgrund."
+      }
+    ]
+  },
+  {
+    "question": "54/100 – Neben jedem Tauchplatz liegt eine kleine Insel. Was soll man dort machen können?",
+    "header": "Mini-Inseln",
+    "options": [
+      {
+        "label": "Geheimnis + Rastplatz (Empfohlen)",
+        "description": "Luft auffüllen, ein Sammelstück finden, kurze Pause."
+      },
+      {
+        "label": "Nur Kulisse",
+        "description": "Landmarke zur Orientierung."
+      },
+      {
+        "label": "Eigene Angelplätze",
+        "description": "Besondere Fische an jeder Insel."
+      }
+    ]
+  },
+  {
+    "question": "55/100 – Der Abgrund (150 m+, versunkenes TV-Studio) fehlt noch. Wie soll man ihn erreichen?",
+    "header": "Abgrund",
+    "options": [
+      {
+        "label": "Nur mit dem U-Boot (Empfohlen)",
+        "description": "Das U-Boot wird das große Ziel im Spätspiel."
+      },
+      {
+        "label": "Beste Flasche + Leine",
+        "description": "Selbst tauchen, extrem knapp mit Luft."
+      },
+      {
+        "label": "Story-Tauchgang",
+        "description": "Geführter Tauchgang mit Dr. Fin im Finale."
+      }
+    ]
+  },
+  {
+    "question": "56/100 – Soll es an Tauchplätzen Stellen geben, die man nur zu zweit schafft?",
+    "header": "Koop-Stellen",
+    "options": [
+      {
+        "label": "Ja, optionale Koop-Stellen (Empfohlen)",
+        "description": "Z. B. eine schwere Tür für zwei; allein gibt es einen Umweg."
+      },
+      {
+        "label": "Nein, alles allein machbar",
+        "description": "Koop ist nur gemütlicher, nicht nötig."
+      },
+      {
+        "label": "Ja, eigener Koop-Platz",
+        "description": "Ein ganzer Ort nur für 2 oder mehr Spieler."
+      }
+    ]
+  },
+  {
+    "question": "57/100 – Onkel Gus meldet sich per Funk. Wie viel Story soll es insgesamt geben?",
+    "header": "Story-Menge",
+    "options": [
+      {
+        "label": "Funk je Meilenstein (Empfohlen)",
+        "description": "Ein paar witzige Sätze, nie länger als 20 Sekunden."
+      },
+      {
+        "label": "Story-Missionen",
+        "description": "Gus schickt dich mit Zielen zu bestimmten Orten."
+      },
+      {
+        "label": "Fast keine Story",
+        "description": "Nur Logbuch-Seiten zum Selberlesen."
+      }
+    ]
+  },
+  {
+    "question": "58/100 – Ab wann sollen die Rivalen „Bottom Feeders“ mit ihrer Yacht auftauchen?",
+    "header": "Rivalen",
+    "options": [
+      {
+        "label": "Ab ca. 1.000 Followern (Empfohlen)",
+        "description": "Wenn der Kanal läuft, ankert Konkurrenz vor der Insel."
+      },
+      {
+        "label": "Gleich am ersten Tag",
+        "description": "Sofort jemand zum Ärgern."
+      },
+      {
+        "label": "Erst im Spätspiel",
+        "description": "Für die letzten 500.000 Follower."
+      }
+    ]
+  },
+  {
+    "question": "59/100 – Sollen Figuren auch sichtbar auf die Insel kommen?",
+    "header": "Besuch",
+    "options": [
+      {
+        "label": "Ja, ab und zu Besuch (Empfohlen)",
+        "description": "Dr. Fin oder die Rivalen legen mit dem Boot am Steg an."
+      },
+      {
+        "label": "Nein, nur Funk und Handy",
+        "description": "Die Insel bleibt ganz deine."
+      },
+      {
+        "label": "Ja, ein Händler am Strand",
+        "description": "Kauft Fundstücke, verkauft Snacks."
+      }
+    ]
+  },
+  {
+    "question": "60/100 – Sollen die Figuren sprechen?",
+    "header": "Stimmen",
+    "options": [
+      {
+        "label": "Brabbel-Stimmen (Empfohlen)",
+        "description": "Lustige Fantasie-Laute mit Untertiteln – passt für alle Sprachen."
+      },
+      {
+        "label": "Echte Sprecher (DE + EN)",
+        "description": "Lebendiger, aber teuer und aufwendig."
+      },
+      {
+        "label": "Nur Text",
+        "description": "Ganz ohne Stimmen."
+      }
+    ]
+  },
+  {
+    "question": "61/100 – Es gibt 15 Logbuch-Seiten, 20 goldene Muscheln, 6 Schätze, 4 Geheimnisse und eine Flaschenpost. Wie viele sollen es werden?",
+    "header": "Menge",
+    "options": [
+      {
+        "label": "Etwa doppelt so viele (Empfohlen)",
+        "description": "Auch unter Wasser und auf den Mini-Inseln."
+      },
+      {
+        "label": "Genug so",
+        "description": "Lieber diese gut verstecken."
+      },
+      {
+        "label": "Weniger, aber besser versteckt",
+        "description": "Jeder Fund ist etwas Besonderes."
+      }
+    ]
+  },
+  {
+    "question": "62/100 – Wie sollst du Sammelstücke finden?",
+    "header": "Finden",
+    "options": [
+      {
+        "label": "Glitzern + Zähler (Empfohlen)",
+        "description": "Wie jetzt: keine Markierung, nur Funkeln aus der Nähe und ein Zähler im Handy."
+      },
+      {
+        "label": "Bereiche auf der Karte",
+        "description": "Kreise auf der Seekarte zeigen, wo noch etwas liegt."
+      },
+      {
+        "label": "Gar keine Hilfe",
+        "description": "Pures Suchen."
+      }
+    ]
+  },
+  {
+    "question": "63/100 – Was sollen Sammelstücke bringen?",
+    "header": "Belohnung",
+    "options": [
+      {
+        "label": "Story + Kosmetik je Set (Empfohlen)",
+        "description": "Alle Muscheln = goldener Hut, alle Logbuch-Seiten = die ganze Gus-Geschichte."
+      },
+      {
+        "label": "Geld",
+        "description": "Schätze lassen sich verkaufen."
+      },
+      {
+        "label": "Nur Steam-Erfolge",
+        "description": "Kein Vorteil im Spiel."
+      }
+    ]
+  },
+  {
+    "question": "64/100 – Höhle, Funkturm und Flaschenpost führen zum versunkenen TV-Studio. Wie schwer soll dieses Rätsel sein?",
+    "header": "Rätsel",
+    "options": [
+      {
+        "label": "Mittel, mit Hinweisen (Empfohlen)",
+        "description": "Wer die Logbuch-Seiten liest, kommt drauf."
+      },
+      {
+        "label": "Schwer, Community-Rätsel",
+        "description": "Ein Geheimnis, über das Spieler online rätseln."
+      },
+      {
+        "label": "Leicht, klare Wegbeschreibung",
+        "description": "Niemand bleibt hängen."
+      }
+    ]
+  },
+  {
+    "question": "65/100 – Bei Ohnmacht sollen Freunde retten können. Wie soll die Rettung funktionieren?",
+    "header": "Retten",
+    "options": [
+      {
+        "label": "Zur Oberfläche schleppen (Empfohlen)",
+        "description": "Bewusstlosen Freund nach oben ziehen, dort wacht er auf und behält die Clips."
+      },
+      {
+        "label": "Luft teilen per Taste",
+        "description": "Kurz Luft spenden, der Freund wacht unter Wasser auf."
+      },
+      {
+        "label": "Beides",
+        "description": "Luft teilen in der Not, Schleppen als letzte Rettung."
+      }
+    ]
+  },
+  {
+    "question": "66/100 – Wenn der Host das Spiel verlässt, endet die Sitzung für alle. Was soll passieren?",
+    "header": "Host geht",
+    "options": [
+      {
+        "label": "Warnung vor dem Verlassen (Empfohlen)",
+        "description": "Der Host sieht „Alle werden getrennt“ und muss bestätigen."
+      },
+      {
+        "label": "Host-Übergabe",
+        "description": "Ein Gast wird neuer Host, das Spiel läuft weiter."
+      },
+      {
+        "label": "So lassen",
+        "description": "Alle landen mit einer Meldung im Menü."
+      }
+    ]
+  },
+  {
+    "question": "67/100 – Gäste speichern nichts (nur Hotbar und Ausrüstungswahl). Was sollen Gäste behalten?",
+    "header": "Gast-Stand",
+    "options": [
+      {
+        "label": "Kosmetik + Erfolge (Empfohlen)",
+        "description": "Hüte, Anzüge und Steam-Erfolge gehören dem Spieler, der Kanal dem Host."
+      },
+      {
+        "label": "Kopie des ganzen Kanals",
+        "description": "Jeder kann allein weiterspielen."
+      },
+      {
+        "label": "Nichts",
+        "description": "Gäste sind nur zu Besuch."
+      }
+    ]
+  },
+  {
+    "question": "68/100 – Was soll sich ändern, wenn mehr Spieler dabei sind?",
+    "header": "Mehr Spieler",
+    "options": [
+      {
+        "label": "Mehr Tiere und Schwärme (Empfohlen)",
+        "description": "Jeder hat etwas zu filmen, ohne den anderen die Motive wegzunehmen."
+      },
+      {
+        "label": "Nur Geld-Ausgleich (jetzt)",
+        "description": "Fisch- und Video-Faktoren, sonst alles gleich."
+      },
+      {
+        "label": "Mehr Gefahren",
+        "description": "Mehr Raubtiere – zusammen wird es härter."
+      }
+    ]
+  },
+  {
+    "question": "69/100 – Sprachchat steht beim ersten Start auf Push-to-Talk (V). Was soll voreingestellt sein?",
+    "header": "Voice-Start",
+    "options": [
+      {
+        "label": "Offenes Mikrofon (Empfohlen)",
+        "description": "Wie in vielen Koop-Spielen üblich; stumm schalten per Taste."
+      },
+      {
+        "label": "Push-to-Talk wie jetzt",
+        "description": "Nur reden, solange V gedrückt ist."
+      },
+      {
+        "label": "Aus, bis man es einschaltet",
+        "description": "Am vorsichtigsten."
+      }
+    ]
+  },
+  {
+    "question": "70/100 – Andere hört man in 2–30 m, unter Wasser gedämpft. Wie weit soll man unter Wasser hören?",
+    "header": "Reichweite",
+    "options": [
+      {
+        "label": "Nur nah, ca. 10 m (Empfohlen)",
+        "description": "Unter Wasser muss man zusammenbleiben; das Funk-Upgrade hebt das auf."
+      },
+      {
+        "label": "Wie an Land, 30 m",
+        "description": "Einfacher für Anfänger."
+      },
+      {
+        "label": "Gar nicht ohne Funk",
+        "description": "Nur Handzeichen bis zum Funk-Upgrade."
+      }
+    ]
+  },
+  {
+    "question": "71/100 – Funk unter Wasser soll ein Upgrade sein. Wann und wie teuer?",
+    "header": "Funk",
+    "options": [
+      {
+        "label": "Ab dem Wrack, ca. 2.500 $ (Empfohlen)",
+        "description": "Wenn die Plätze tiefer und dunkler werden."
+      },
+      {
+        "label": "Von Anfang an im Shop",
+        "description": "Günstig, damit Freunde gleich reden können."
+      },
+      {
+        "label": "Erst im Spätspiel",
+        "description": "Lange nur Handzeichen und Gedämpftes."
+      }
+    ]
+  },
+  {
+    "question": "72/100 – Im Spiel gibt es keinen Text-Chat. Brauchst du einen?",
+    "header": "Text-Chat",
+    "options": [
+      {
+        "label": "Ja, Chat mit Enter (Empfohlen)",
+        "description": "Für Spieler ohne Mikrofon; Nachrichten verschwinden nach 10 s."
+      },
+      {
+        "label": "Nein",
+        "description": "Sprache reicht."
+      },
+      {
+        "label": "Nur Schnellrufe",
+        "description": "Fertige Rufe wie „Hier!“ oder „Luft knapp!“ per Taste."
+      }
+    ]
+  },
+  {
+    "question": "73/100 – Essen und Trinken sollen ins Spiel kommen. Wie streng?",
+    "header": "Hunger",
+    "options": [
+      {
+        "label": "Sanft: Bonus statt Strafe (Empfohlen)",
+        "description": "Satt = etwas mehr Luft und Tempo, hungrig = nur kleine Nachteile."
+      },
+      {
+        "label": "Mittel: hungrig = langsamer",
+        "description": "Spürbar, aber ohne Ohnmacht."
+      },
+      {
+        "label": "Hart: Ohnmacht ohne Essen",
+        "description": "Echtes Überleben."
+      }
+    ]
+  },
+  {
+    "question": "74/100 – Woher soll das Essen kommen?",
+    "header": "Essen",
+    "options": [
+      {
+        "label": "Fische grillen + Kokosnüsse (Empfohlen)",
+        "description": "Grill am Strand wie in How to Fish, Früchte auf der Insel."
+      },
+      {
+        "label": "Snacks per Heli",
+        "description": "Im Chopper Shop bestellen."
+      },
+      {
+        "label": "Beides",
+        "description": "Grillen spart Geld, der Heli ist bequem."
+      }
+    ]
+  },
+  {
+    "question": "75/100 – Schlafen soll erst ab einer bestimmten Uhrzeit gehen. Ab wann?",
+    "header": "Schlafen",
+    "options": [
+      {
+        "label": "Ab 18 Uhr (Empfohlen)",
+        "description": "Nach dem Nachmittags-Tauchgang ins Bett; Nachttauchen bleibt freiwillig."
+      },
+      {
+        "label": "Ab 21 Uhr",
+        "description": "Längere Abende, mehr Nachttauchen."
+      },
+      {
+        "label": "Jederzeit",
+        "description": "Wer genug hat, springt direkt zum nächsten Morgen."
+      }
+    ]
+  },
+  {
+    "question": "76/100 – Ein Spieltag dauert jetzt 40 echte Minuten (vorher 25). Passt das?",
+    "header": "Tageslänge",
+    "options": [
+      {
+        "label": "40 Minuten lassen (Empfohlen)",
+        "description": "Genug Zeit für Angeln, 2–3 Tauchgänge und Hochladen."
+      },
+      {
+        "label": "30 Minuten",
+        "description": "Schnellere Tage, mehr Videos pro Stunde."
+      },
+      {
+        "label": "60 Minuten",
+        "description": "Sehr gemütlich, viel Zeit zum Erkunden."
+      }
+    ]
+  },
+  {
+    "question": "77/100 – Bei 1 Mio. Followern kommt jetzt nur eine Glückwunsch-Seite. Wie soll sich das echte Finale anfühlen?",
+    "header": "Finale",
+    "options": [
+      {
+        "label": "Geskriptetes Spektakel (Empfohlen)",
+        "description": "Feste Abfolge mit Big Eye, Live-Chat und Gags, ca. 10 Minuten."
+      },
+      {
+        "label": "Freier Tauchgang",
+        "description": "Du tauchst selbst, Ereignisse passieren nach und nach."
+      },
+      {
+        "label": "Flucht nach oben",
+        "description": "Das Big Eye jagt dich zurück zur Oberfläche."
+      }
+    ]
+  },
+  {
+    "question": "78/100 – Viele verschiedene Enden sind geplant. Wie viele zum Early-Access-Start?",
+    "header": "Enden",
+    "options": [
+      {
+        "label": "3 Enden zum Start (Empfohlen)",
+        "description": "Genug für Abwechslung, weitere per Update."
+      },
+      {
+        "label": "1 Ende, Rest per Update",
+        "description": "Schneller fertig, später mehr."
+      },
+      {
+        "label": "5 oder mehr",
+        "description": "Großer Wiederspielwert ab Tag 1."
+      }
+    ]
+  },
+  {
+    "question": "79/100 – Was soll nach dem Finale noch motivieren?",
+    "header": "Danach",
+    "options": [
+      {
+        "label": "Legenden + Rekordjagd (Empfohlen)",
+        "description": "Jede Art in Legendär-Größe finden, Sealog zu 100 %."
+      },
+      {
+        "label": "Neues Spiel+ (härter)",
+        "description": "Von vorn mit schwereren Tauchplätzen."
+      },
+      {
+        "label": "Nichts, Spiel ist durch",
+        "description": "Ein klares Ende."
+      }
+    ]
+  },
+  {
+    "question": "80/100 – Wie soll der Abspann aussehen?",
+    "header": "Abspann",
+    "options": [
+      {
+        "label": "Dein Best-of als Abspann (Empfohlen)",
+        "description": "Deine besten Clips und Fotos laufen als Video."
+      },
+      {
+        "label": "Klassischer Abspann",
+        "description": "Namen auf Unterwasser-Hintergrund."
+      },
+      {
+        "label": "Kurzer Gag-Abspann",
+        "description": "Die Crew am Steg winkt, fertig."
+      }
+    ]
+  },
+  {
+    "question": "81/100 – Livestreams auf KRILL.tv (ab 1.000 Followern) fehlen noch. Wie soll ein Stream ablaufen?",
+    "header": "Stream",
+    "options": [
+      {
+        "label": "Live tauchen vom Boot (Empfohlen)",
+        "description": "Stream starten, tauchen, der Chat reagiert sofort, Spenden kommen live."
+      },
+      {
+        "label": "Erst nur an Land",
+        "description": "Aus dem Wasser erst später mit Relay-Boje."
+      },
+      {
+        "label": "Termin ankündigen",
+        "description": "Fans warten, der Stream startet zur angesagten Uhrzeit."
+      }
+    ]
+  },
+  {
+    "question": "82/100 – Wo soll der Live-Chat beim Streamen erscheinen?",
+    "header": "Live-Chat",
+    "options": [
+      {
+        "label": "Klein am Bildrand (Empfohlen)",
+        "description": "Kurze Sprechblasen, die schnell verschwinden."
+      },
+      {
+        "label": "Auf dem Handy",
+        "description": "Zum Lesen hochnehmen – riskant unter Wasser."
+      },
+      {
+        "label": "Großes Overlay",
+        "description": "Wie bei einem echten Stream."
+      }
+    ]
+  },
+  {
+    "question": "83/100 – Wie gefährlich sollen Mutproben aus dem Chat sein?",
+    "header": "Mutproben",
+    "options": [
+      {
+        "label": "Lustig, kleines Risiko (Empfohlen)",
+        "description": "Aal streicheln, rückwärts schwimmen – kostet etwas Luft."
+      },
+      {
+        "label": "Echt riskant",
+        "description": "Tiefer als erlaubt, Hai anstupsen – viel Geld."
+      },
+      {
+        "label": "Du wählst je Mutprobe",
+        "description": "Jede zeigt Risiko und Lohn, du nimmst an oder lehnst ab."
+      }
+    ]
+  },
+  {
+    "question": "84/100 – Was soll passieren, wenn du während eines Streams ohnmächtig wirst?",
+    "header": "Stream-Panne",
+    "options": [
+      {
+        "label": "Chat feiert die Panne (Empfohlen)",
+        "description": "Viele Aufrufe trotz Rettungsgebühr – Pannen bringen Fans."
+      },
+      {
+        "label": "Stream bricht ab",
+        "description": "Follower gehen verloren."
+      },
+      {
+        "label": "Wie sonst auch",
+        "description": "Nur die Clips sind weg, der Stream läuft weiter."
+      }
+    ]
+  },
+  {
+    "question": "85/100 – Gast-Taucher (TourTrap) fehlen noch. Wann sollen sie kommen?",
+    "header": "Gäste",
+    "options": [
+      {
+        "label": "Nach Livestream + Wetter (Empfohlen)",
+        "description": "Erst die Grundlagen, dann Gäste als großes Spätspiel-Feature."
+      },
+      {
+        "label": "Als Nächstes",
+        "description": "Gäste sind dir am wichtigsten."
+      },
+      {
+        "label": "Gar nicht mehr",
+        "description": "Fokus auf Filmen und Koop."
+      }
+    ]
+  },
+  {
+    "question": "86/100 – Wie selbstständig sollen Gäste unter Wasser sein?",
+    "header": "Gast-KI",
+    "options": [
+      {
+        "label": "Folgen dir, machen Quatsch (Empfohlen)",
+        "description": "Bleiben grob bei dir, schwimmen aber zu Tieren oder in Gefahr."
+      },
+      {
+        "label": "Brav im Schlepptau",
+        "description": "Leicht zu führen."
+      },
+      {
+        "label": "Völlig eigenständig",
+        "description": "Chaos pur."
+      }
+    ]
+  },
+  {
+    "question": "87/100 – Sollen Gäste auch filmen und Clips für dein Video liefern?",
+    "header": "Gast-Clips",
+    "options": [
+      {
+        "label": "Ja, wackelige Gast-Clips (Empfohlen)",
+        "description": "Meist lustig verwackelt, manchmal Gold wert."
+      },
+      {
+        "label": "Nein",
+        "description": "Gäste schauen nur zu."
+      },
+      {
+        "label": "Nur VIP-Gäste",
+        "description": "Profis mit eigener Kamera."
+      }
+    ]
+  },
+  {
+    "question": "88/100 – Wie sollen Gäste ihre Tour bewerten?",
+    "header": "Bewertung",
+    "options": [
+      {
+        "label": "Sterne + lustiger Kommentar (Empfohlen)",
+        "description": "1–5 Sterne im Handy, beeinflusst neue Buchungen."
+      },
+      {
+        "label": "Nur Trinkgeld",
+        "description": "Gute Tour = mehr Geld."
+      },
+      {
+        "label": "Gar nicht",
+        "description": "Bezahlt ist bezahlt."
+      }
+    ]
+  },
+  {
+    "question": "89/100 – Sponsoren zahlen jetzt automatisch pro voller Sealog-Seite. Soll das bleiben, wenn Aufträge kommen?",
+    "header": "Sponsor-Geld",
+    "options": [
+      {
+        "label": "Beides: Grundgeld + Aufträge (Empfohlen)",
+        "description": "Kleines festes Geld pro Seite, das große Geld über Aufträge."
+      },
+      {
+        "label": "Nur noch Aufträge",
+        "description": "Geld nur für erfüllte Bedingungen."
+      },
+      {
+        "label": "Nur automatisch wie jetzt",
+        "description": "Ohne Aufträge, ganz einfach."
+      }
+    ]
+  },
+  {
+    "question": "90/100 – Wie sollen Sponsor-Logos im Spiel aussehen?",
+    "header": "Logos",
+    "options": [
+      {
+        "label": "Fantasie-Logos sichtbar (Empfohlen)",
+        "description": "„Krabben-Cola“ am Boot, „Tangfit“ auf dem Anzug – Freunde sehen sie."
+      },
+      {
+        "label": "Nur im Handy",
+        "description": "Boot und Anzug bleiben sauber."
+      },
+      {
+        "label": "Gar keine Logos",
+        "description": "Sponsoren nur als Geldquelle."
+      }
+    ]
+  },
+  {
+    "question": "91/100 – Was passiert, wenn du eine Sponsor-Bedingung brichst (z. B. Hai im Video)?",
+    "header": "Regelbruch",
+    "options": [
+      {
+        "label": "Kein Geld + Meckermail (Empfohlen)",
+        "description": "Lustige Mail, der Deal endet, sonst kein Schaden."
+      },
+      {
+        "label": "Strafe zahlen",
+        "description": "Vertragsstrafe in $."
+      },
+      {
+        "label": "Follower-Verlust",
+        "description": "Fans finden den Ärger peinlich."
+      }
+    ]
+  },
+  {
+    "question": "92/100 – Wie viele Sponsoren sollst du gleichzeitig haben können?",
+    "header": "Anzahl",
+    "options": [
+      {
+        "label": "Bis zu 3, du wählst aus (Empfohlen)",
+        "description": "Angebote kommen per Nachricht, du nimmst an oder lehnst ab."
+      },
+      {
+        "label": "Einer zur Zeit",
+        "description": "Übersichtlich."
+      },
+      {
+        "label": "Unbegrenzt",
+        "description": "Je mehr, desto mehr Geld – und mehr Bedingungen."
+      }
+    ]
+  },
+  {
+    "question": "93/100 – Wann soll die Steam-Seite (für Wunschlisten) online gehen?",
+    "header": "Steam-Seite",
+    "options": [
+      {
+        "label": "Nach Grafik-Feinschliff (Empfohlen)",
+        "description": "Erst gute Screenshots und Trailer, dann Wunschlisten sammeln."
+      },
+      {
+        "label": "So bald wie möglich",
+        "description": "Früh Wunschlisten sammeln, auch mit vorläufigen Bildern."
+      },
+      {
+        "label": "Erst zur Demo",
+        "description": "Seite und Demo zusammen."
+      }
+    ]
+  },
+  {
+    "question": "94/100 – Sollen Steam-Erfolge im Koop für alle zählen?",
+    "header": "Erfolge Koop",
+    "options": [
+      {
+        "label": "Gemischt (Empfohlen)",
+        "description": "Kanal-Ziele für alle, Pannen und Rekorde nur für den, der sie schafft."
+      },
+      {
+        "label": "Für alle Anwesenden",
+        "description": "Wer dabei ist, bekommt den Erfolg mit."
+      },
+      {
+        "label": "Nur für den Auslöser",
+        "description": "Jeder muss alles selbst schaffen."
+      }
+    ]
+  },
+  {
+    "question": "95/100 – Welcher Preis passt für den Early Access?",
+    "header": "Preis",
+    "options": [
+      {
+        "label": "14,99 € (Empfohlen)",
+        "description": "Viel Inhalt mit Koop; dazu ein 4er-Pack mit Rabatt für Freunde."
+      },
+      {
+        "label": "9,99 €",
+        "description": "Niedrige Hürde für Spontankäufe."
+      },
+      {
+        "label": "19,99 €",
+        "description": "Höherer Wert, später Rabatte."
+      }
+    ]
+  },
+  {
+    "question": "96/100 – Welche Steam-Funktion soll als Erstes eingebaut werden?",
+    "header": "Steam-Funk.",
+    "options": [
+      {
+        "label": "Freunde einladen (Empfohlen)",
+        "description": "Ein Klick aus der Freundesliste, ohne IP und Portfreigabe."
+      },
+      {
+        "label": "Cloud-Speicher",
+        "description": "Spielstand auf jedem PC."
+      },
+      {
+        "label": "Workshop (Mods)",
+        "description": "Spieler bauen eigene Inhalte."
+      }
+    ]
+  },
+  {
+    "question": "97/100 – Für Grafikchips im Prozessor (wie bei dir) wählt das Spiel automatisch „Mittel“. Richtig so?",
+    "header": "Grafikstufe",
+    "options": [
+      {
+        "label": "Ja, Mittel als Start (Empfohlen)",
+        "description": "Sicher flüssig auf schwachen PCs; Hoch lief im Test auch mit ~60 FPS."
+      },
+      {
+        "label": "Hoch als Start",
+        "description": "Schöner, kann auf schwächeren Laptops ruckeln."
+      },
+      {
+        "label": "Niedrig als Start",
+        "description": "Immer flüssig, aber deutlich weniger Gras und Schatten."
+      }
+    ]
+  },
+  {
+    "question": "98/100 – Das Sichtfeld ist fest auf 70°. Brauchst du einen Regler?",
+    "header": "Sichtfeld",
+    "options": [
+      {
+        "label": "Ja, 60–100° (Empfohlen)",
+        "description": "Hilft gegen Übelkeit und für breite Bildschirme."
+      },
+      {
+        "label": "Nein, 70° passt",
+        "description": "Eine Einstellung weniger."
+      },
+      {
+        "label": "Nur 3 Stufen",
+        "description": "Eng, Normal, Weit."
+      }
+    ]
+  },
+  {
+    "question": "99/100 – Sollen Kopfwippen beim Laufen und Kamerawackeln abschaltbar sein?",
+    "header": "Wackeln",
+    "options": [
+      {
+        "label": "Ja, ein Schalter (Empfohlen)",
+        "description": "Für alle, denen schnell übel wird."
+      },
+      {
+        "label": "Regler 0–100 %",
+        "description": "Feiner einstellbar."
+      },
+      {
+        "label": "Nein",
+        "description": "Gehört zum Spielgefühl."
+      }
+    ]
+  },
+  {
+    "question": "100/100 – Die Test-Abkürzungen (Strg+Umschalt+F12, dann F5–F10) sind im Spiel. Was soll mit ihnen passieren?",
+    "header": "Test-Cheats",
+    "options": [
+      {
+        "label": "In Testversionen lassen (Empfohlen)",
+        "description": "Für deine Tests behalten, vor dem Steam-Release entfernen."
+      },
+      {
+        "label": "Sofort entfernen",
+        "description": "Testversion verhält sich wie das fertige Spiel."
+      },
+      {
+        "label": "Als Kreativmodus behalten",
+        "description": "Später als Spaß-Modus im Menü."
+      }
+    ]
+  }
+]
